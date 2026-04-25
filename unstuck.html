@@ -1162,7 +1162,7 @@ const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString('es-ES',{day:'nu
 const fmtDT=ts=>{if(!ts)return null;const d=new Date(ts);return d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})+' '+d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')};
 const initials=n=>n.trim().split(' ').slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('');
 const fmt=s=>{if(s==null||s<0)return'—';return Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0')};
-const fmtTime=s=>{if(!s||s<60)return s+'s';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h>0?h+'h '+m+'m':m+'m'};
+const fmtTime=s=>{if(!s||s<=0)return'—';if(s<60)return s+'s';const hh=Math.floor(s/3600),mm=Math.floor((s%3600)/60);return hh>0?hh+'h '+mm+'m':mm+'m'};
 const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;try{segs=text.split(/(?<=[.!?…])\s+/).filter(s=>s.trim())}catch{segs=text.replace(/([.!?…])\s+/g,'$1\n').split('\n').filter(s=>s.trim())}let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
 const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id)||m.get(e.id).ts<e.ts)m.set(e.id,e)});return Array.from(m.values()).sort((a,b)=>b.ts-a.ts)};
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
@@ -1873,7 +1873,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const origin=getOrigin();
   const AC={info:{bg:'rgba(26,115,232,0.07)',bd:'rgba(26,115,232,0.22)',c:'#1A73E8'},success:{bg:'rgba(10,122,88,0.07)',bd:'rgba(10,122,88,0.22)',c:'#0A7A58'},warn:{bg:'rgba(149,96,16,0.07)',bd:'rgba(149,96,16,0.22)',c:'#956010'},error:{bg:'rgba(197,34,31,0.07)',bd:'rgba(197,34,31,0.22)',c:'#C5221F'}};
   const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());const info=await driveUI(auth.access_token);onUpdate({...driveState,...auth,driveUser:info,clientId:cid.trim()});setStatus({t:'success',m:'Conectado como '+info.email})}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
-  const upload=async()=>{const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')).map(k=>S.get(k)).filter(Boolean);setBusy('u');setStatus(null);try{const r=await driveUpload('flujo_'+user.id+'.json',{version:1,userId:user.id,library:lib,syncedAt:Date.now()},fileId,token);onUpdate({...driveState,fileId:r?.id||fileId,lastSync:Date.now()});setStatus({t:'success',m:lib.length+' textos subidos.'})}catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
+  const upload=async()=>{const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);setBusy('u');setStatus(null);try{const r=await driveUpload('flujo_'+user.id+'.json',{version:1,userId:user.id,library:lib,syncedAt:Date.now()},fileId,token);onUpdate({...driveState,fileId:r?.id||fileId,lastSync:Date.now()});setStatus({t:'success',m:lib.length+' textos subidos.'})}catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
   const download=async()=>{setBusy('d');setStatus(null);try{const f=await driveFindFile('flujo_'+user.id+'.json',token);if(!f){setStatus({t:'warn',m:'No hay archivo en Drive.'});setBusy(null);return}const data=await driveDownload(f.id,token);if(data?.library?.length){const merged=mergeLibs(library,data.library);merged.forEach(e=>S.set('flujo:'+user.id+':'+e.id,e));setStatus({t:'success',m:data.library.length+' textos descargados.'})}onUpdate({...driveState,fileId:f.id,lastSync:Date.now()})}catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.4)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
@@ -2184,7 +2184,7 @@ const App=()=>{
     const lib=S.list('flujo:'+u.id+':').filter(k=>
       !k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&
       !k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&
-      !k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')
+      !k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')
     ).map(k=>S.get(k)).filter(Boolean).sort((a,b)=>b.ts-a.ts);
     setLibrary(lib);
     const refs=S.list('flujo:'+u.id+':ref:').map(k=>S.get(k)).filter(Boolean).sort((a,b)=>b.ts-a.ts);
