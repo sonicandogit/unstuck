@@ -1761,6 +1761,8 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
+  const [showDrivePanel,setShowDrivePanel]=useState(false);
+  const driveConnected=!!(S.get('flujo:drive:'+user.id)?.token&&S.get('flujo:drive:'+user.id)?.expires_at>Date.now()+30000);
   const stats=useMemo(()=>computeStats(library,reflections),[library,reflections]);
   const em=energyMsg(energy);
   const recentNotes=reflections.filter(r=>r.notes?.trim()).slice(0,3);
@@ -1772,12 +1774,17 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
 
   return(
     <div style={{height:'100vh',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
+      {showDrivePanel&&<DrivePanel user={user} driveState={S.get('flujo:drive:'+user.id)||{}} onUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setShowDrivePanel(false)}} onClose={()=>setShowDrivePanel(false)} library={library}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
         <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Unstuck</div>
         <div style={{flex:1}}/>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Biblioteca</button>
+          <button onClick={()=>setShowDrivePanel(true)} style={{background:driveConnected?'rgba(26,115,232,0.08)':'rgba(0,0,0,0.04)',border:'0.5px solid '+(driveConnected?'rgba(26,115,232,0.25)':BDR),borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,fontWeight:500,color:driveConnected?'#1A73E8':MUTED}}>
+            <span>⇅</span>
+            <span>{driveConnected?'Drive conectado':'Conectar Drive'}</span>
+          </button>
           <button onClick={()=>setShowKeyPanel(true)} style={{background:getApiKey(user.id)?'rgba(10,122,88,0.08)':'rgba(85,80,184,0.07)',border:'0.5px solid '+(getApiKey(user.id)?'rgba(10,122,88,0.25)':'rgba(85,80,184,0.25)'),borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,fontWeight:500,color:getApiKey(user.id)?'#0A7A58':'#5550B8'}}>
             <span>{getApiKey(user.id)?'✦':'⚙'}</span>
             <span>{getApiKey(user.id)?'Claude conectado':'Añadir API key'}</span>
