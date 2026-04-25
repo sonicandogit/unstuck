@@ -1762,8 +1762,9 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
   const [showDrivePanel,setShowDrivePanel]=useState(false);
-  const [driveState,setDriveStateLocal]=useState(()=>S.get('flujo:drive:'+user.id)||{});
-  const driveConnected=!!(driveState?.token&&driveState?.expires_at>Date.now()+30000);
+  const [driveRefresh,setDriveRefresh]=useState(0);
+  const driveData=S.get('flujo:drive:'+user.id)||{};
+  const driveConnected=!!(driveData.token&&driveData.expires_at>Date.now()+30000);
   const stats=useMemo(()=>computeStats(library,reflections),[library,reflections]);
   const em=energyMsg(energy);
   const recentNotes=reflections.filter(r=>r.notes?.trim()).slice(0,3);
@@ -1775,7 +1776,7 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
 
   return(
     <div style={{height:'100vh',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
-      {showDrivePanel&&<DrivePanel user={user} driveState={driveState} onUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveStateLocal(ns);}} onClose={()=>setShowDrivePanel(false)} library={library}/>}
+      {showDrivePanel&&<DrivePanel user={user} driveState={driveData} onUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);setShowDrivePanel(false);}} onClose={()=>setShowDrivePanel(false)} library={library}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
         <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Unstuck</div>
@@ -2238,7 +2239,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const [status,setStatus]=useState(null);const [busy,setBusy]=useState(null);
   const origin=getOrigin();
   const AC={info:{bg:'rgba(26,115,232,0.07)',bd:'rgba(26,115,232,0.22)',c:'#1A73E8'},success:{bg:'rgba(10,122,88,0.07)',bd:'rgba(10,122,88,0.22)',c:'#0A7A58'},warn:{bg:'rgba(149,96,16,0.07)',bd:'rgba(149,96,16,0.22)',c:'#956010'},error:{bg:'rgba(197,34,31,0.07)',bd:'rgba(197,34,31,0.22)',c:'#C5221F'}};
-  const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());onUpdate({...driveState,...auth,driveUser:{email:''},clientId:cid.trim()});setStatus({t:'success',m:'¡Drive conectado!'});setTimeout(()=>onClose(),1200);}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
+  const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());onUpdate({...driveState,...auth,driveUser:{email:''},clientId:cid.trim()});setStatus({t:'success',m:'¡Drive conectado!'});}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
   const upload=async()=>{
     const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);
     const refs=S.list('flujo:'+user.id+':ref:').map(k=>S.get(k)).filter(Boolean);
