@@ -1503,7 +1503,7 @@ const getOrigin=()=>{try{const o=window.location.origin;return o&&o!=='null'?o:'
 const getRedirectUri=()=>{try{const u=new URL(window.location.href);return u.origin+u.pathname}catch{return getOrigin()}};
 const oauthPopup=cid=>new Promise((res,rej)=>{
   const ru=getRedirectUri();if(!ru){rej(new Error('no_origin'));return}
-  const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:cid,redirect_uri:ru,response_type:'token',scope:'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/oauth2/v2/userinfo.email',prompt:'consent'});
+  const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:cid,redirect_uri:ru,response_type:'token',scope:'https://www.googleapis.com/auth/drive.file',prompt:'consent'});
   const p=window.open(url,'gdrive','width=500,height=640,scrollbars=yes');
   if(!p){rej(new Error('blocked'));return}
   const iv=setInterval(()=>{try{if(p.closed){clearInterval(iv);rej(new Error('closed'));return}try{const h=p.location.hash;if(h&&h.includes('access_token')){const q=new URLSearchParams(h.slice(1));clearInterval(iv);p.close();res({access_token:q.get('access_token'),expires_at:Date.now()+parseInt(q.get('expires_in')||'3600')*1000})}}catch{}}catch(e){clearInterval(iv);rej(e)}},250);
@@ -1633,7 +1633,7 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
     try{
       const origin=getOrigin();if(!origin){setRestoreStatus({t:'error',m:'Usa HTTP, no file://'});setRestoreBusy(false);return}
       const auth=await oauthPopup(restoreCid.trim());
-      const info=await driveUI(auth.access_token);
+      const info={email:'Drive conectado'};
       // Search for ANY flujo_*.json file
       const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("name contains 'flujo_' and trashed=false")+'&fields=files(id,name)',{headers:{Authorization:'Bearer '+auth.access_token}});
       const d=await r.json();
@@ -2237,7 +2237,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const [status,setStatus]=useState(null);const [busy,setBusy]=useState(null);
   const origin=getOrigin();
   const AC={info:{bg:'rgba(26,115,232,0.07)',bd:'rgba(26,115,232,0.22)',c:'#1A73E8'},success:{bg:'rgba(10,122,88,0.07)',bd:'rgba(10,122,88,0.22)',c:'#0A7A58'},warn:{bg:'rgba(149,96,16,0.07)',bd:'rgba(149,96,16,0.22)',c:'#956010'},error:{bg:'rgba(197,34,31,0.07)',bd:'rgba(197,34,31,0.22)',c:'#C5221F'}};
-  const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());const info=await driveUI(auth.access_token);onUpdate({...driveState,...auth,driveUser:info,clientId:cid.trim()});setStatus({t:'success',m:'Conectado como '+info.email})}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
+  const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());onUpdate({...driveState,...auth,driveUser:{email:''},clientId:cid.trim()});setStatus({t:'success',m:'Conectado como '+info.email})}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
   const upload=async()=>{
     const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);
     const refs=S.list('flujo:'+user.id+':ref:').map(k=>S.get(k)).filter(Boolean);
