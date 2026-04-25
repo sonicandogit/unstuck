@@ -1184,7 +1184,7 @@ const callClaude=async(system,userMsg,maxTokens=600,uid)=>{
   const r=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:'claude-3-5-sonnet-20241022',max_tokens:maxTokens,system,messages:[{role:'user',content:userMsg}]}),
+    body:JSON.stringify({model:'claude-opus-4-7',max_tokens:maxTokens,system,messages:[{role:'user',content:userMsg}]}),
   });
   if(r.status===401)throw new Error('invalid_key');
   if(!r.ok){let msg='Error HTTP '+r.status;try{const e=await r.json();msg=e.error?.message?e.error.message+' ('+r.status+')':msg}catch{}throw new Error(msg)}
