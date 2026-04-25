@@ -1,0 +1,20 @@
+{
+  "name": "Unstuck",
+  "short_name": "Unstuck",
+  "start_url": "/unstuck/unstuck.html",
+  "display": "standalone",
+  "background_color": "#F4F2ED",
+  "theme_color": "#F4F2ED",
+  "icons": [
+    {
+      "src": "unstuckfavicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "unstuckfavicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
