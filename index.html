@@ -1506,7 +1506,7 @@ const oauthPopup=cid=>new Promise((res,rej)=>{
   const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:cid,redirect_uri:ru,response_type:'token',scope:'https://www.googleapis.com/auth/drive.file',prompt:'consent'});
   const p=window.open(url,'gdrive','width=500,height=640,scrollbars=yes');
   if(!p){rej(new Error('blocked'));return}
-  const iv=setInterval(()=>{try{if(p.closed){clearInterval(iv);rej(new Error('closed'));return}try{const h=p.location.hash;if(h&&h.includes('access_token')){const q=new URLSearchParams(h.slice(1));clearInterval(iv);p.close();res({access_token:q.get('access_token'),expires_at:Date.now()+parseInt(q.get('expires_in')||'3600')*1000})}}catch{}}catch(e){clearInterval(iv);rej(e)}},250);
+  const iv=setInterval(()=>{try{if(p.closed){clearInterval(iv);rej(new Error('closed'));return}try{const h=p.location.hash;if(h&&h.includes('access_token')){const q=new URLSearchParams(h.slice(1));clearInterval(iv);p.close();res({token:q.get('access_token'),expires_at:Date.now()+parseInt(q.get('expires_in')||'3600')*1000})}}catch{}}catch(e){clearInterval(iv);rej(e)}},250);
   setTimeout(()=>{clearInterval(iv);try{p.close()}catch{};rej(new Error('timeout'))},300000);
 });
 const df=async(url,opts,tok)=>{const r=await fetch(url,{...opts,headers:{Authorization:'Bearer '+tok,...(opts?.headers||{})}});if(r.status===401)throw Object.assign(new Error('expired'),{code:401});if(!r.ok)throw new Error('Drive '+r.status);return r.status===204?null:r.json()};
