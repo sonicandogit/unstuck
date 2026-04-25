@@ -1185,7 +1185,7 @@ const callClaude=async(system,userMsg,maxTokens=600,uid)=>{
     body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:maxTokens,system,messages:[{role:'user',content:userMsg}]}),
   });
   if(r.status===401)throw new Error('invalid_key');
-  if(!r.ok)throw new Error('api_'+r.status);
+  if(!r.ok){let msg='Error '+r.status;try{const e=await r.json();msg=e.error?.message||msg}catch{}throw new Error(msg)}
   const d=await r.json();
   return d.content?.filter(b=>b.type==='text').map(b=>b.text).join('')||'';
 };
@@ -1477,6 +1477,7 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
               <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.title}</div><div style={{fontSize:11,color:MUTED}}>{fmtDate(e.date)} · {e.wordCount} palabras</div></div>
               <button onClick={()=>exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>↓</button>
+              <button onClick={()=>{if(window.confirm('¿Eliminar "'+e.title+'"?')){S.del('flujo:'+user.id+':'+e.id);setLibrary(prev=>prev.filter(x=>x.id!==e.id))}}} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:6,padding:'3px 8px',fontSize:11,color:'rgba(197,34,31,0.5)',cursor:'pointer',flexShrink:0}}>✕</button>
             </div>})}
           </div>
         </div>}
@@ -1652,6 +1653,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   const [rating,setRating]=useState(7);
   const [notes,setNotes]=useState('');
   const [fbState,setFbState]=useState(getApiKey(user.id)?'idle':'no_key');
+  const [fbError,setFbError]=useState('');
   const [feedback,setFeedback]=useState('');
   const [showKey,setShowKey]=useState(false);
   const rm=ratingMsg(rating);
@@ -1667,7 +1669,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
     }catch(e){
       if(e.message==='no_key')setFbState('no_key');
       else if(e.message==='invalid_key')setFbState('invalid_key');
-      else setFbState('error');
+      else{setFbError(e.message);setFbState('error');}
     }
   };
 
@@ -1719,7 +1721,10 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
             {fbState==='idle'&&<p style={{fontSize:13,color:MUTED}}>Preparando lectura…</p>}
             {fbState==='no_key'&&<div style={{background:'rgba(85,80,184,0.06)',border:'0.5px solid rgba(85,80,184,0.18)',borderRadius:9,padding:'12px 14px'}}><p style={{fontSize:13,color:TXT,lineHeight:1.65,marginBottom:10}}>Para recibir feedback necesitas añadir tu API key de Claude. Se guarda solo en tu navegador.</p><Btn variant="accent" onClick={()=>setShowKey(true)} small>Añadir API key →</Btn></div>}
             {fbState==='invalid_key'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}><p style={{fontSize:13,color:'#C5221F',flex:1}}>La API key no es válida.</p><Btn variant="danger" onClick={()=>setShowKey(true)} small>Actualizar</Btn></div>}
-            {fbState==='error'&&<div style={{display:'flex',gap:10,alignItems:'center'}}><p style={{fontSize:12,color:MUTED,flex:1}}>No se pudo conectar con Claude.</p><Btn onClick={()=>{setFbState('idle');runFeedback()}} small>Reintentar</Btn></div>}
+            {fbState==='error'&&<div style={{display:'flex',gap:10,alignItems:'center',flexDirection:'column',alignItems:'flex-start'}}>
+              <p style={{fontSize:12,color:MUTED}}>{fbError||'No se pudo conectar con Claude.'}</p>
+              <Btn onClick={()=>{setFbState('idle');runFeedback()}} small>Reintentar</Btn>
+            </div>}
           </div>
           {/* Rating + notes */}
           <div style={{padding:'20px 24px',display:'flex',flexDirection:'column',gap:18}}>
@@ -1895,26 +1900,48 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
   const doAlign=d=>{setAlign(d);edRef.current?.focus();document.execCommand({left:'justifyLeft',center:'justifyCenter',right:'justifyRight'}[d],false,null)};
 
   const updateTunnelStyle=()=>{
-    if(ab!=='tunel'||!edRef.current)return;
+    if(!edRef.current)return;
     const el=edRef.current;
     const blocks=Array.from(el.children).filter(b=>b.nodeType===1&&b.tagName!=='BR');
+    if(ab!=='tunel'){
+      blocks.forEach(b=>{b.style.filter='';b.style.opacity='';b.style.transition='';b.style.pointerEvents='';b.style.userSelect='';});
+      return;
+    }
     if(!blocks.length)return;
     let curIdx=blocks.length-1;
     try{const sel=window.getSelection();if(sel?.rangeCount){const anchor=sel.anchorNode;blocks.forEach((b,i)=>{if(b===anchor||b.contains(anchor))curIdx=i})}}catch{}
-    blocks.forEach((b,i)=>{const past=i<curIdx;b.style.filter=past?'blur(2.8px)':'none';b.style.opacity=past?'0.22':'1';b.style.transition='filter 0.5s ease,opacity 0.5s ease';b.style.pointerEvents=past?'none':'';b.style.userSelect=past?'none':'';});
+    blocks.forEach((b,i)=>{
+      const past=i<curIdx;
+      b.style.filter=past?'blur(2.8px)':'none';
+      b.style.opacity=past?'0.22':'1';
+      b.style.transition='filter 0.5s ease,opacity 0.5s ease';
+      b.style.pointerEvents=past?'none':'';
+      b.style.userSelect=past?'none':'';
+      if(i===curIdx){b.scrollIntoView({block:'nearest',behavior:'smooth'});}
+    });
   };
 
   useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p')},[]);
   useEffect(()=>{clearInterval(tRef.current);if(running&&timerDur){tRef.current=setInterval(()=>setTimer(s=>{if(s<=1){clearInterval(tRef.current);setRunning(false);setDone(true);return 0}return s-1}),1000)}return()=>clearInterval(tRef.current)},[running,timerDur]);
   useEffect(()=>{clearInterval(eRef.current);if(running)eRef.current=setInterval(()=>setElapsed(e=>e+1),1000);return()=>clearInterval(eRef.current)},[running]);
   useEffect(()=>{clearInterval(iRef.current);if(ab==='presion'&&running){iRef.current=setInterval(()=>setIdle(s=>{const n=s+1;if(n>=idleLimit-5)setIdleWarn(true);if(n>=idleLimit){const el=edRef.current;if(el){const bs=Array.from(el.querySelectorAll('p,div')).filter(e=>e.innerText?.trim());if(bs.length>1)bs[bs.length-1].remove();else{const ls=el.innerText.trimEnd().split('\n');if(ls.length>1){ls.pop();el.innerText=ls.join('\n')}else el.innerHTML=''}const np=el.innerText||'';prevLen.current=np.length;setPlainTxt(np);setWc(np.trim()?np.trim().split(/\s+/).filter(Boolean).length:0)}setIdleWarn(false);return 0}return n}),1000)}return()=>clearInterval(iRef.current)},[ab,running,idleLimit]);
-  useEffect(()=>{const onSel=()=>{if(ab==='tunel')updateTunnelStyle()};document.addEventListener('selectionchange',onSel);return()=>document.removeEventListener('selectionchange',onSel)},[ab]);
+  useEffect(()=>{
+    updateTunnelStyle();
+    const onSel=()=>updateTunnelStyle();
+    document.addEventListener('selectionchange',onSel);
+    return()=>document.removeEventListener('selectionchange',onSel);
+  },[ab]);
   useEffect(()=>{clearInterval(asRef.current);if(!autoSave||!started){setAsCd(AUTOSAVE);return}setAsCd(AUTOSAVE);asRef.current=setInterval(()=>setAsCd(c=>{if(c<=1){if(plainTxt!==lastSaved.current)saveNow(true);return AUTOSAVE}return c-1}),1000);return()=>clearInterval(asRef.current)},[autoSave,started,plainTxt]);
 
-  const handleInput=()=>{
+  const handleInput=(e)=>{
     const el=edRef.current;if(!el)return;
     const plain=el.innerText||'',cur=plain.length,prev=prevLen.current;const isD=cur<prev,nD=Math.max(0,prev-cur);
-    if(ab==='rio'&&isD){document.execCommand('undo');return}
+    // Río: block deletions EXCEPT spellcheck replacements (inputType='insertReplacementText') 
+    if(ab==='rio'&&isD){
+      const itype=e?.nativeEvent?.inputType||'';
+      if(itype==='insertReplacementText'||itype==='insertText'){/*allow spellcheck*/}
+      else{document.execCommand('undo');return}
+    }
     if(ab==='limite'&&isD){if(!isDel.current){if(delsLeft<=0||nD>limChars){document.execCommand('undo');return}isDel.current=true;setDelsLeft(d=>d-1);setCharsInDel(nD)}else{const nx=charsInDel+nD;if(nx>limChars){document.execCommand('undo');return}setCharsInDel(nx)}}
     if(!isD&&isDel.current){isDel.current=false;setCharsInDel(0)}
     prevLen.current=cur;setPlainTxt(plain);setWc(plain.trim()?plain.trim().split(/\s+/).filter(Boolean).length:0);
@@ -1924,7 +1951,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
   };
   const handleKey=e=>{if(ab==='rio'&&(e.key==='Backspace'||e.key==='Delete'))e.preventDefault()};
   const timerCol=()=>{if(!timerDur||timerSec==null)return headerAccent;const p=timerSec/timerDur;return p>0.4?headerAccent:p>0.15?'#956010':'#A82020'};
-  const textCol=()=>ab==='tunel'?'transparent':(idleWarn&&ab==='presion')?'rgba(26,25,22,0.15)':'#1A1916';
+  const textCol=()=>(idleWarn&&ab==='presion')?'rgba(26,25,22,0.15)':'#1A1916';
   const limHint=()=>{if(delsLeft===0)return{l:'Sin más intentos',c:'#A82020'};if(isDel.current)return{l:limChars-charsInDel+' chars · '+delsLeft+' intentos',c:'#956010'};return{l:delsLeft+'/'+limDels+' intentos',c:'rgba(149,96,16,0.55)'}};
   const siL=()=>{if(!autoSave)return{l:'off',dot:'rgba(0,0,0,0.12)',c:FAINT};if(saveStatus==='saving')return{l:'Guardando…',dot:'#956010',c:MUTED};if(saveStatus==='saved')return{l:'✓',dot:'#0A7A58',c:'#0A7A58'};if(!started||!plainTxt.trim())return{l:'Auto',dot:'rgba(10,122,88,0.35)',c:FAINT};return{l:asCd+'s',dot:'rgba(10,122,88,0.5)',c:FAINT}};
   const si=siL();
@@ -1942,7 +1969,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
         <button onClick={()=>{if(started&&plainTxt.trim()){if(!window.confirm('¿Volver al menú?'))return;}if(started)saveNow(false);onBack();}} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:12,display:'flex',alignItems:'center',gap:3,padding:'3px 6px',borderRadius:5,flexShrink:0}}>← Menú</button>
         <div style={{fontSize:14,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',marginRight:4}}>Unstuck</div>
         <div style={{display:'flex',gap:2,flex:1}}>
-          {['check','reto','proyecto'].map(id=><button key={id} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:'pointer',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
+          {['check','reto','proyecto'].map(id=><button key={id} onClick={()=>{if(id!==sk){if(started&&plainTxt.trim()){if(!window.confirm('¿Cambiar de sección? El texto se guardará.'))return;saveNow(false);}onBack();}}} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:id!==sk?'pointer':'default',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
         </div>
         <button onClick={()=>setShowLib(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
         <button onClick={()=>setShowDrive(true)} style={{background:connected?'rgba(10,122,88,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(10,122,88,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#0A7A58':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>
@@ -2018,7 +2045,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
             {!plainTxt&&<div style={{position:'absolute',top:20,left:36,pointerEvents:'none',zIndex:2,fontSize:sz,fontFamily:fontObj.value,lineHeight:1.85,color:'rgba(26,25,22,0.28)'}}>{sk==='proyecto'?'Continúa donde lo dejaste…':'Empieza a escribir…'}</div>}
             {!started&&!plainTxt&&<div style={{position:'absolute',bottom:12,left:36,pointerEvents:'none',zIndex:2,fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}><span style={{width:4,height:4,borderRadius:'50%',background:headerAccent,opacity:0.6}}/>El temporizador arranca al escribir</div>}
             {ab==='limite'&&started&&(()=>{const h=limHint();return(<div style={{position:'absolute',top:8,left:36,pointerEvents:'none',zIndex:2,display:'flex',alignItems:'center',gap:4,fontSize:10,color:h.c}}>{Array.from({length:limDels}).map((_,i)=><span key={i} style={{width:6,height:6,borderRadius:'50%',background:i<delsLeft?'#956010':'rgba(0,0,0,0.1)',display:'inline-block'}}/>)}<span style={{marginLeft:2}}>{h.l}</span></div>)})()}
-            <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt}
+            <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt}
               style={{position:'absolute',inset:0,overflowY:'auto',padding:'20px 36px 14px',outline:'none',boxSizing:'border-box',fontFamily:fontObj.value,fontSize:sz+'px',lineHeight:1.85,color:textCol(),caretColor:headerAccent}}/>
           </div>
 
