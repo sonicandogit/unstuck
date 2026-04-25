@@ -1669,7 +1669,7 @@ const SessionBriefing=({user,energy,library,onStart,onBack})=>{
 const PostSession=({sessionData,onComplete,onBack,user})=>{
   const [rating,setRating]=useState(7);
   const [notes,setNotes]=useState('');
-  const [fbState,setFbState]=useState(getApiKey(user.id)?'idle':'no_key');
+  const [fbState,setFbState]=useState(getApiKey(user.id)?'ready':'no_key');
   const [fbError,setFbError]=useState('');
   const [feedback,setFeedback]=useState('');
   const [showKey,setShowKey]=useState(false);
@@ -1678,7 +1678,6 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 
   const runFeedback=async()=>{
     if(!sessionData.text?.trim()){setFbState('no_text');return}
-    setFbState('loading');
     const ctx=sessionData.exerciseTitle?'Ejercicio: "'+sessionData.exerciseTitle+'"\n'+(sessionData.exerciseDesc||'')+'\n\n':'Tipo: '+sessionData.sk+'\n\n';
     try{
       const txt=await callClaude(FEEDBACK_SYSTEM,ctx+'Texto:\n\n'+sessionData.text,600,user.id);
@@ -1690,7 +1689,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
     }
   };
 
-  useEffect(()=>{if(fbState==='idle')runFeedback()},[]);
+  // feedback is manual — no auto-trigger
 
   const save=()=>{
     const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,sessionTitle:sessionData.title,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback};
@@ -1703,7 +1702,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 
   return(
     <div style={{height:'100vh',background:'transparent',overflow:'auto',display:'flex',flexDirection:'column'}}>
-      {showKey&&<ApiKeyPanel userId={user.id} onClose={()=>{setShowKey(false);if(getApiKey(user.id)&&(fbState==='no_key'||fbState==='invalid_key')){setFbState('idle');runFeedback()}}}/>}
+      {showKey&&<ApiKeyPanel userId={user.id} onClose={()=>{setShowKey(false);if(getApiKey(user.id)&&(fbState==='no_key'||fbState==='invalid_key')){setFbState('ready')}}}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:46,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
         <button onClick={onBack} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:4}}>← Dashboard</button>
       </div>
@@ -1735,12 +1734,15 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
               )):<p style={{fontSize:13,color:TXT,lineHeight:1.75,whiteSpace:'pre-wrap'}}>{feedback}</p>}
             </div>}
             {fbState==='no_text'&&<p style={{fontSize:13,color:MUTED}}>No hay texto que leer en esta sesión.</p>}
-            {fbState==='idle'&&<p style={{fontSize:13,color:MUTED}}>Preparando lectura…</p>}
+            {(fbState==='ready'||fbState==='idle')&&<div style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:10}}>
+              <p style={{fontSize:13,color:MUTED,lineHeight:1.6}}>Pide a Claude que lea tu texto y te dé feedback sobre lo que funciona, lo que puedes empujar y una pregunta para la próxima vez.</p>
+              <Btn variant="accent" onClick={()=>{setFbState('loading');runFeedback()}} style={{display:'flex',alignItems:'center',gap:6}}>✦ Pedir lectura de Claude</Btn>
+            </div>}
             {fbState==='no_key'&&<div style={{background:'rgba(85,80,184,0.06)',border:'0.5px solid rgba(85,80,184,0.18)',borderRadius:9,padding:'12px 14px'}}><p style={{fontSize:13,color:TXT,lineHeight:1.65,marginBottom:10}}>Para recibir feedback necesitas añadir tu API key de Claude. Se guarda solo en tu navegador.</p><Btn variant="accent" onClick={()=>setShowKey(true)} small>Añadir API key →</Btn></div>}
             {fbState==='invalid_key'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}><p style={{fontSize:13,color:'#C5221F',flex:1}}>La API key no es válida.</p><Btn variant="danger" onClick={()=>setShowKey(true)} small>Actualizar</Btn></div>}
             {fbState==='error'&&<div style={{display:'flex',gap:10,alignItems:'center',flexDirection:'column',alignItems:'flex-start'}}>
               <p style={{fontSize:12,color:MUTED}}>{fbError||'No se pudo conectar con Claude.'}</p>
-              <Btn onClick={()=>{setFbState('idle');runFeedback()}} small>Reintentar</Btn>
+              <Btn onClick={()=>{setFbState('loading');runFeedback()}} small>Reintentar</Btn>
             </div>}
           </div>
           {/* Rating + notes */}
