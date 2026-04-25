@@ -26,6 +26,12 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
 .fu{animation:fadeUp 0.22s ease forwards}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .fi{animation:fadeIn 0.18s ease forwards}
+/* Mobile */
+@media(max-width:600px){
+  .desk-only{display:none!important}
+  .mob-pad{padding-left:14px!important;padding-right:14px!important}
+  input[type=range]::-webkit-slider-thumb{width:22px;height:22px}
+}
 </style>
 </head>
 <body>
@@ -1614,9 +1620,62 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
   const [ci,setCi]=useState(0);
   const [pin,setPin]=useState('');
   const [showNew,setShowNew]=useState(users.length===0);
+  const [showRestore,setShowRestore]=useState(false);
+  const [restoreCid,setRestoreCid]=useState('');
+  const [restoreStatus,setRestoreStatus]=useState(null);
+  const [restoreBusy,setRestoreBusy]=useState(false);
   const [pinTarget,setPinTarget]=useState(null);
   const [pinInput,setPinInput]=useState('');
   const [pinError,setPinError]=useState(false);
+  const doRestore=async()=>{
+    if(!restoreCid.trim()){setRestoreStatus({t:'error',m:'Introduce tu Client ID de Google.'});return}
+    setRestoreBusy(true);setRestoreStatus(null);
+    try{
+      const origin=getOrigin();if(!origin){setRestoreStatus({t:'error',m:'Usa HTTP, no file://'});setRestoreBusy(false);return}
+      const auth=await oauthPopup(restoreCid.trim());
+      const info=await driveUI(auth.access_token);
+      // Search for ANY flujo_*.json file
+      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("name contains 'flujo_' and trashed=false")+'&fields=files(id,name)',{headers:{Authorization:'Bearer '+auth.access_token}});
+      const d=await r.json();
+      const files=d.files||[];
+      if(!files.length){setRestoreStatus({t:'warn',m:'No se encontró ningún backup en este Drive.'});setRestoreBusy(false);return}
+      let restored=0;
+      for(const f of files){
+        try{
+          const data=await driveDownload(f.id,auth.access_token);
+          if(!data?.profile||!data?.userId)continue;
+          const u=data.profile;
+          // Register user if not already present
+          const allUsers=S.get('flujo:users')||[];
+          if(!allUsers.find(x=>x.id===u.id)){
+            S.set('flujo:users',[...allUsers,u]);
+          }
+          // Restore PIN
+          if(data.pin)S.set('flujo:'+u.id+':pin',data.pin);
+          // Restore library
+          if(data.library?.length)data.library.forEach(e=>S.set('flujo:'+u.id+':'+e.id,e));
+          // Restore refs
+          if(data.refs?.length)data.refs.forEach(ref=>S.set('flujo:'+u.id+':ref:'+ref.id,ref));
+          // Restore extra
+          if(data.extra?.projects?.length)S.set('flujo:'+u.id+':projects',data.extra.projects);
+          if(data.extra?.lastProject)S.set('flujo:'+u.id+':lastProject',data.extra.lastProject);
+          if(data.extra?.lessonsRead?.length)S.set('flujo:'+u.id+':lessons_read',data.extra.lessonsRead);
+          // Save drive connection for this user
+          S.set('flujo:drive:'+u.id,{...auth,driveUser:info,clientId:restoreCid.trim(),lastSync:Date.now()});
+          restored++;
+        }catch{}
+      }
+      if(restored>0){
+        setRestoreStatus({t:'success',m:restored+' perfil(es) restaurado(s). Recarga la página.'});
+        setTimeout(()=>window.location.reload(),1500);
+      } else {
+        setRestoreStatus({t:'warn',m:'Se encontraron archivos pero no se pudo restaurar ningún perfil.'});
+      }
+    }catch(e){
+      const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP.',timeout:'Tiempo agotado.'};
+      setRestoreStatus({t:'error',m:msgs[e.message]||e.message});
+    }finally{setRestoreBusy(false)}
+  };
   const create=()=>{
     if(!name.trim()||pin.length!==4||!/^\d{4}$/.test(pin))return;
     const c=USER_COLORS[ci];
@@ -1635,7 +1694,7 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
     else{setPinError(true);setPinInput('');}
   };
   return(
-    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:32,overflow:'auto',position:'relative'}}>
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto',position:'relative'}}>
 
       <div style={{position:'relative',zIndex:1,width:'100%',maxWidth:480,display:'flex',flexDirection:'column',alignItems:'center'}}>
         <div style={{fontSize:40,fontWeight:700,letterSpacing:'-0.05em',color:TXT,marginBottom:6,fontFamily:'Lora,Georgia,serif'}}>Unstuck</div>
@@ -1655,7 +1714,10 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
             })}
           </div>
 
-          {!showNew&&<button onClick={()=>setShowNew(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 20px',cursor:'pointer',fontSize:13,color:MUTED,marginBottom:8}}>+ Nuevo perfil</button>}
+          {!showNew&&!showRestore&&<div style={{display:'flex',gap:8,flexDirection:'column',alignItems:'center'}}>
+          <button onClick={()=>setShowNew(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 20px',cursor:'pointer',fontSize:13,color:MUTED}}>+ Nuevo perfil</button>
+          <button onClick={()=>setShowRestore(true)} style={{background:'transparent',border:'none',fontSize:11,color:FAINT,cursor:'pointer',textDecoration:'underline'}}>Restaurar perfil desde Google Drive</button>
+        </div>}
         </>}
       {pinTarget&&<div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.45)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}}>
         <div className="fi" style={{background:'#fff',borderRadius:16,padding:28,width:280,textAlign:'center',boxShadow:'0 8px 40px rgba(0,0,0,0.18)'}}>
@@ -1671,6 +1733,15 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
         </div>
       </div>}
 
+        {showRestore&&<div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:24,width:'100%',maxWidth:340,boxShadow:'0 4px 24px rgba(0,0,0,0.07)'}}>
+          <button onClick={()=>{setShowRestore(false);setRestoreStatus(null);}} style={{background:'transparent',border:'none',fontSize:12,color:MUTED,cursor:'pointer',marginBottom:12,display:'block'}}>← Cancelar</button>
+          <div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:6}}>Restaurar desde Google Drive</div>
+          <div style={{fontSize:12,color:MUTED,lineHeight:1.65,marginBottom:14}}>Conecta el Drive donde guardaste tu perfil. Se restaurarán todos los perfiles y textos que encuentre.</div>
+          {restoreStatus&&<div style={{background:restoreStatus.t==='success'?'rgba(10,122,88,0.07)':restoreStatus.t==='warn'?'rgba(149,96,16,0.07)':'rgba(197,34,31,0.07)',border:'0.5px solid '+(restoreStatus.t==='success'?'rgba(10,122,88,0.25)':restoreStatus.t==='warn'?'rgba(149,96,16,0.25)':'rgba(197,34,31,0.25)'),borderRadius:8,padding:'9px 12px',fontSize:12,color:restoreStatus.t==='success'?'#0A7A58':restoreStatus.t==='warn'?'#956010':'#C5221F',marginBottom:12}}>{restoreStatus.m}</div>}
+          <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:5}}>Client ID de Google OAuth</div>
+          <input type="text" value={restoreCid} onChange={e=>setRestoreCid(e.target.value)} placeholder="1234….apps.googleusercontent.com" style={{marginBottom:12,width:'100%',fontSize:12}}/>
+          <button onClick={doRestore} disabled={restoreBusy||!restoreCid.trim()} style={{width:'100%',background:'#1A73E8',border:'none',borderRadius:8,padding:'10px',fontSize:13,fontWeight:500,color:'#fff',cursor:'pointer',opacity:restoreBusy||!restoreCid.trim()?0.5:1}}>{restoreBusy?'Conectando…':'🔑 Conectar con Google y restaurar'}</button>
+        </div>}
         {showNew&&<div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:24,width:'100%',maxWidth:320,boxShadow:'0 4px 24px rgba(0,0,0,0.07)'}}>
           {users.length>0&&<button onClick={()=>setShowNew(false)} style={{background:'transparent',border:'none',fontSize:12,color:MUTED,cursor:'pointer',marginBottom:12,display:'block'}}>← Cancelar</button>}
           <div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:14}}>{users.length===0?'Crea tu perfil':'Nuevo perfil'}</div>
@@ -1788,12 +1859,12 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
         </div>
 
         {/* Stats */}
-        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:10}}>
+        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:8}}>
           <StatCard label="Palabras" value={stats.totalWords>=1000?(stats.totalWords/1000).toFixed(1)+'k':stats.totalWords||0} sub="escritas"/>
           <StatCard label="Esta semana" value={stats.thisWeek||0} sub="sesiones"/>
           <StatCard label="Valoración" value={stats.avgRating?stats.avgRating+'/10':'—'} sub="media" accent={stats.avgRating>=7?'#0A7A58':TXT}/>
         </div>
-        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:12}}>
           <StatCard label="Esta semana" value={fmtTime(stats.weekElapsed)||'—'} sub="tiempo escrito"/>
           <StatCard label="Total" value={fmtTime(stats.totalElapsed)||'—'} sub="desde el inicio"/>
           <StatCard label="Lecciones" value={lessonsRead+'/64'} sub={lessonsPct+'% leído'} accent={lessonsRead>0?'#5550B8':TXT}/>
@@ -1900,7 +1971,7 @@ const SessionBriefing=({user,energy,library,onStart,onBack})=>{
         <div style={{flex:1}}/>
         <div style={{fontSize:12,color:MUTED}}>Energía <strong style={{color:TXT}}>{energy}/10</strong></div>
       </div>
-      <div style={{flex:1,maxWidth:640,width:'100%',margin:'0 auto',padding:'28px 20px 48px'}}>
+      <div style={{flex:1,maxWidth:640,width:'100%',margin:'0 auto',padding:'20px 14px 48px'}}>
         <div className="fu" style={{marginBottom:24}}>
           <div style={{fontSize:20,fontWeight:600,color:TXT,letterSpacing:'-0.02em',marginBottom:4,fontFamily:'Lora,Georgia,serif'}}>Sesión de hoy</div>
           <div style={{fontSize:13,color:MUTED}}>Elige por dónde empiezas o haz todo en orden.</div>
@@ -2042,7 +2113,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:46,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
         <button onClick={onBack} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:4}}>← Dashboard</button>
       </div>
-      <div style={{maxWidth:560,width:'100%',margin:'0 auto',padding:'32px 20px 60px'}}>
+      <div style={{maxWidth:560,width:'100%',margin:'0 auto',padding:'20px 14px 60px'}}>
         <div className="fu" style={{background:'#fff',borderRadius:16,boxShadow:'0 4px 40px rgba(0,0,0,0.08)',overflow:'hidden'}}>
           <div style={{padding:'20px 24px 16px',borderBottom:'0.5px solid '+BDR}}>
             <div style={{fontSize:11,fontWeight:500,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:3}}>Sesión completada</div>
@@ -2160,8 +2231,37 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const origin=getOrigin();
   const AC={info:{bg:'rgba(26,115,232,0.07)',bd:'rgba(26,115,232,0.22)',c:'#1A73E8'},success:{bg:'rgba(10,122,88,0.07)',bd:'rgba(10,122,88,0.22)',c:'#0A7A58'},warn:{bg:'rgba(149,96,16,0.07)',bd:'rgba(149,96,16,0.22)',c:'#956010'},error:{bg:'rgba(197,34,31,0.07)',bd:'rgba(197,34,31,0.22)',c:'#C5221F'}};
   const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());const info=await driveUI(auth.access_token);onUpdate({...driveState,...auth,driveUser:info,clientId:cid.trim()});setStatus({t:'success',m:'Conectado como '+info.email})}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
-  const upload=async()=>{const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);setBusy('u');setStatus(null);try{const r=await driveUpload('flujo_'+user.id+'.json',{version:1,userId:user.id,library:lib,syncedAt:Date.now()},fileId,token);onUpdate({...driveState,fileId:r?.id||fileId,lastSync:Date.now()});setStatus({t:'success',m:lib.length+' textos subidos.'})}catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
-  const download=async()=>{setBusy('d');setStatus(null);try{const f=await driveFindFile('flujo_'+user.id+'.json',token);if(!f){setStatus({t:'warn',m:'No hay archivo en Drive.'});setBusy(null);return}const data=await driveDownload(f.id,token);if(data?.library?.length){const merged=mergeLibs(library,data.library);merged.forEach(e=>S.set('flujo:'+user.id+':'+e.id,e));setStatus({t:'success',m:data.library.length+' textos descargados.'})}onUpdate({...driveState,fileId:f.id,lastSync:Date.now()})}catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
+  const upload=async()=>{
+    const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);
+    const refs=S.list('flujo:'+user.id+':ref:').map(k=>S.get(k)).filter(Boolean);
+    const extra={
+      projects:S.get('flujo:'+user.id+':projects')||[],
+      lastProject:S.get('flujo:'+user.id+':lastProject')||null,
+      lessonsRead:S.get('flujo:'+user.id+':lessons_read')||[],
+    };
+    const pin=S.get('flujo:'+user.id+':pin')||null;
+    const backup={version:2,userId:user.id,profile:user,pin,library:lib,refs,extra,syncedAt:Date.now()};
+    setBusy('u');setStatus(null);
+    try{const r=await driveUpload('flujo_'+user.id+'.json',backup,fileId,token);
+    onUpdate({...driveState,fileId:r?.id||fileId,lastSync:Date.now()});
+    setStatus({t:'success',m:lib.length+' textos y perfil subidos.'})}
+    catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}
+  };
+  const download=async()=>{setBusy('d');setStatus(null);try{
+    const f=await driveFindFile('flujo_'+user.id+'.json',token);
+    if(!f){setStatus({t:'warn',m:'No hay archivo en Drive.'});setBusy(null);return}
+    const data=await driveDownload(f.id,token);
+    if(data?.library?.length){const merged=mergeLibs(library,data.library);merged.forEach(e=>S.set('flujo:'+user.id+':'+e.id,e));}
+    if(data?.refs?.length){data.refs.forEach(r=>S.set('flujo:'+user.id+':ref:'+r.id,r));}
+    if(data?.extra){
+      if(data.extra.projects?.length)S.set('flujo:'+user.id+':projects',data.extra.projects);
+      if(data.extra.lastProject)S.set('flujo:'+user.id+':lastProject',data.extra.lastProject);
+      if(data.extra.lessonsRead?.length)S.set('flujo:'+user.id+':lessons_read',data.extra.lessonsRead);
+    }
+    onUpdate({...driveState,fileId:f.id,lastSync:Date.now()});
+    const total=(data?.library?.length||0)+(data?.refs?.length||0);
+    setStatus({t:'success',m:total+' entradas restauradas. Recarga la página para ver los cambios.'});
+  }catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.4)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
       <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:440,maxHeight:'88vh',overflow:'auto',boxShadow:'0 8px 40px rgba(0,0,0,0.15)'}}>
@@ -2326,8 +2426,8 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
         <div style={{display:'flex',gap:2,flex:1}}>
           {['check','reto','proyecto'].map(id=><button key={id} onClick={()=>{if(id!==sk){if(started&&plainTxt.trim()){if(!window.confirm('¿Cambiar de sección? El texto se guardará.'))return;saveNow(false);}onBack();}}} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:id!==sk?'pointer':'default',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
         </div>
-        <button onClick={()=>setShowLib(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
-        <button onClick={()=>setShowDrive(true)} style={{background:connected?'rgba(10,122,88,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(10,122,88,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#0A7A58':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>
+        <button onClick={()=>setShowLib(true)} className="desk-only" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
+        <button onClick={()=>setShowDrive(true)} className="desk-only" style={{background:connected?'rgba(10,122,88,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(10,122,88,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#0A7A58':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>
         <button onClick={handleFinishDay} style={{background:'#F4F2ED',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,fontWeight:500,color:TXT,cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>Terminar →</button>
         <div style={{position:'relative'}}>
           <button onClick={()=>setShowUserMenu(v=>!v)} style={{width:26,height:26,borderRadius:'50%',background:user.bg,border:'1.5px solid '+user.accent+'44',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:600,color:user.textCol}}>{user.initials}</button>
@@ -2338,7 +2438,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
             <button onClick={()=>{onLogout();setShowUserMenu(false)}} style={{display:'block',width:'100%',background:'transparent',border:'none',padding:'8px 12px',fontSize:12,color:MUTED,cursor:'pointer',textAlign:'left'}}>Cambiar usuario</button>
           </div>}
         </div>
-        <button onClick={()=>setShowPanel(v=>!v)} style={{background:showPanel?'rgba(0,0,0,0.06)':'transparent',border:'0.5px solid '+BDR,color:showPanel?TXT:MUTED,fontSize:11,padding:'3px 7px',borderRadius:6,cursor:'pointer',flexShrink:0}}>Panel</button>
+        <button onClick={()=>setShowPanel(v=>!v)} className="desk-only" style={{background:showPanel?'rgba(0,0,0,0.06)':'transparent',border:'0.5px solid '+BDR,color:showPanel?TXT:MUTED,fontSize:11,padding:'3px 7px',borderRadius:6,cursor:'pointer',flexShrink:0}}>Panel</button>
       </div>
 
       <div style={{display:'flex',flex:1,minHeight:0}}>
@@ -2378,13 +2478,15 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
 
           {/* TOOLBAR */}
           <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:36,background:'#F9F8F5',borderBottom:'0.5px solid '+BDR,gap:2,flexShrink:0}}>
-            <select value={fontIdx} onChange={e=>setFontIdx(+e.target.value)} style={{fontSize:11,color:TXT,background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 3px',cursor:'pointer',height:24,maxWidth:72}}>{FONTS.map((f,i)=><option key={f.label} value={i}>{f.label}</option>)}</select>
-            <div style={{display:'flex',alignItems:'center',border:'0.5px solid '+BDR,borderRadius:5,overflow:'hidden',height:24,flexShrink:0}}>
-              <button onClick={()=>setSz(s=>Math.max(12,s-2))} style={{...TBTN(false),width:18,height:24,borderRadius:0,fontSize:14}}>−</button>
-              <span style={{fontSize:10,color:TXT,minWidth:18,textAlign:'center',userSelect:'none',borderLeft:'0.5px solid '+BDR,borderRight:'0.5px solid '+BDR,lineHeight:'24px'}}>{sz}</span>
-              <button onClick={()=>setSz(s=>Math.min(28,s+2))} style={{...TBTN(false),width:18,height:24,borderRadius:0,fontSize:14}}>+</button>
-            </div>
-            <Sep/><button onClick={()=>cmd('bold')} style={{...TBTN(bold),fontSize:12,fontWeight:700,fontFamily:'Georgia,serif'}}>B</button><button onClick={()=>cmd('italic')} style={{...TBTN(italic),fontSize:12,fontStyle:'italic',fontFamily:'Georgia,serif'}}>I</button><button onClick={()=>cmd('underline')} style={{...TBTN(under),fontSize:11,textDecoration:'underline'}}>U</button>
+            <div className="desk-only" style={{display:'flex',alignItems:'center',gap:2}}>
+              <select value={fontIdx} onChange={e=>setFontIdx(+e.target.value)} style={{fontSize:11,color:TXT,background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 3px',cursor:'pointer',height:24,maxWidth:72}}>{FONTS.map((f,i)=><option key={f.label} value={i}>{f.label}</option>)}</select>
+              <div style={{display:'flex',alignItems:'center',border:'0.5px solid '+BDR,borderRadius:5,overflow:'hidden',height:24,flexShrink:0}}>
+                <button onClick={()=>setSz(s=>Math.max(12,s-2))} style={{...TBTN(false),width:18,height:24,borderRadius:0,fontSize:14}}>−</button>
+                <span style={{fontSize:10,color:TXT,minWidth:18,textAlign:'center',userSelect:'none',borderLeft:'0.5px solid '+BDR,borderRight:'0.5px solid '+BDR,lineHeight:'24px'}}>{sz}</span>
+                <button onClick={()=>setSz(s=>Math.min(28,s+2))} style={{...TBTN(false),width:18,height:24,borderRadius:0,fontSize:14}}>+</button>
+              </div>
+              <Sep/>
+            </div><button onClick={()=>cmd('bold')} style={{...TBTN(bold),fontSize:12,fontWeight:700,fontFamily:'Georgia,serif'}}>B</button><button onClick={()=>cmd('italic')} style={{...TBTN(italic),fontSize:12,fontStyle:'italic',fontFamily:'Georgia,serif'}}>I</button><button onClick={()=>cmd('underline')} style={{...TBTN(under),fontSize:11,textDecoration:'underline'}}>U</button>
             <Sep/>{['left','center','right'].map(d=><button key={d} onClick={()=>doAlign(d)} style={TBTN(align===d)}><AlignIcon dir={d} col={align===d?TXT:MUTED}/></button>)}
             <div style={{flex:1}}/>
             <div style={{display:'flex',alignItems:'center',gap:4}}>
@@ -2403,9 +2505,14 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
             {!started&&!plainTxt&&<div style={{position:'absolute',bottom:12,left:36,pointerEvents:'none',zIndex:2,fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}><span style={{width:4,height:4,borderRadius:'50%',background:headerAccent,opacity:0.6}}/>El temporizador arranca al escribir</div>}
             {ab==='limite'&&started&&(()=>{const h=limHint();return(<div style={{position:'absolute',top:8,left:36,pointerEvents:'none',zIndex:2,display:'flex',alignItems:'center',gap:4,fontSize:10,color:h.c}}>{Array.from({length:limDels}).map((_,i)=><span key={i} style={{width:6,height:6,borderRadius:'50%',background:i<delsLeft?'#956010':'rgba(0,0,0,0.1)',display:'inline-block'}}/>)}<span style={{marginLeft:2}}>{h.l}</span></div>)})()}
             <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt} onPaste={e=>{if(sk!=='proyecto')e.preventDefault()}}
-              style={{position:'absolute',inset:0,overflowY:'auto',padding:'20px 36px 14px',outline:'none',boxSizing:'border-box',fontFamily:fontObj.value,fontSize:sz+'px',lineHeight:1.85,color:textCol(),caretColor:headerAccent}}/>
+              style={{position:'absolute',inset:0,overflowY:'auto',padding:'20px 18px 80px',outline:'none',boxSizing:'border-box',fontFamily:fontObj.value,fontSize:sz+'px',lineHeight:1.85,color:textCol(),caretColor:headerAccent,WebkitOverflowScrolling:'touch'}}/>
           </div>
 
+          {/* MOBILE MODE BAR */}
+          <div className="mob-mode-bar" style={{display:'none',borderTop:'0.5px solid '+BDR,background:'#F9F8F5',padding:'6px 10px',gap:6,flexShrink:0,overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
+            <style>{'.mob-mode-bar{display:none!important}@media(max-width:600px){.mob-mode-bar{display:flex!important}.desk-only{display:none!important}}'}</style>
+            {MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} style={{background:ab===m.id?m.color+'15':'rgba(0,0,0,0.04)',border:'0.5px solid',borderColor:ab===m.id?m.color+'50':BDR,color:ab===m.id?m.color:MUTED,fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontWeight:ab===m.id?600:400,flexShrink:0,whiteSpace:'nowrap'}}>{m.sym} {m.name}</button>)}
+          </div>
           {/* BOTTOM BAR */}
           <div style={{height:36,borderTop:'0.5px solid '+BDR,background:'#F9F8F5',display:'flex',alignItems:'center',padding:'0 10px',gap:6,flexShrink:0}}>
             <span style={{fontSize:13,fontWeight:500,color:wc>0?TXT:FAINT}}>{wc}</span><span style={{fontSize:11,color:FAINT}}>pal</span>
@@ -2414,12 +2521,12 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
             <span style={{fontSize:11,color:started?headerAccent:FAINT}}>{started?fmt(elapsed):'—'}</span>
             <div style={{flex:1}}/>
             {lockedMode?<ModeBadge modeId={lockedMode} small/>
-              :<div style={{display:'flex',gap:2}}>{MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} title={m.full} style={{background:ab===m.id?m.color+'12':'transparent',border:'0.5px solid',borderColor:ab===m.id?m.color+'38':BDR,color:ab===m.id?m.color:FAINT,fontSize:10,padding:'2px 5px',borderRadius:4,cursor:'pointer',fontWeight:ab===m.id?500:400}}>{m.name}</button>)}</div>}
+              :<div style={{display:'flex',gap:2}}>{MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} title={m.full} style={{background:ab===m.id?m.color+'12':'transparent',border:'0.5px solid',borderColor:ab===m.id?m.color+'38':BDR,color:ab===m.id?m.color:FAINT,fontSize:11,padding:'4px 7px',borderRadius:4,cursor:'pointer',fontWeight:ab===m.id?500:400}}>{m.name}</button>)}</div>}
           </div>
         </div>
 
         {/* SIDE PANEL */}
-        {showPanel&&<div style={{width:190,borderLeft:'0.5px solid '+BDR,background:'#F4F2ED',overflow:'auto',flexShrink:0}}>
+        {showPanel&&<div className="desk-only" style={{width:190,borderLeft:'0.5px solid '+BDR,background:'#F4F2ED',overflow:'auto',flexShrink:0}}>
           <div style={{padding:12}}>
             {/* Exercise description */}
             {(customExercise||customReto)&&<div style={{marginBottom:12}}>
