@@ -2458,6 +2458,9 @@ const App=()=>{
   const [users,setUsers]=useState(()=>S.get('flujo:users')||[]);
   const [currentUser,setCurrentUser]=useState(null);
   const [rememberedId]=useState(()=>S.get('flujo:current'));
+  const [pendingSwitch,setPendingSwitch]=useState(null);
+  const [switchPin,setSwitchPin]=useState('');
+  const [switchPinError,setSwitchPinError]=useState(false);
   const [view,setView]=useState('dashboard');
   const [energy,setEnergy]=useState(5);
   const [library,setLibrary]=useState([]);
@@ -2482,7 +2485,22 @@ const App=()=>{
   useEffect(()=>{if(currentUser)loadUser(currentUser)},[currentUser?.id]);
 
   const createUser=u=>{const updated=[...users,u];setUsers(updated);S.set('flujo:users',updated);S.set('flujo:current',u.id);setCurrentUser(u);setLibrary([]);setReflections([]);setDriveState({});setView('dashboard')};
-  const selectUser=u=>{S.set('flujo:current',u.id);setCurrentUser(u);setView('dashboard')};
+  const selectUser=u=>{
+    const stored=S.get('flujo:'+u.id+':pin');
+    if(stored&&currentUser&&currentUser.id!==u.id){
+      // switching between users — need PIN
+      setPendingSwitch(u);setSwitchPin('');setSwitchPinError(false);
+    } else {
+      S.set('flujo:current',u.id);setCurrentUser(u);setView('dashboard');
+    }
+  };
+  const confirmSwitchPin=()=>{
+    const stored=S.get('flujo:'+pendingSwitch.id+':pin');
+    if(switchPin===stored){
+      S.set('flujo:current',pendingSwitch.id);setCurrentUser(pendingSwitch);
+      setView('dashboard');setPendingSwitch(null);setSwitchPin('');
+    } else {setSwitchPinError(true);setSwitchPin('');}
+  };
   const logout=()=>{S.set('flujo:current',null);setCurrentUser(null)};
   const deleteUser=id=>{const updated=users.filter(u=>u.id!==id);setUsers(updated);S.set('flujo:users',updated);if(currentUser?.id===id){S.set('flujo:current',null);setCurrentUser(null)}};
   const updateDrive=ns=>{if(!currentUser)return;S.set('flujo:drive:'+currentUser.id,ns);setDriveState(ns)};
@@ -2494,15 +2512,35 @@ const App=()=>{
 
   if(!currentUser)return <UserSelect users={users} onSelect={selectUser} onCreate={createUser} rememberedId={rememberedId}/>;
 
+  // Switch-user PIN modal (shown over any screen)
+  const SwitchPinModal=pendingSwitch?<div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.55)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}}>
+    <div className="fi" style={{background:'#fff',borderRadius:16,padding:28,width:280,textAlign:'center',boxShadow:'0 8px 40px rgba(0,0,0,0.2)'}}>
+      <div style={{width:48,height:48,borderRadius:'50%',background:pendingSwitch.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,fontWeight:600,color:pendingSwitch.textCol,margin:'0 auto 12px'}}>{pendingSwitch.initials}</div>
+      <div style={{fontSize:15,fontWeight:600,color:TXT,marginBottom:4}}>{pendingSwitch.name}</div>
+      <div style={{fontSize:12,color:MUTED,marginBottom:18}}>PIN para cambiar de perfil</div>
+      <input type="password" inputMode="numeric" maxLength={4} value={switchPin}
+        onChange={e=>setSwitchPin(e.target.value.replace(/[^0-9]/g,'').slice(0,4))}
+        onKeyDown={e=>{if(e.key==='Enter')confirmSwitchPin();if(e.key==='Escape'){setPendingSwitch(null);setSwitchPin('');}}}
+        autoFocus placeholder="····"
+        style={{width:'100%',textAlign:'center',letterSpacing:8,fontSize:22,marginBottom:switchPinError?8:14,border:'0.5px solid '+(switchPinError?'rgba(197,34,31,0.5)':'rgba(0,0,0,0.12)'),borderRadius:8,padding:'10px'}}/>
+      {switchPinError&&<div style={{fontSize:11,color:'#C5221F',marginBottom:10}}>PIN incorrecto</div>}
+      <div style={{display:'flex',gap:8}}>
+        <button onClick={()=>{setPendingSwitch(null);setSwitchPin('');}} style={{flex:1,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'9px',fontSize:13,color:MUTED,cursor:'pointer'}}>Cancelar</button>
+        <button onClick={confirmSwitchPin} disabled={switchPin.length!==4} style={{flex:1,background:TXT,border:'none',borderRadius:8,padding:'9px',fontSize:13,fontWeight:500,color:'#fff',cursor:'pointer',opacity:switchPin.length!==4?0.4:1}}>Entrar</button>
+      </div>
+    </div>
+  </div>:null;
+
   if(view==='postSession')return <PostSession sessionData={sessionData} onComplete={completeReflection} onBack={()=>{setView('dashboard');loadUser(currentUser)}} user={currentUser}/>;
 
-  if(view==='editor'&&sessionConfig)return <Editor user={currentUser} users={users} library={library} setLibrary={setLibrary}
+  if(view==='editor'&&sessionConfig)return <>{SwitchPinModal}<Editor user={currentUser} users={users} library={library} setLibrary={setLibrary}
     onFinishDay={finishDay} onBack={()=>setView('briefing')} onSwitchUser={selectUser} onLogout={logout} onDeleteUser={deleteUser}
-    driveState={driveState} onDriveUpdate={updateDrive} sessionConfig={sessionConfig}/>;
+    driveState={driveState} onDriveUpdate={updateDrive} sessionConfig={sessionConfig}/></>
 
-  if(view==='briefing')return <SessionBriefing user={currentUser} energy={energy} library={library} onStart={startSession} onBack={()=>setView('dashboard')}/>;
+  if(view==='briefing')return <>{SwitchPinModal}<SessionBriefing user={currentUser} energy={energy} library={library} onStart={startSession} onBack={()=>setView('dashboard')}/></>
 
   return <>
+    {SwitchPinModal}
     {showExLibrary&&<ExerciseLibrary user={currentUser} library={library} reflections={reflections} onClose={()=>setShowExLibrary(false)}/>}
     <Dashboard user={currentUser} users={users} library={library} reflections={reflections}
       onContinue={goToBriefing} onSwitchUser={selectUser} onLogout={logout} onDeleteUser={deleteUser}
