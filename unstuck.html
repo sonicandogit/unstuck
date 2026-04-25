@@ -1109,22 +1109,301 @@ if(S.get('flujo:version')!==APP_VERSION){
 }
 const EXERCISE_BANK={
   low:[
-    {id:'obs1',title:'Escribe lo que ves',family:'Observación',desc:'Describe en detalle lo que ves desde donde estás ahora mismo. Sin inventar, solo observar.',mode:'normal',modeReason:'Sin restricciones. Solo observa y describe.',min:50},
-    {id:'obs2',title:'Lo que escuchas ahora',family:'Observación',desc:'Cierra los ojos 30 segundos y escucha. Luego escribe todo lo que has oído.',mode:'normal',modeReason:'Edición libre para este ejercicio suave.',min:50},
-    {id:'mem1',title:'Un objeto de tu infancia',family:'Memoria',desc:'Elige un objeto que recuerdes de cuando eras pequeño. Descríbelo por su peso, textura, contexto.',mode:'normal',modeReason:'Escribe libremente. Sin presión.',min:60},
-    {id:'cop1',title:'Copia y continúa',family:'Imitación',desc:'Abre un libro al azar, copia el primer párrafo de la página, y continúa desde donde lo deja el autor.',mode:'normal',modeReason:'Libertad total para imitar y transformar.',min:60},
+    {id:'obs1',title:'Escribe lo que ves',family:'Observación',
+     desc:'Describe con detalle todo lo que ves desde donde estás ahora mismo. Sin inventar nada. Solo observa y escribe.',
+     mode:'rio',modeReason:'Modo Río: escribe sin borrar. Si te equivocas, sigue. El objetivo es el flujo, no la perfección.',min:50,
+     teoria:`INSTRUCCIONES DETALLADAS — Escribe lo que ves
+
+Este ejercicio entrena la atención. La mayoría de las veces no vemos lo que tenemos delante: lo reconocemos. Hay una diferencia enorme entre reconocer una silla y ver una silla.
+
+CÓMO HACERLO:
+Mira el espacio que tienes delante. Ahora escribe todo lo que ves, en el orden en que lo percibes. No lo organices. No lo expliques. Solo nómbralo y descríbelo.
+
+Empieza por lo grande (la habitación, la luz) y ve bajando hacia lo pequeño (el borde de una taza, una sombra en la pared). O al revés. Lo que importa es que no te saltes nada por "poco interesante".
+
+EJEMPLO:
+"La pantalla del portátil, blanca. Un cable negro que cae en curva hasta el suelo. La taza a la derecha, con una mancha de café seco en el interior. La ventana detrás, tres marcos, el del centro con la pintura descascarada en la esquina superior izquierda. Un árbol moviéndose fuera. El sonido de tráfico que entra sin que yo lo haya notado hasta ahora."
+
+POR QUÉ FUNCIONA:
+Ver con precisión es la base de toda escritura descriptiva. Este ejercicio te enseña a sustituir "había una mesa" por lo que realmente hay: el color, la textura, el estado, la historia visible en los objetos.
+
+VARIANTES:
+- Describe solo las sombras del espacio
+- Describe solo las cosas que están fuera de sitio
+- Describe solo los sonidos que escuchas`},
+
+    {id:'obs2',title:'Lo que escuchas ahora',family:'Observación',
+     desc:'Cierra los ojos 30 segundos y escucha. Luego escribe todo lo que has oído, en capas: cerca, lejos, muy lejos.',
+     mode:'normal',modeReason:'Modo Normal: libertad total. Puedes corregir y afinar mientras escribes.',min:50,
+     teoria:`INSTRUCCIONES DETALLADAS — Lo que escuchas ahora
+
+La mayoría de la prosa es visual. Añadir capas sonoras a tu escritura cambia completamente la experiencia del lector. Este ejercicio entrena el oído narrativo.
+
+CÓMO HACERLO:
+1. Pon un temporizador de 30 segundos.
+2. Cierra los ojos y escucha. No clasifiques los sonidos mientras los oyes. Solo percibe.
+3. Cuando suene el temporizador, escribe todo lo que recuerdas haber escuchado.
+
+Organízalos en capas de distancia:
+— Lo que estaba dentro de la habitación (tu propia respiración, el ventilador, el teclado)
+— Lo que venía de cerca (pasos en el pasillo, conversación al otro lado de la pared)
+— Lo que venía de lejos (tráfico, pájaros, obras)
+
+EJEMPLO:
+"Cerca: el zumbido constante del ordenador, casi inaudible pero presente. Mi propia respiración, más rápida de lo que pensaba. Lejos: un motor de moto que pasó y se alejó. Más lejos: algo que podría ser lluvia o podría ser viento entre hojas. No estoy seguro. También, en algún momento, alguien tosió en otro cuarto."
+
+POR QUÉ FUNCIONA:
+El sonido ancla las escenas en el tiempo real. Una escena que describe solo lo visual flota. Una escena que también tiene sonido existe en el presente, tiene duración.`},
+
+    {id:'mem1',title:'Un objeto de tu infancia',family:'Memoria',
+     desc:'Elige un objeto que recuerdes de cuando eras pequeño. Descríbelo como si lo tuvieras delante: su peso, textura, olor, historia.',
+     mode:'normal',modeReason:'Modo Normal: la memoria necesita espacio para desplegarse. Sin restricciones.',min:60,
+     teoria:`INSTRUCCIONES DETALLADAS — Un objeto de tu infancia
+
+Los objetos son cápsulas de tiempo. Contienen más información sobre una época que cualquier descripción directa. Proust lo entendió con la magdalena: no es el objeto en sí, es todo lo que activa.
+
+CÓMO HACERLO:
+Cierra los ojos y viaja mentalmente a algún espacio de tu infancia: una cocina, un dormitorio, un patio. Espera a que aparezca un objeto. No lo elijas con la cabeza. Deja que llegue solo.
+
+Cuando lo tengas, descríbelo como si lo tuvieras en las manos ahora mismo:
+— ¿Cuánto pesa? ¿Es frío o cálido al tacto?
+— ¿Qué textura tiene? ¿Es rugoso, liso, quebradizo?
+— ¿Tiene olor? ¿A qué?
+— ¿Qué estado tenía? ¿Estaba nuevo, viejo, roto, arreglado con celo?
+— ¿Dónde estaba siempre? ¿Quién lo usaba?
+
+EJEMPLO:
+"Una radio de plástico color crema, con un dial de frecuencia que costaba girar porque estaba pegajoso de años de dedos. Pesaba más de lo que parecía. La rejilla delantera tenía una mancha oscura en la esquina inferior que nunca supe qué era. Sonaba con un ligero silbido de fondo, siempre, incluso cuando el volumen estaba bajo."
+
+POR QUÉ FUNCIONA:
+Los detalles sensoriales concretos son los que hacen que el lector vea. No "una radio vieja" sino "una radio con el dial pegajoso de años de dedos".`},
+
+    {id:'cop1',title:'Copia y continúa',family:'Imitación',
+     desc:'Abre un libro al azar. Copia la primera frase de la página que abras. Luego continúa tú, manteniendo el ritmo y el tono del autor.',
+     mode:'normal',modeReason:'Modo Normal: imitar requiere leer y releer. La libertad de edición ayuda.',min:60,
+     teoria:`INSTRUCCIONES DETALLADAS — Copia y continúa
+
+Este es uno de los ejercicios más antiguos para escritores: copiar a los maestros para aprender sus ritmos. No es plagio, es aprendizaje activo. Cuando copias una frase y luego intentas continuarla con el mismo tono, tu mano aprende algo que tu cabeza no puede enseñarse a sí misma.
+
+CÓMO HACERLO:
+1. Coge cualquier libro de tu estantería (o abre uno en el móvil). Ábrelo por una página al azar.
+2. Lee la primera frase de esa página en voz alta. Una vez. Luego otra.
+3. Cópiala literalmente en el editor.
+4. Continúa desde donde el autor la dejó. Escribe al menos 5-6 frases más, intentando mantener: la longitud de las frases del autor, su nivel de detalle, si usa mucha o poca adjetivación, el tiempo verbal, el ritmo.
+
+EJEMPLO:
+Frase copiada (Carver): "Ella estaba en la cocina cuando él llegó a casa esa tarde."
+Continuación propia: "La luz del techo zumbaba igual que siempre. Él dejó las llaves en el mueble del recibidor. En la cocina sonaba algo, una sartén quizás. Pensó que iba a decir algo cuando entrara, pero cuando entró no dijo nada."
+
+POR QUÉ FUNCIONA:
+La continuación revela cuánto has absorbido del ritmo del autor. Es un espejo: ves exactamente dónde tu voz se separa de la del maestro. Esa separación es tu punto de partida.`},
   ],
   mid:[
-    {id:'voz1',title:'Tres registros',family:'Voz',desc:'Escribe la misma situación en tres registros: formal, coloquial y lírico. Luego elige el más honesto.',mode:'rio',modeReason:'Sin borrar. Deja fluir cada voz sin juzgarla.',min:80},
-    {id:'trans1',title:'Cambia el narrador',family:'Narrador',desc:'Toma una escena e inventa una de 3 líneas ahora mismo. Reescríbela en primera, segunda y tercera persona.',mode:'tunel',modeReason:'Solo ves lo que acabas de escribir.',min:100},
-    {id:'trans2',title:'Sin adjetivos',family:'Estilo',desc:'Escribe un párrafo sobre cualquier cosa. Luego reescríbelo sin usar ningún adjetivo.',mode:'rio',modeReason:'Una vez escrito, no vuelves atrás.',min:80},
-    {id:'emoc1',title:'Una emoción sin nombrarla',family:'Descripción',desc:'Elige una emoción. Escribe una escena donde esté presente sin mencionarla ni nombrar partes del cuerpo.',mode:'tunel',modeReason:'El túnel te hace avanzar sin leer lo anterior.',min:100},
+    {id:'voz1',title:'Tres registros',family:'Voz',
+     desc:'Escribe la misma situación breve (alguien que llega tarde a casa) en tres registros diferentes: formal/burocrático, coloquial, y lírico/poético.',
+     mode:'rio',modeReason:'Modo Río: sin borrar. Cada registro fluye de una vez. El objetivo es la diferencia entre ellos.',min:80,
+     teoria:`INSTRUCCIONES DETALLADAS — Tres registros
+
+El registro es la relación entre quien habla, a quién habla y en qué contexto. Cambiar el registro de una misma escena es como encender luces de colores distintos sobre el mismo objeto: lo que ves cambia completamente.
+
+CÓMO HACERLO:
+La situación es siempre la misma: alguien llega tarde a casa. No importa quién ni por qué. Escríbela tres veces:
+
+REGISTRO 1 — FORMAL/BUROCRÁTICO:
+Como si fuera un informe, un acta, una declaración. Sin emociones. Solo hechos y procedimiento.
+Ejemplo: "El sujeto accedió al domicilio a las 23:47 horas, con un retraso de 107 minutos respecto al horario habitual. No se emitió comunicación previa. La otra parte se encontraba en el interior."
+
+REGISTRO 2 — COLOQUIAL:
+Como se lo contarías a un amigo. Con el vocabulario y el ritmo del habla real.
+Ejemplo: "Llegué tardísimo, casi las doce, y mi madre estaba ahí sentada con la tele apagada, que es la señal. Sin decir nada, que es peor que si dijera algo."
+
+REGISTRO 3 — LÍRICO:
+Con atención a la imagen, el sonido, la resonancia emocional. Como si importara más cómo suena que lo que dice.
+Ejemplo: "La llave entró en la cerradura con el cansancio de todas las noches anteriores. Dentro, el silencio tenía forma: la de alguien que llevaba horas esperando sin querer esperar."
+
+REFLEXIÓN FINAL: ¿Cuál te sale más natural? ¿Cuál te resulta más difícil? ¿Cuál dice más sobre la situación?`},
+
+    {id:'trans1',title:'Cambia el narrador',family:'Narrador',
+     desc:'Escribe una escena breve de 3-4 líneas en primera persona. Luego reescríbela dos veces: en segunda persona (tú) y en tercera (él/ella).',
+     mode:'tunel',modeReason:'Modo Túnel: cada reescritura es un nuevo intento. El túnel te empuja a avanzar.',min:100,
+     teoria:`INSTRUCCIONES DETALLADAS — Cambia el narrador
+
+El punto de vista no es solo una elección técnica. Cambia radicalmente la distancia emocional del lector, la responsabilidad del narrador y lo que es posible contar. Este ejercicio te hace sentir esa diferencia en el cuerpo, no solo entenderla con la cabeza.
+
+CÓMO HACERLO:
+Empieza con una escena sencilla y cotidiana: lavarte la cara, esperar un autobús, leer un mensaje en el móvil.
+
+VERSIÓN 1 — PRIMERA PERSONA (yo):
+"Me miré en el espejo más tiempo del necesario. Había algo en mi cara que no reconocía, o quizás era todo."
+
+VERSIÓN 2 — SEGUNDA PERSONA (tú):
+La segunda persona mete al lector dentro de la acción. Crea una extraña familiaridad, casi incómoda.
+"Te miras en el espejo más tiempo del necesario. Hay algo en tu cara que no reconoces, o quizás es todo."
+
+VERSIÓN 3 — TERCERA PERSONA (él/ella):
+La tercera persona crea distancia. El personaje se vuelve observable desde fuera.
+"Se miró en el espejo más tiempo del necesario. Había algo en su cara que no reconocía, o quizás era todo."
+
+NOTA: La misma frase. Tres experiencias lectoras completamente distintas. ¿Cuál te parece más honesta para esta escena? ¿Cuál te resulta más incómoda? La incomodidad suele señalar algo interesante.`},
+
+    {id:'trans2',title:'Sin adjetivos',family:'Estilo',
+     desc:'Escribe un párrafo sobre cualquier cosa. Luego reescríbelo eliminando absolutamente todos los adjetivos. Verás qué queda.',
+     mode:'rio',modeReason:'Modo Río: escribe sin borrar. Primero el párrafo libre, luego la versión sin adjetivos.',min:80,
+     teoria:`INSTRUCCIONES DETALLADAS — Sin adjetivos
+
+El adjetivo es la muleta más usada en la escritura. "Una tarde oscura y melancólica" es fácil de escribir y difícil de sentir. Eliminar los adjetivos obliga a encontrar el sustantivo exacto o el verbo que ya contenga lo que el adjetivo quería añadir.
+
+CÓMO HACERLO:
+Escribe primero un párrafo descriptivo de 5-8 frases sobre cualquier cosa: una persona, un lugar, un momento. Usa los adjetivos con libertad.
+
+Luego reescríbelo eliminando todos y cada uno de los adjetivos. Está prohibido: grande, pequeño, bonito, triste, viejo, nuevo, oscuro, luminoso... cualquier palabra que describa una cualidad.
+
+EJEMPLO CON ADJETIVOS:
+"Era una calle estrecha y ruidosa, llena de tiendas pequeñas y sucias. La gente caminaba rápido, con caras cansadas. Un perro viejo dormía en la entrada de un portal oscuro."
+
+MISMO PÁRRAFO SIN ADJETIVOS:
+"Era una calle. Las tiendas se apilaban una contra otra. La gente caminaba. Un perro dormía en la entrada de un portal."
+
+¿Notas lo que pasa? El párrafo sin adjetivos suena más seco. Pero también más honesto. Ahora el reto es añadir la vida de vuelta sin usar adjetivos: usa verbos más precisos, sustantivos más específicos, detalles concretos.
+
+"Era una calle donde los toldos de las tiendas se rozaban. La gente caminaba mirando el suelo. Un perro respiraba en la entrada de un portal, sin levantarse cuando alguien pasaba."
+
+¿Ves la diferencia? Los detalles hacen el trabajo que antes hacían los adjetivos.`},
+
+    {id:'emoc1',title:'Una emoción sin nombrarla',family:'Descripción',
+     desc:'Elige una emoción (miedo, alivio, vergüenza, euforia). Escribe una escena donde esté presente sin mencionar el nombre de la emoción ni nombrar partes del cuerpo que la expresen.',
+     mode:'tunel',modeReason:'Modo Túnel: el foco en el párrafo actual te ayuda a no perderte en explicaciones.',min:100,
+     teoria:`INSTRUCCIONES DETALLADAS — Una emoción sin nombrarla
+
+"Estaba asustado" informa al lector. "Las llaves no entraban en la cerradura" hace que el lector sienta el miedo. Esta es la diferencia entre contar y mostrar: la emoción como información versus la emoción como experiencia.
+
+LA REGLA DOBLE:
+1. No puedes nombrar la emoción (prohibido: miedo, alivio, vergüenza, alegría, ansiedad...)
+2. No puedes usar las expresiones corporales convencionales (prohibido: se le hizo un nudo en el estómago, el corazón le latía fuerte, se le heló la sangre...)
+
+¿QUÉ PUEDES USAR?
+— Acciones concretas e involuntarias del personaje
+— Lo que el personaje percibe del entorno (y cómo lo percibe)
+— Objetos y su relación con ellos
+— El tiempo: cómo lo experimenta (lento, rápido, inexistente)
+
+EJEMPLO — MIEDO (sin nombrarlo, sin el cuerpo):
+Prohibido: "Tenía miedo. El corazón le latía con fuerza."
+Permitido: "Contó los pasos hasta la puerta. Doce. Siempre doce. Las llaves no encontraban el agujero. Las probó todas, en orden, aunque sabía cuál era. Afuera, un coche frenó. Ella no se giró."
+
+EJEMPLO — ALIVIO:
+Prohibido: "Sintió un gran alivio."
+Permitido: "Se sentó sin elegir la silla. Respiró y el aire le supo a otra cosa. Miró por la ventana sin buscar nada. En la cocina, el grifo goteaba. Lo había escuchado mil veces sin escucharlo."
+
+EL RETO REAL: La especificidad. No "buscó algo que hacer" sino "apiló los platos, los desapiló, los volvió a apilar". Los gestos específicos e involuntarios son los que revelan la emoción sin nombrarla.`},
   ],
   high:[
-    {id:'dial1',title:'Diálogo sin atribuciones',family:'Diálogos',desc:'Escribe una conversación sin usar "dijo", "respondió" ni similares. Empieza in medias res.',mode:'tunel',modeReason:'Solo ves las últimas frases. Foco total.',min:120},
-    {id:'narr1',title:'Narrador no humano',family:'Narrador',desc:'Escribe desde el punto de vista de un objeto, animal o concepto abstracto sin explicar que eres ese narrador.',mode:'presion',modeReason:'La presión de tiempo evita que te paralices.',min:150},
-    {id:'narr2',title:'Narrador en segunda persona',family:'Narrador',desc:'Escribe una escena donde el "tú" es el protagonista. Lánzate directamente a la acción.',mode:'rio',modeReason:'Sin borradores. Confía en tu primer instinto.',min:100},
-    {id:'rest1',title:'Historia en seis palabras (expandida)',family:'Restricción',desc:'Empieza con una historia en exactamente seis palabras. Luego úsala como semilla y expándela.',mode:'presion',modeReason:'Escribe o pierdes. La restricción conecta con el formato.',min:120},
+    {id:'dial1',title:'Diálogo sin atribuciones',family:'Diálogos',
+     desc:'Escribe una conversación entre dos personas sin usar nunca "dijo", "respondió", "preguntó" ni ningún verbo de habla. El lector debe saber quién habla solo por el tono y el contenido.',
+     mode:'tunel',modeReason:'Modo Túnel: cada intervención es su propio momento. El foco te impide sobreexplicar.',min:120,
+     teoria:`INSTRUCCIONES DETALLADAS — Diálogo sin atribuciones
+
+Las etiquetas de diálogo ("dijo", "respondió") son una muleta. Cuando las eliminas, la única forma de que el lector sepa quién habla es hacer que las voces sean genuinamente distintas. Este ejercicio te obliga a construir dos personajes desde cero.
+
+LA REGLA:
+No puedes usar ningún verbo de habla ni ningun sinónimo. Prohibido: dijo, respondió, preguntó, exclamó, murmuró, contestó, explicó, añadió...
+
+CÓMO HACER QUE LAS VOCES SEAN DISTINGUIBLES:
+— Longitud de frases: una voz usa frases cortas, la otra largas
+— Vocabulario: una usa lenguaje formal, la otra coloquial
+— Lo que preguntan vs. lo que afirman: una pregunta, la otra nunca pregunta
+— Temas: una habla de hechos, la otra de sentimientos
+— Silencios: una deja espacio, la otra lo llena
+
+EJEMPLO CORRECTO:
+"—¿Cuándo vuelves?
+—No lo sé todavía. Depende de varias cosas.
+—¿De qué cosas?
+—Del trabajo, sobre todo. Y de cómo estén las cosas aquí cuando termine.
+—¿Y cómo crees que van a estar las cosas aquí?
+—No lo sé.
+—Eso es lo que dices siempre.
+—Sí."
+
+¿Puedes distinguir quién es quién sin etiquetas? Una voz hace preguntas directas y breves. La otra da respuestas largas que esquivan. El desequilibrio entre ambas ya dice algo sobre la relación.
+
+EMPIEZA IN MEDIAS RES: No expliques quiénes son ni dónde están. Lánzate directamente a la conversación. El contexto se infiere.`},
+
+    {id:'narr1',title:'Narrador no humano',family:'Narrador',
+     desc:'Escribe desde el punto de vista de un objeto o animal. Sin revelar que eres ese narrador. Sin pensamientos humanos. Solo percepciones.',
+     mode:'presion',modeReason:'Modo Presión: la urgencia te impide sobrepensar. Los narradores no humanos salen mejor cuando no los controlas demasiado.',min:150,
+     teoria:`INSTRUCCIONES DETALLADAS — Narrador no humano
+
+El reto de este ejercicio es genuino: ¿puedes imaginar una percepción del mundo radicalmente diferente a la tuya? No se trata de humanizar al objeto o al animal (el perro que "piensa en la injusticia de su situación"). Se trata de construir una percepción coherente con lo que ese ser puede percibir realmente.
+
+DOS ESTRATEGIAS:
+
+ESTRATEGIA 1 — EL OBJETO:
+Un objeto no siente, no piensa, pero registra. Lleva historia. Ha cambiado de manos. Ha estado en momentos que las personas no recuerdan que él presenció.
+Elige un objeto: una silla, una llave, un cuaderno, un abrigo. Escribe lo que "sabe": los pesos distintos que lo han usado, los cambios de luz que ha visto, lo que ha escuchado.
+Ejemplo: "Fui afinado por última vez hace cuatro años. Antes de eso, cada semana. Ahora solo me tocan para quitar el polvo."
+
+ESTRATEGIA 2 — EL ANIMAL:
+Un animal percibe de forma distinta: el olfato como fuente de información narrativa, el movimiento como amenaza o invitación, el tiempo sin pasado ni futuro abstractos.
+Ejemplo: "El olor de antes todavía estaba en el sofá pero era más débil. El olor nuevo era agrio. La puerta se había abierto dos veces desde que amaneció."
+
+LO PROHIBIDO:
+— Pensamientos humanos: "sabía que algo iba mal", "recordó tiempos mejores"
+— Emociones humanas nombradas: "sentía soledad"
+— Juicios morales
+
+SIN REVELAR QUÉ ERES: El lector debe inferirlo por las percepciones, no porque tú lo declares.`},
+
+    {id:'narr2',title:'Segunda persona, presente',family:'Narrador',
+     desc:'Escribe en segunda persona del singular (tú) y en presente. Una escena cotidiana pero intensa. Sin explicar nada. Solo lo que ocurre ahora.',
+     mode:'rio',modeReason:'Modo Río: la segunda persona en presente necesita impulso. Sin correcciones: fluye.',min:100,
+     teoria:`INSTRUCCIONES DETALLADAS — Segunda persona, presente
+
+La segunda persona del singular (tú) crea una extraña proximidad. El lector no puede ignorar lo que ocurre porque está escrito para él. El presente añade urgencia: esto no pasó, está pasando ahora, mientras lees.
+
+EFECTOS DE ESTE PUNTO DE VISTA:
+— Implicación forzada del lector
+— Sensación de instrucciones o de destino
+— Extrañeza: el "tú" puede ser el lector, puede ser el autor, puede ser un personaje
+
+CÓMO USARLO:
+Elige una situación cotidiana pero con carga emocional: esperar noticias, entrar a una habitación donde pasó algo, hacer algo por última vez sin saberlo.
+
+EJEMPLO:
+"Pones la cafetera. Escuchas el sonido que hace cuando el agua llega arriba. Sabes que tienes diez minutos antes de que tengas que decidir algo. Abres la ventana aunque no hace calor. En la calle, alguien llama a alguien por su nombre. No es el tuyo. Igual te giras."
+
+CLAVES:
+— No expliques lo que siente el "tú". Solo lo que hace y lo que percibe.
+— El presente continuo crea tensión: todo está ocurriendo ahora mismo.
+— Deja espacio en blanco: no todo tiene que estar explicado. Lo que falta es parte del texto.
+
+VARIANTE: Escribe una escena que conoces de tu vida pero en segunda persona. Observa cómo cambia la distancia emocional.`},
+
+    {id:'rest1',title:'Historia en seis palabras y expansión',family:'Restricción',
+     desc:'Empieza escribiendo una historia en exactamente seis palabras. Luego úsala como primera línea y expándela hasta donde llegues.',
+     mode:'presion',modeReason:'Modo Presión: la restricción del formato pide urgencia. Escribe sin frenarte.',min:120,
+     teoria:`INSTRUCCIONES DETALLADAS — Historia en seis palabras y expansión
+
+La historia de seis palabras más famosa se atribuye a Hemingway: "En venta: zapatos de bebé, sin usar." Seis palabras que contienen una pérdida, una economía desesperada, un duelo implícito. La fuerza viene de todo lo que no dice.
+
+PASO 1 — LAS SEIS PALABRAS:
+Escribe una historia completa en exactamente seis palabras. Debe implicar algo que ocurrió, aunque no lo cuente directamente.
+
+EJEMPLOS:
+— "Llamó dos veces. Nadie contestó. Bien." (alivio o resignación)
+— "El abrigo de él, todavía aquí." (ausencia)
+— "Ganamos. Él no lo vio." (pérdida)
+— "Aprendí su nombre demasiado tarde." (arrepentimiento)
+— "La última foto. Todos sonreímos." (ironía)
+
+Tómate el tiempo que necesites con las seis palabras. Son la semilla. Si la semilla es débil, el árbol será débil.
+
+PASO 2 — LA EXPANSIÓN:
+Usa esas seis palabras como primera línea y expándelas. No las expliques. Deja que el texto abra el mundo que estaba comprimido en ellas.
+
+¿Quiénes son estas personas? ¿Qué pasó antes de este momento? ¿Qué pasa después?
+
+La expansión no debe "resolver" las seis palabras. Debe hacer que el lector sienta más, no que entienda más.`},
   ],
 };
 const getExercises=energy=>{if(energy<=3)return EXERCISE_BANK.low;if(energy<=6)return EXERCISE_BANK.mid;return EXERCISE_BANK.high};
@@ -1177,7 +1456,7 @@ const computeStats=(library,reflections)=>{
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
   const thisWeek=library.filter(e=>new Date(e.date)>=weekAgo).length;
   const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
-  const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d.toISOString().slice(0,10)});
+  const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
   const activeDates=new Set(library.map(e=>e.date));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
   const weekElapsed=library.filter(e=>new Date(e.date)>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
@@ -1232,7 +1511,7 @@ const driveUpload=async(name,content,fid,tok)=>{const B='u_bnd';const meta=JSON.
 
 /* ─── DOCX ───────────────────────────────────────── */
 const waitDocx=()=>new Promise(r=>{if(window.__docx){r(window.__docx);return}window.addEventListener('docxReady',()=>r(window.__docx),{once:true});setTimeout(()=>r(window.__docx||null),8000)});
-const exportDocx=async(entry,fDocx,fSize)=>{
+const exportDocx=async(entry,fDocx,fSize,feedbackTxt)=>{
   const lib=await waitDocx();if(!lib){alert('No se pudo cargar la librería .docx');return}
   const {Document,Packer,Paragraph,TextRun,AlignmentType}=lib;
   const aMap={left:AlignmentType.LEFT,center:AlignmentType.CENTER,right:AlignmentType.RIGHT};
@@ -1241,7 +1520,15 @@ const exportDocx=async(entry,fDocx,fSize)=>{
   const toR=(node,f={})=>{const runs=[];node.childNodes.forEach(c=>{if(c.nodeType===Node.TEXT_NODE){if(c.textContent)runs.push(new TextRun({text:c.textContent,bold:!!f.b,italics:!!f.i,underline:f.u?{}:undefined,font:fDocx,size:fSize*2}))}else if(c.nodeType===Node.ELEMENT_NODE){const t=c.tagName.toLowerCase();const nf={...f};if(t==='strong'||t==='b')nf.b=true;if(t==='em'||t==='i')nf.i=true;if(t==='u')nf.u=true;if(t==='br')runs.push(new TextRun({break:1}));else runs.push(...toR(c,nf))}});return runs};
   const paras=[];div.childNodes.forEach(node=>{if(node.nodeType===Node.TEXT_NODE){const t=node.textContent.trim();if(t)paras.push(new Paragraph({children:[new TextRun({text:t,font:fDocx,size:fSize*2})],alignment:pA}))}else if(node.nodeType===Node.ELEMENT_NODE){const t=node.tagName.toLowerCase();if(t==='p'||t==='div'){const runs=toR(node);paras.push(new Paragraph({children:runs.length?runs:[new TextRun('')],alignment:pA,spacing:{after:200}}))}}});
   if(!paras.length)paras.push(new Paragraph({children:[new TextRun('')]}));
-  const doc=new Document({styles:{default:{document:{run:{font:fDocx,size:fSize*2}}}},sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1440,right:1440,bottom:1440,left:1440}}},children:[new Paragraph({children:[new TextRun({text:entry.title||'Unstuck',bold:true,size:36,font:fDocx})],spacing:{after:240}}),new Paragraph({children:[new TextRun({text:(entry.sessionLabel||'')+' · '+fmtDate(entry.date)+' · '+entry.wordCount+' palabras',size:18,color:'888888',font:'Arial'})],spacing:{after:480}}),...paras]}]});
+  const feedbackParas=[];
+  if(feedbackTxt&&feedbackTxt.trim()){
+    feedbackParas.push(new Paragraph({children:[new TextRun({text:'',break:1})],spacing:{before:400}}));
+    feedbackParas.push(new Paragraph({children:[new TextRun({text:'Revisión de Claude',bold:true,size:24,font:fDocx,color:'5550B8'})],spacing:{after:160}}));
+    feedbackTxt.trim().split('\n').filter(l=>l.trim()).forEach(line=>{
+      feedbackParas.push(new Paragraph({children:[new TextRun({text:line.trim(),size:fSize*2-2,font:fDocx,color:'444444'})],spacing:{after:120}}));
+    });
+  }
+  const doc=new Document({styles:{default:{document:{run:{font:fDocx,size:fSize*2}}}},sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1440,right:1440,bottom:1440,left:1440}}},children:[new Paragraph({children:[new TextRun({text:entry.title||'Unstuck',bold:true,size:36,font:fDocx})],spacing:{after:240}}),new Paragraph({children:[new TextRun({text:(entry.sessionLabel||'')+' · '+fmtDate(entry.date)+' · '+entry.wordCount+' palabras',size:18,color:'888888',font:'Arial'})],spacing:{after:480}}),...paras,...feedbackParas]}]});
   const blob=await Packer.toBlob(doc);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=((entry.title||'unstuck').replace(/[^a-z0-9áéíóúñ ]/gi,'').trim()||'unstuck')+'.docx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 };
 
@@ -1473,9 +1760,9 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
                   const isToday=d.date===today();
                   return <div key={i} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
                     <div style={{width:36,height:36,borderRadius:'50%',background:d.done?'#0A7A58':isToday?'rgba(0,0,0,0.06)':'transparent',border:isToday&&!d.done?'1.5px solid rgba(0,0,0,0.18)':'0.5px solid '+(d.done?'#0A7A58':'rgba(0,0,0,0.08)'),display:'flex',alignItems:'center',justifyContent:'center',fontSize:d.done?16:13,color:d.done?'#fff':isToday?TXT:FAINT}}>
-                      {d.done?'✓':new Date(d.date).getDate()}
+                      {d.done?'✓':isToday?'●':new Date(d.date).getDate()}
                     </div>
-                    <div style={{fontSize:9,color:FAINT}}>{['D','L','M','X','J','V','S'][new Date(d.date).getDay()]}</div>
+                    <div style={{fontSize:9,color:isToday?user.accent||'#5550B8':FAINT}}>{isToday?'Hoy':['D','L','M','X','J','V','S'][new Date(d.date).getDay()]}</div>
                   </div>;
                 })}
               </div>
@@ -1489,8 +1776,8 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
               <div style={{flex:1}}>
                 <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                   {stats.last7status.map((d,i)=>(
-                    <div key={i} style={{width:28,height:28,borderRadius:'50%',background:d.done?'#0A7A58':'rgba(0,0,0,0.05)',border:'0.5px solid '+(d.done?'#0A7A58':'rgba(0,0,0,0.1)'),display:'flex',alignItems:'center',justifyContent:'center',fontSize:d.done?12:10,color:d.done?'#fff':FAINT}}>
-                      {d.done?'✓':new Date(d.date).getDate()}
+                    <div key={i} title={d.date} style={{width:28,height:28,borderRadius:'50%',background:d.done?'#0A7A58':d.date===today()?'rgba(0,0,0,0.08)':'rgba(0,0,0,0.04)',border:'0.5px solid '+(d.done?'#0A7A58':d.date===today()?'rgba(0,0,0,0.2)':'rgba(0,0,0,0.08)'),display:'flex',alignItems:'center',justifyContent:'center',fontSize:d.done?12:10,color:d.done?'#fff':FAINT}}>
+                      {d.done?'✓':d.date===today()?'●':new Date(d.date).getDate()}
                     </div>
                   ))}
                 </div>
@@ -1542,7 +1829,7 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
             {library.slice(0,3).map(e=>{const sc={check:'#0A7A58',reto:'#956010',proyecto:'#5550B8'}[e.sk]||MUTED;return <div key={e.id} style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:9,padding:'10px 14px',display:'flex',alignItems:'center',gap:10}}>
               <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.title}</div><div style={{fontSize:11,color:MUTED}}>{fmtDate(e.date)} · {e.wordCount} palabras</div></div>
-              <button onClick={()=>exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>↓</button>
+              <button onClick={()=>{const ref=reflections.find(r=>r.sessionTitle===e.title&&r.date===e.date);exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>↓</button>
               <button onClick={()=>{if(window.confirm('¿Eliminar "'+e.title+'"?')){S.del('flujo:'+user.id+':'+e.id);setLibrary(prev=>prev.filter(x=>x.id!==e.id))}}} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:6,padding:'3px 8px',fontSize:11,color:'rgba(197,34,31,0.5)',cursor:'pointer',flexShrink:0}}>✕</button>
             </div>})}
           </div>
@@ -1850,7 +2137,7 @@ const ExerciseLibrary=({user,library,reflections,onClose})=>{
                   </div>
                   <div style={{display:'flex',gap:6,flexShrink:0}}>
                     {ref&&<span style={{background:ref.rating>=7?'rgba(10,122,88,0.1)':'rgba(0,0,0,0.05)',color:ref.rating>=7?'#0A7A58':MUTED,borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:500}}>{ref.rating}/10</span>}
-                    <button onClick={()=>exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
+                    <button onClick={()=>{const ref=getRef(e);exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
                   </div>
                 </div>
                 {e.plain&&<div style={{padding:'0 16px 10px 33px',fontSize:12,color:'rgba(26,25,22,0.5)',lineHeight:1.6,fontStyle:'italic',overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical'}}>{e.plain.slice(0,300)}</div>}
@@ -1946,7 +2233,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
 
   const NS=k=>'flujo:'+user.id+':'+k;
   const resetLim=(d=limDels)=>{isDel.current=false;setCharsInDel(0);setDelsLeft(d)};
-  const buildEntry=()=>({id:sk+'_'+Date.now(),ts:Date.now(),sk,date:today(),sessionLabel:headerFamily,title:headerTitle,html:edRef.current?.innerHTML||'',plain:plainTxt,wordCount:wc,fontIdx,editorSize:sz,alignDir:align,weekId:sessionConfig.weekId||null,projectId:currentProject?.id||null});
+  const buildEntry=()=>({id:sk+'_'+Date.now(),ts:Date.now(),sk,date:today(),sessionLabel:headerFamily,title:headerTitle,html:edRef.current?.innerHTML||'',plain:plainTxt,wordCount:wc,elapsed,fontIdx,editorSize:sz,alignDir:align,weekId:sessionConfig.weekId||null,projectId:currentProject?.id||null});
 
   const saveNow=async(auto=false)=>{
     if(!plainTxt.trim())return;setSaveStatus('saving');
@@ -1979,13 +2266,13 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
     let curIdx=blocks.length-1;
     try{const sel=window.getSelection();if(sel?.rangeCount){const anchor=sel.anchorNode;blocks.forEach((b,i)=>{if(b===anchor||b.contains(anchor))curIdx=i})}}catch{}
     blocks.forEach((b,i)=>{
-      const past=i<curIdx;
-      b.style.filter=past?'blur(2.8px)':'none';
-      b.style.opacity=past?'0.22':'1';
-      b.style.transition='filter 0.5s ease,opacity 0.5s ease';
-      b.style.pointerEvents=past?'none':'';
-      b.style.userSelect=past?'none':'';
-      if(i===curIdx){b.scrollIntoView({block:'nearest',behavior:'smooth'});}
+      const isCur=i===curIdx;
+      b.style.filter=isCur?'none':'blur(2.8px)';
+      b.style.opacity=isCur?'1':'0.22';
+      b.style.transition='filter 0.4s ease,opacity 0.4s ease';
+      b.style.pointerEvents=isCur?'':'none';
+      b.style.userSelect=isCur?'':'none';
+      if(isCur)b.scrollIntoView({block:'nearest',behavior:'smooth'});
     });
   };
 
