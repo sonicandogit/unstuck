@@ -1100,6 +1100,13 @@ const S={
   del:k=>{try{localStorage.removeItem(k)}catch{}},
   list:p=>Object.keys(localStorage).filter(k=>k.startsWith(p)),
 };
+// Version reset: clear all data if version changed
+const APP_VERSION='v2-pin';
+if(S.get('flujo:version')!==APP_VERSION){
+  const keys=[...Object.keys(localStorage)].filter(k=>k.startsWith('flujo:'));
+  keys.forEach(k=>localStorage.removeItem(k));
+  S.set('flujo:version',APP_VERSION);
+}
 const EXERCISE_BANK={
   low:[
     {id:'obs1',title:'Escribe lo que ves',family:'Observación',desc:'Describe en detalle lo que ves desde donde estás ahora mismo. Sin inventar, solo observar.',mode:'normal',modeReason:'Sin restricciones. Solo observa y describe.',min:50},
@@ -1155,6 +1162,7 @@ const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString('es-ES',{day:'nu
 const fmtDT=ts=>{if(!ts)return null;const d=new Date(ts);return d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})+' '+d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')};
 const initials=n=>n.trim().split(' ').slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('');
 const fmt=s=>{if(s==null||s<0)return'—';return Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0')};
+const fmtTime=s=>{if(!s||s<60)return s+'s';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h>0?h+'h '+m+'m':m+'m'};
 const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;try{segs=text.split(/(?<=[.!?…])\s+/).filter(s=>s.trim())}catch{segs=text.replace(/([.!?…])\s+/g,'$1\n').split('\n').filter(s=>s.trim())}let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
 const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id)||m.get(e.id).ts<e.ts)m.set(e.id,e)});return Array.from(m.values()).sort((a,b)=>b.ts-a.ts)};
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
@@ -1172,7 +1180,9 @@ const computeStats=(library,reflections)=>{
   const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d.toISOString().slice(0,10)});
   const activeDates=new Set(library.map(e=>e.date));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
-  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status};
+  const weekElapsed=library.filter(e=>new Date(e.date)>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
+  const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
+  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,totalElapsed};
 };
 
 /* ─── CLAUDE API ─────────────────────────────────── */
@@ -1315,8 +1325,28 @@ const LeccionModal=({reto,onClose})=>{
 const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
   const [name,setName]=useState('');
   const [ci,setCi]=useState(0);
+  const [pin,setPin]=useState('');
   const [showNew,setShowNew]=useState(users.length===0);
-  const create=()=>{if(!name.trim())return;const c=USER_COLORS[ci];onCreate({id:uid(),name:name.trim(),colorIdx:ci,accent:c.accent,bg:c.bg,textCol:c.txt,initials:initials(name),createdAt:today()});setName('');setShowNew(false)};
+  const [pinTarget,setPinTarget]=useState(null);
+  const [pinInput,setPinInput]=useState('');
+  const [pinError,setPinError]=useState(false);
+  const create=()=>{
+    if(!name.trim()||pin.length!==4||!/^\d{4}$/.test(pin))return;
+    const c=USER_COLORS[ci];
+    const u={id:uid(),name:name.trim(),colorIdx:ci,accent:c.accent,bg:c.bg,textCol:c.txt,initials:initials(name),createdAt:today()};
+    S.set('flujo:'+u.id+':pin',pin);
+    onCreate(u);setName('');setPin('');setShowNew(false);
+  };
+  const tryLogin=u=>{
+    const stored=S.get('flujo:'+u.id+':pin');
+    if(!stored){onSelect(u);return;}
+    setPinTarget(u);setPinInput('');setPinError(false);
+  };
+  const confirmPin=()=>{
+    const stored=S.get('flujo:'+pinTarget.id+':pin');
+    if(pinInput===stored){onSelect(pinTarget);setPinTarget(null);}
+    else{setPinError(true);setPinInput('');}
+  };
   return(
     <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:32,overflow:'auto',position:'relative'}}>
 
@@ -1329,7 +1359,7 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
           <div style={{display:'flex',flexWrap:'wrap',gap:12,justifyContent:'center',marginBottom:24,width:'100%'}}>
             {users.map(u=>{
               const isRemembered=u.id===rememberedId;
-              return <button key={u.id} onClick={()=>onSelect(u)} style={{background:'#fff',border:'0.5px solid '+(isRemembered?u.accent:BDR),borderRadius:14,padding:'18px 22px',cursor:'pointer',textAlign:'center',minWidth:110,position:'relative',boxShadow:isRemembered?'0 2px 12px rgba(0,0,0,0.1)':'none',transition:'box-shadow 0.15s'}}>
+              return <button key={u.id} onClick={()=>tryLogin(u)} style={{background:'#fff',border:'0.5px solid '+(isRemembered?u.accent:BDR),borderRadius:14,padding:'18px 22px',cursor:'pointer',textAlign:'center',minWidth:110,position:'relative',boxShadow:isRemembered?'0 2px 12px rgba(0,0,0,0.1)':'none',transition:'box-shadow 0.15s'}}>
                 {isRemembered&&<div style={{position:'absolute',top:8,right:8,width:7,height:7,borderRadius:'50%',background:u.accent}}/>}
                 <div style={{width:48,height:48,borderRadius:'50%',background:u.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,fontWeight:600,color:u.textCol,margin:'0 auto 10px'}}>{u.initials}</div>
                 <div style={{fontSize:13,fontWeight:500,color:TXT}}>{u.name}</div>
@@ -1340,13 +1370,28 @@ const UserSelect=({users,onSelect,onCreate,rememberedId})=>{
 
           {!showNew&&<button onClick={()=>setShowNew(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 20px',cursor:'pointer',fontSize:13,color:MUTED,marginBottom:8}}>+ Nuevo perfil</button>}
         </>}
+      {pinTarget&&<div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.45)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div className="fi" style={{background:'#fff',borderRadius:16,padding:28,width:280,textAlign:'center',boxShadow:'0 8px 40px rgba(0,0,0,0.18)'}}>
+          <div style={{width:48,height:48,borderRadius:'50%',background:pinTarget.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,fontWeight:600,color:pinTarget.textCol,margin:'0 auto 12px'}}>{pinTarget.initials}</div>
+          <div style={{fontSize:15,fontWeight:600,color:TXT,marginBottom:4}}>{pinTarget.name}</div>
+          <div style={{fontSize:12,color:MUTED,marginBottom:18}}>Introduce tu PIN para entrar</div>
+          <input type="password" inputMode="numeric" maxLength={4} value={pinInput} onChange={e=>setPinInput(e.target.value.replace(/[^0-9]/g,'').slice(0,4))} onKeyDown={e=>{if(e.key==='Enter')confirmPin()}} autoFocus placeholder="····" style={{width:'100%',textAlign:'center',letterSpacing:8,fontSize:22,marginBottom:pinError?8:14,border:'0.5px solid '+(pinError?'rgba(197,34,31,0.5)':'rgba(0,0,0,0.12)'),borderRadius:8,padding:'10px'}}/>
+          {pinError&&<div style={{fontSize:11,color:'#C5221F',marginBottom:10}}>PIN incorrecto</div>}
+          <div style={{display:'flex',gap:8}}>
+            <Btn onClick={()=>{setPinTarget(null);setPinInput('');}} variant="ghost" full small>Cancelar</Btn>
+            <Btn onClick={confirmPin} variant="primary" full disabled={pinInput.length!==4}>Entrar</Btn>
+          </div>
+        </div>
+      </div>}
 
         {showNew&&<div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:24,width:'100%',maxWidth:320,boxShadow:'0 4px 24px rgba(0,0,0,0.07)'}}>
           {users.length>0&&<button onClick={()=>setShowNew(false)} style={{background:'transparent',border:'none',fontSize:12,color:MUTED,cursor:'pointer',marginBottom:12,display:'block'}}>← Cancelar</button>}
           <div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:14}}>{users.length===0?'Crea tu perfil':'Nuevo perfil'}</div>
           <input type="text" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')create()}} placeholder="Tu nombre…" style={{marginBottom:12,width:'100%'}}/>
-          <div style={{display:'flex',gap:6,marginBottom:16}}>{USER_COLORS.map((c,i)=><button key={i} onClick={()=>setCi(i)} style={{width:24,height:24,borderRadius:'50%',background:c.accent,border:ci===i?'2px solid '+TXT:'2px solid transparent',cursor:'pointer',padding:0}}/>)}</div>
-          <Btn variant="primary" onClick={create} disabled={!name.trim()} full>Entrar a Unstuck</Btn>
+          <div style={{display:'flex',gap:6,marginBottom:12}}>{USER_COLORS.map((c,i)=><button key={i} onClick={()=>setCi(i)} style={{width:24,height:24,borderRadius:'50%',background:c.accent,border:ci===i?'2px solid '+TXT:'2px solid transparent',cursor:'pointer',padding:0}}/>)}</div>
+          <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:5}}>PIN de acceso (4 dígitos)</div>
+          <input type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} onKeyDown={e=>{if(e.key==='Enter')create()}} placeholder="····" style={{marginBottom:14,width:'100%',letterSpacing:6,fontSize:18,textAlign:'center'}}/>
+          <Btn variant="primary" onClick={create} disabled={!name.trim()||pin.length!==4} full>Entrar a Unstuck</Btn>
         </div>}
       </div>
     </div>
@@ -1456,10 +1501,14 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
         </div>
 
         {/* Stats */}
-        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
+        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:10}}>
           <StatCard label="Palabras" value={stats.totalWords>=1000?(stats.totalWords/1000).toFixed(1)+'k':stats.totalWords||0} sub="escritas"/>
           <StatCard label="Esta semana" value={stats.thisWeek||0} sub="sesiones"/>
           <StatCard label="Valoración" value={stats.avgRating?stats.avgRating+'/10':'—'} sub="media" accent={stats.avgRating>=7?'#0A7A58':TXT}/>
+        </div>
+        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+          <StatCard label="Esta semana" value={fmtTime(stats.weekElapsed)||'—'} sub="tiempo escrito"/>
+          <StatCard label="Total" value={fmtTime(stats.totalElapsed)||'—'} sub="desde el inicio"/>
           <StatCard label="Lecciones" value={lessonsRead+'/64'} sub={lessonsPct+'% leído'} accent={lessonsRead>0?'#5550B8':TXT}/>
         </div>
 
@@ -1692,7 +1741,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   // feedback is manual — no auto-trigger
 
   const save=()=>{
-    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,sessionTitle:sessionData.title,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback};
+    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,sessionTitle:sessionData.title,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'?feedback:''};
     S.set('flujo:'+user.id+':ref:'+r.id,r);onComplete(r);
   };
 
@@ -1735,8 +1784,8 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
             </div>}
             {fbState==='no_text'&&<p style={{fontSize:13,color:MUTED}}>No hay texto que leer en esta sesión.</p>}
             {(fbState==='ready'||fbState==='idle')&&<div style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:10}}>
-              <p style={{fontSize:13,color:MUTED,lineHeight:1.6}}>Pide a Claude que lea tu texto y te dé feedback sobre lo que funciona, lo que puedes empujar y una pregunta para la próxima vez.</p>
-              <Btn variant="accent" onClick={()=>{setFbState('loading');runFeedback()}} style={{display:'flex',alignItems:'center',gap:6}}>✦ Pedir lectura de Claude</Btn>
+              <p style={{fontSize:13,color:MUTED,lineHeight:1.6}}>Claude lee tu texto y te da tres puntos: qué funciona, qué explorar y una pregunta para la próxima vez.</p>
+              <button onClick={()=>{setFbState('loading');runFeedback()}} style={{background:'rgba(85,80,184,0.09)',border:'0.5px solid rgba(85,80,184,0.28)',color:'#5550B8',borderRadius:8,padding:'9px 16px',fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>✦ Revisión de Claude</button>
             </div>}
             {fbState==='no_key'&&<div style={{background:'rgba(85,80,184,0.06)',border:'0.5px solid rgba(85,80,184,0.18)',borderRadius:9,padding:'12px 14px'}}><p style={{fontSize:13,color:TXT,lineHeight:1.65,marginBottom:10}}>Para recibir feedback necesitas añadir tu API key de Claude. Se guarda solo en tu navegador.</p><Btn variant="accent" onClick={()=>setShowKey(true)} small>Añadir API key →</Btn></div>}
             {fbState==='invalid_key'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}><p style={{fontSize:13,color:'#C5221F',flex:1}}>La API key no es válida.</p><Btn variant="danger" onClick={()=>setShowKey(true)} small>Actualizar</Btn></div>}
@@ -1861,7 +1910,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
   const RETO_MODES=['rio','limite','tunel'];
 
   const [started,setStarted]=useState(false);
-  const [timerSec,setTimer]=useState(sk==='check'?7*60:sk==='reto'?15*60:null);
+  const [timerSec,setTimer]=useState(sk==='check'?7*60:null);
   const [running,setRunning]=useState(false);
   const lockedMode=null; // modes are always user-selectable
   const allowedModes=sk==='proyecto'?null:RETO_MODES;
@@ -1892,7 +1941,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
     :currentProject?(currentProject.type+' · '+(currentProject.wordCount||0)+' palabras'):'';
   const headerAccent=sk==='check'?'#0A7A58':sk==='reto'?'#956010':'#5550B8';
   const headerBg=sk==='check'?'rgba(10,122,88,0.06)':sk==='reto'?'rgba(149,96,16,0.06)':'rgba(85,80,184,0.06)';
-  const timerDur=sk==='check'?7*60:sk==='reto'?15*60:null;
+  const timerDur=sk==='check'?7*60:null; // reto & proyecto: no countdown
   const sessionXP=customExercise?.xp||80;
 
   const NS=k=>'flujo:'+user.id+':'+k;
@@ -2025,7 +2074,9 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
                 </div>}
               </div>
               <div style={{textAlign:'right',flexShrink:0}}>
-                {timerDur&&timerSec!=null&&<div style={{fontSize:22,fontWeight:200,color:timerCol(),fontVariantNumeric:'tabular-nums',lineHeight:1}}>{fmt(timerSec)}</div>}
+                {timerDur&&timerSec!=null
+                ?<div style={{fontSize:22,fontWeight:200,color:timerCol(),fontVariantNumeric:'tabular-nums',lineHeight:1}}>{fmt(timerSec)}</div>
+                :<div style={{fontSize:18,fontWeight:200,color:FAINT,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{fmt(elapsed)}</div>}
                 <div style={{fontSize:10,color:FAINT,marginTop:1}}>+{sessionXP} XP</div>
               </div>
             </div>
@@ -2064,7 +2115,7 @@ const Editor=({user,users,library,setLibrary,onFinishDay,onBack,onSwitchUser,onL
             {!plainTxt&&<div style={{position:'absolute',top:20,left:36,pointerEvents:'none',zIndex:2,fontSize:sz,fontFamily:fontObj.value,lineHeight:1.85,color:'rgba(26,25,22,0.28)'}}>{sk==='proyecto'?'Continúa donde lo dejaste…':'Empieza a escribir…'}</div>}
             {!started&&!plainTxt&&<div style={{position:'absolute',bottom:12,left:36,pointerEvents:'none',zIndex:2,fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}><span style={{width:4,height:4,borderRadius:'50%',background:headerAccent,opacity:0.6}}/>El temporizador arranca al escribir</div>}
             {ab==='limite'&&started&&(()=>{const h=limHint();return(<div style={{position:'absolute',top:8,left:36,pointerEvents:'none',zIndex:2,display:'flex',alignItems:'center',gap:4,fontSize:10,color:h.c}}>{Array.from({length:limDels}).map((_,i)=><span key={i} style={{width:6,height:6,borderRadius:'50%',background:i<delsLeft?'#956010':'rgba(0,0,0,0.1)',display:'inline-block'}}/>)}<span style={{marginLeft:2}}>{h.l}</span></div>)})()}
-            <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt}
+            <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt} onPaste={e=>{if(sk!=='proyecto')e.preventDefault()}}
               style={{position:'absolute',inset:0,overflowY:'auto',padding:'20px 36px 14px',outline:'none',boxSizing:'border-box',fontFamily:fontObj.value,fontSize:sz+'px',lineHeight:1.85,color:textCol(),caretColor:headerAccent}}/>
           </div>
 
