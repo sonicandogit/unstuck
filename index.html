@@ -1762,7 +1762,8 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
   const [showDrivePanel,setShowDrivePanel]=useState(false);
-  const driveConnected=!!(S.get('flujo:drive:'+user.id)?.token&&S.get('flujo:drive:'+user.id)?.expires_at>Date.now()+30000);
+  const [driveState,setDriveStateLocal]=useState(()=>S.get('flujo:drive:'+user.id)||{});
+  const driveConnected=!!(driveState?.token&&driveState?.expires_at>Date.now()+30000);
   const stats=useMemo(()=>computeStats(library,reflections),[library,reflections]);
   const em=energyMsg(energy);
   const recentNotes=reflections.filter(r=>r.notes?.trim()).slice(0,3);
@@ -1774,7 +1775,7 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
 
   return(
     <div style={{height:'100vh',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
-      {showDrivePanel&&<DrivePanel user={user} driveState={S.get('flujo:drive:'+user.id)||{}} onUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setShowDrivePanel(false)}} onClose={()=>setShowDrivePanel(false)} library={library}/>}
+      {showDrivePanel&&<DrivePanel user={user} driveState={driveState} onUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveStateLocal(ns);}} onClose={()=>setShowDrivePanel(false)} library={library}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
         <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Unstuck</div>
