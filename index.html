@@ -2262,7 +2262,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
     try{const r=await driveUpload('flujo_'+user.id+'.json',backup,fileId,token);
     onUpdate({...driveState,fileId:r?.id||fileId,lastSync:Date.now()});
     setStatus({t:'success',m:lib.length+' textos y perfil subidos.'})}
-    catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}
+    catch(e){if(e.code===401||e.message==='expired')setStatus({t:'warn',m:'El token de Google ha expirado. Pulsa Reconectar.'});else setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}
   };
   const download=async()=>{setBusy('d');setStatus(null);try{
     const f=await driveFindFile('flujo_'+user.id+'.json',token);
@@ -2278,7 +2278,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
     onUpdate({...driveState,fileId:f.id,lastSync:Date.now()});
     const total=(data?.library?.length||0)+(data?.refs?.length||0);
     setStatus({t:'success',m:total+' entradas restauradas. Recarga la página para ver los cambios.'});
-  }catch(e){setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
+  }catch(e){if(e.code===401||e.message==='expired')setStatus({t:'warn',m:'El token de Google ha expirado. Pulsa Reconectar.'});else setStatus({t:'error',m:'Error: '+e.message})}finally{setBusy(null)}};
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.4)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
       <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:440,maxHeight:'88vh',overflow:'auto',boxShadow:'0 8px 40px rgba(0,0,0,0.15)'}}>
@@ -2286,7 +2286,8 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
         <div style={{padding:20,display:'flex',flexDirection:'column',gap:14}}>
           {status&&<div style={{background:AC[status.t].bg,border:'0.5px solid '+AC[status.t].bd,borderRadius:8,padding:'9px 12px',fontSize:12,color:AC[status.t].c}}>{status.m}</div>}
           {connected?(<>
-            <div style={{background:'rgba(10,122,88,0.07)',border:'0.5px solid rgba(10,122,88,0.22)',borderRadius:10,padding:'11px 14px',display:'flex',alignItems:'center',gap:10}}><span>✓</span><div><div style={{fontSize:13,fontWeight:500,color:'#0A7A58'}}>Drive conectado</div><div style={{fontSize:11,color:MUTED}}>{lastSync?'Última sync: '+fmtDT(lastSync):'Sin sincronizar todavía'}</div></div></div>
+            <div style={{background:'rgba(10,122,88,0.07)',border:'0.5px solid rgba(10,122,88,0.22)',borderRadius:10,padding:'11px 14px',display:'flex',alignItems:'center',gap:10}}><span>✓</span><div><div style={{fontSize:13,fontWeight:500,color:'#0A7A58'}}>Drive conectado</div><div style={{fontSize:11,color:MUTED}}>{lastSync?'Última sync: '+fmtDT(lastSync):'Sin sincronizar todavía'}</div>
+                  {expires_at&&expires_at<Date.now()+300000&&<div style={{fontSize:10,color:'#956010',marginTop:2}}>⚠ Token próximo a expirar — reconecta</div>}</div></div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
               {[{l:'↑ Subir a Drive',a:upload,b:'u',v:'green'},{l:'↓ Bajar de Drive',a:download,b:'d',v:'default'}].map(({l,a,b,v})=>(<div key={l} style={{background:'#F9F8F5',border:'0.5px solid '+BDR,borderRadius:10,padding:14}}><div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:10}}>{l}</div><Btn variant={v} onClick={a} disabled={!!busy} full small>{busy===b?'…':l}</Btn></div>))}
             </div>
@@ -2674,6 +2675,22 @@ const App=()=>{
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 
+</script>
+
+<script>
+if('serviceWorker' in navigator){
+  // Inline service worker as blob URL so it works from any path
+  const swCode = `
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => clients.claim());
+self.addEventListener('fetch', e => e.respondWith(fetch(e.request)));
+`;
+  const blob = new Blob([swCode], {type: 'application/javascript'});
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl, {scope: './'})
+    .then(() => console.log('SW registered'))
+    .catch(e => console.log('SW error', e));
+}
 </script>
 </body>
 </html>
