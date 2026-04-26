@@ -44,7 +44,6 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
 </head>
 <body>
 <div id="root"><div style="height:100vh;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6B6963">Cargando Unstuck…</div></div>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module">import*as d from'https://esm.sh/docx@8.5.0';window.__docx=d;window.dispatchEvent(new Event('docxReady'));</script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -1511,48 +1510,46 @@ const doPush=async(customExercise,customReto,currentProject,plainTxt,uid)=>{
 const getOrigin=()=>{try{const o=window.location.origin;return o&&o!=='null'?o:''}catch{return''}};
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata';
 
-// Wait for GIS library to load
-const waitGIS=()=>new Promise((ok,fail)=>{
-  if(window.google?.accounts?.oauth2){ok();return;}
-  let tries=0;
-  const iv=setInterval(()=>{
-    if(window.google?.accounts?.oauth2){clearInterval(iv);ok();}
-    else if(++tries>40){clearInterval(iv);fail(new Error('GIS no cargado'));}
-  },250);
-});
-
-// Get token using GIS — works on mobile PWA without popup
+// OAuth via redirect — most compatible with mobile PWAs
+// Returns a promise that resolves with {token, expires_at}
+// Uses sessionStorage to store pending auth state
 const oauthPopup=cid=>new Promise((res,rej)=>{
-  waitGIS().then(()=>{
-    const client=window.google.accounts.oauth2.initTokenClient({
-      client_id:cid,
-      scope:DRIVE_SCOPE,
-      callback:(resp)=>{
-        if(resp.error){rej(new Error(resp.error));return;}
-        res({token:resp.access_token,expires_at:Date.now()+(parseInt(resp.expires_in)||3600)*1000});
-      },
-      error_callback:(err)=>rej(new Error(err?.type||'oauth_error')),
-    });
-    client.requestAccessToken({prompt:'consent'});
-  }).catch(rej);
+  if(!cid){rej(new Error('no_client_id'));return;}
+  const origin=getOrigin();
+  if(!origin){rej(new Error('no_origin'));return;}
+  // Build redirect URI — current page
+  const redirectUri=origin+window.location.pathname;
+  // Store callback in sessionStorage so we can resolve after redirect
+  sessionStorage.setItem('drive_pending_cid',cid);
+  sessionStorage.setItem('drive_pending_redirect',redirectUri);
+  // Redirect to Google OAuth
+  const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({
+    client_id:cid,
+    redirect_uri:redirectUri,
+    response_type:'token',
+    scope:DRIVE_SCOPE,
+    prompt:'consent',
+  });
+  window.location.href=url;
+  // Promise never resolves here — page will reload after redirect
+  // Resolution happens in checkOAuthRedirect() below
 });
 
-// Silent re-auth (no prompt) — for auto-reconnect on load
-const silentAuth=cid=>new Promise((res,rej)=>{
-  waitGIS().then(()=>{
-    const client=window.google.accounts.oauth2.initTokenClient({
-      client_id:cid,
-      scope:DRIVE_SCOPE,
-      prompt:'',
-      callback:(resp)=>{
-        if(resp.error){rej(new Error(resp.error));return;}
-        res({token:resp.access_token,expires_at:Date.now()+(parseInt(resp.expires_in)||3600)*1000});
-      },
-      error_callback:(err)=>rej(new Error(err?.type||'oauth_error')),
-    });
-    client.requestAccessToken();
-  }).catch(rej);
-});
+// Check if we're returning from OAuth redirect — call on app load
+const checkOAuthRedirect=()=>{
+  const hash=window.location.hash;
+  if(!hash||!hash.includes('access_token'))return null;
+  const params=new URLSearchParams(hash.slice(1));
+  const token=params.get('access_token');
+  const expiresIn=parseInt(params.get('expires_in')||'3600');
+  if(!token)return null;
+  // Clean URL
+  history.replaceState(null,'',window.location.pathname);
+  const cid=sessionStorage.getItem('drive_pending_cid')||'';
+  sessionStorage.removeItem('drive_pending_cid');
+  sessionStorage.removeItem('drive_pending_redirect');
+  return{token,expires_at:Date.now()+expiresIn*1000,clientId:cid};
+};
 
 const df=async(url,opts,tok)=>{
   const r=await fetch(url,{...opts,headers:{Authorization:'Bearer '+tok,...(opts?.headers||{})}});
@@ -1572,11 +1569,9 @@ const driveDownload=async(id,tok)=>{
 const driveUpload=async(name,content,fid,tok)=>{
   const data=JSON.stringify(content);
   if(fid){
-    // Update existing file — simple PATCH
     return df('https://www.googleapis.com/upload/drive/v3/files/'+fid+'?uploadType=media',
       {method:'PATCH',headers:{'Content-Type':'application/json'},body:data},tok);
   }else{
-    // Create new file in appDataFolder — multipart with FormData
     const meta=JSON.stringify({name,mimeType:'application/json',parents:['appDataFolder']});
     const form=new FormData();
     form.append('metadata',new Blob([meta],{type:'application/json'}));
@@ -1585,6 +1580,7 @@ const driveUpload=async(name,content,fid,tok)=>{
       {method:'POST',body:form},tok);
   }
 };
+
 
 /* ─── DOCX ───────────────────────────────────────── */
 const waitDocx=()=>new Promise(r=>{if(window.__docx){r(window.__docx);return}window.addEventListener('docxReady',()=>r(window.__docx),{once:true});setTimeout(()=>r(window.__docx||null),8000)});
@@ -2310,7 +2306,19 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const [status,setStatus]=useState(null);const [busy,setBusy]=useState(null);
   const origin=getOrigin();
   const AC={info:{bg:'rgba(26,115,232,0.07)',bd:'rgba(26,115,232,0.22)',c:'#1A73E8'},success:{bg:'rgba(10,122,88,0.07)',bd:'rgba(10,122,88,0.22)',c:'#0A7A58'},warn:{bg:'rgba(149,96,16,0.07)',bd:'rgba(149,96,16,0.22)',c:'#956010'},error:{bg:'rgba(197,34,31,0.07)',bd:'rgba(197,34,31,0.22)',c:'#C5221F'}};
-  const connect=async()=>{if(!cid.trim()||!origin){setStatus({t:'error',m:'Introduce el Client ID y sirve el archivo desde HTTP.'});return}setBusy('c');setStatus(null);try{const auth=await oauthPopup(cid.trim());onUpdate({...driveState,...auth,driveUser:{email:''},clientId:cid.trim()});setStatus({t:'success',m:'¡Drive conectado!'});}catch(e){const msgs={blocked:'El navegador bloqueó el popup.',closed:'Cancelaste.',no_origin:'Usa HTTP, no file://.',timeout:'Tiempo agotado.'};setStatus({t:'error',m:msgs[e.message]||e.message})}finally{setBusy(null)}};
+  const connect=async()=>{if(!cid.trim()){setStatus({t:'error',m:'Introduce el Client ID.'});return}setBusy('c');setStatus(null);try{
+    // Save uid so we can restore after redirect
+    sessionStorage.setItem('drive_pending_uid',user.id);
+    // Save current drive state so it's preserved after redirect
+    S.set('flujo:drive:'+user.id,{...driveState,clientId:cid.trim()});
+    await oauthPopup(cid.trim());
+    // Page will redirect — code below won't run
+  }catch(e){
+    sessionStorage.removeItem('drive_pending_uid');
+    const msgs={no_client_id:'Introduce el Client ID.',no_origin:'Usa HTTP, no file://.'};
+    setStatus({t:'error',m:msgs[e.message]||e.message});
+    setBusy(false);
+  }};
   const upload=async()=>{
     const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);
     const refs=S.list('flujo:'+user.id+':ref:').map(k=>S.get(k)).filter(Boolean);
@@ -2674,6 +2682,20 @@ const App=()=>{
     setDriveState(S.get('flujo:drive:'+u.id)||{});
   };
 
+  useEffect(()=>{
+    // Check if returning from Google OAuth redirect
+    const auth=checkOAuthRedirect();
+    if(auth){
+      // Find which user was connecting (stored in sessionStorage before redirect)
+      const pendingUid=sessionStorage.getItem('drive_pending_uid');
+      sessionStorage.removeItem('drive_pending_uid');
+      if(pendingUid){
+        const ns={...S.get('flujo:drive:'+pendingUid)||{},...auth};
+        S.set('flujo:drive:'+pendingUid,ns);
+        setDriveRefresh(r=>r+1);
+      }
+    }
+  },[]);
   useEffect(()=>{if(currentUser)loadUser(currentUser)},[currentUser?.id]);
 
   const createUser=u=>{const updated=[...users,u];setUsers(updated);S.set('flujo:users',updated);S.set('flujo:current',u.id);setCurrentUser(u);setLibrary([]);setReflections([]);setDriveState({});setView('dashboard')};
