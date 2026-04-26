@@ -1520,8 +1520,7 @@ const oauthPopup=cid=>new Promise((res,rej)=>{
   // Build redirect URI — current page
   const redirectUri=origin+window.location.pathname;
   // Store callback in sessionStorage so we can resolve after redirect
-  sessionStorage.setItem('drive_pending_cid',cid);
-  sessionStorage.setItem('drive_pending_redirect',redirectUri);
+  // Use localStorage — more reliable than sessionStorage in PWA
   // Redirect to Google OAuth
   const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({
     client_id:cid,
@@ -1543,12 +1542,12 @@ const checkOAuthRedirect=()=>{
   const token=params.get('access_token');
   const expiresIn=parseInt(params.get('expires_in')||'3600');
   if(!token)return null;
-  // Clean URL
+  // Clean URL so token doesn't stay in address bar
   history.replaceState(null,'',window.location.pathname);
-  const cid=sessionStorage.getItem('drive_pending_cid')||'';
-  sessionStorage.removeItem('drive_pending_cid');
-  sessionStorage.removeItem('drive_pending_redirect');
-  return{token,expires_at:Date.now()+expiresIn*1000,clientId:cid};
+  // Get uid from localStorage (survives PWA reload)
+  const uid=localStorage.getItem('flujo_oauth_uid')||'';
+  localStorage.removeItem('flujo_oauth_uid');
+  return{token,expires_at:Date.now()+expiresIn*1000,_uid:uid};
 };
 
 const df=async(url,opts,tok)=>{
@@ -1852,7 +1851,7 @@ const Dashboard=({user,library,reflections,onContinue,onSwitchUser,onLogout,onDe
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Biblioteca</button>
           <button onClick={()=>setShowDrivePanel(true)} style={{background:driveConnected?'rgba(26,115,232,0.08)':'rgba(0,0,0,0.04)',border:'0.5px solid '+(driveConnected?'rgba(26,115,232,0.25)':BDR),borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,fontWeight:500,color:driveConnected?'#1A73E8':MUTED}}>
             <span>⇅</span>
-            <span>{driveConnected?'Drive conectado':'Conectar Drive'}</span>
+            <span>{driveConnected?'Drive ✓':'Conectar Drive'}</span>
           </button>
           <button onClick={()=>setShowKeyPanel(true)} style={{background:getApiKey(user.id)?'rgba(10,122,88,0.08)':'rgba(85,80,184,0.07)',border:'0.5px solid '+(getApiKey(user.id)?'rgba(10,122,88,0.25)':'rgba(85,80,184,0.25)'),borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,fontWeight:500,color:getApiKey(user.id)?'#0A7A58':'#5550B8'}}>
             <span>{getApiKey(user.id)?'✦':'⚙'}</span>
@@ -2306,19 +2305,22 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const [status,setStatus]=useState(null);const [busy,setBusy]=useState(null);
   const origin=getOrigin();
   const AC={info:{bg:'rgba(26,115,232,0.07)',bd:'rgba(26,115,232,0.22)',c:'#1A73E8'},success:{bg:'rgba(10,122,88,0.07)',bd:'rgba(10,122,88,0.22)',c:'#0A7A58'},warn:{bg:'rgba(149,96,16,0.07)',bd:'rgba(149,96,16,0.22)',c:'#956010'},error:{bg:'rgba(197,34,31,0.07)',bd:'rgba(197,34,31,0.22)',c:'#C5221F'}};
-  const connect=async()=>{if(!cid.trim()){setStatus({t:'error',m:'Introduce el Client ID.'});return}setBusy('c');setStatus(null);try{
-    // Save uid so we can restore after redirect
-    sessionStorage.setItem('drive_pending_uid',user.id);
-    // Save current drive state so it's preserved after redirect
-    S.set('flujo:drive:'+user.id,{...driveState,clientId:cid.trim()});
-    await oauthPopup(cid.trim());
-    // Page will redirect — code below won't run
-  }catch(e){
-    sessionStorage.removeItem('drive_pending_uid');
-    const msgs={no_client_id:'Introduce el Client ID.',no_origin:'Usa HTTP, no file://.'};
-    setStatus({t:'error',m:msgs[e.message]||e.message});
-    setBusy(false);
-  }};
+  const connect=async()=>{
+    const cidTrim=cid.trim();
+    if(!cidTrim){setStatus({t:'error',m:'Introduce el Client ID.'});return}
+    setBusy('c');setStatus(null);
+    // Persist clientId and uid BEFORE redirect (localStorage survives page reload, sessionStorage may not in PWA)
+    S.set('flujo:drive:'+user.id,{...driveState,clientId:cidTrim});
+    localStorage.setItem('flujo_oauth_uid',user.id);
+    try{
+      await oauthPopup(cidTrim);
+    }catch(e){
+      localStorage.removeItem('flujo_oauth_uid');
+      const msgs={no_client_id:'Introduce el Client ID.',no_origin:'Usa HTTP, no file://.'};
+      setStatus({t:'error',m:msgs[e.message]||e.message});
+      setBusy(false);
+    }
+  };
   const upload=async()=>{
     const lib=S.list('flujo:'+user.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);
     const refs=S.list('flujo:'+user.id+':ref:').map(k=>S.get(k)).filter(Boolean);
@@ -2670,6 +2672,39 @@ const App=()=>{
   const [sessionData,setSessionData]=useState(null);
   const [showExLibrary,setShowExLibrary]=useState(false);
 
+  // Auto-sync with Drive: download on load, upload on session end
+  const autoSyncDown=async(u)=>{
+    const ds=S.get('flujo:drive:'+u.id)||{};
+    if(!ds.token||ds.expires_at<Date.now()+30000)return; // not connected or expired
+    try{
+      const f=await driveFindFile('flujo_'+u.id+'.json',ds.token);
+      if(!f)return;
+      const data=await driveDownload(f.id,ds.token);
+      if(data?.library?.length){const merged=mergeLibs(S.list('flujo:'+u.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean),data.library);merged.forEach(e=>S.set('flujo:'+u.id+':'+e.id,e));}
+      if(data?.refs?.length)data.refs.forEach(r=>S.set('flujo:'+u.id+':ref:'+r.id,r));
+      if(data?.extra){
+        if(data.extra.projects?.length)S.set('flujo:'+u.id+':projects',data.extra.projects);
+        if(data.extra.lastProject)S.set('flujo:'+u.id+':lastProject',data.extra.lastProject);
+        if(data.extra.lessonsRead?.length)S.set('flujo:'+u.id+':lessons_read',data.extra.lessonsRead);
+      }
+    }catch(e){console.log('Auto-sync down error:',e.message);}
+  };
+
+  const autoSyncUp=async(u)=>{
+    const ds=S.get('flujo:drive:'+u.id)||{};
+    if(!ds.token||ds.expires_at<Date.now()+30000)return;
+    try{
+      const lib=S.list('flujo:'+u.id+':').filter(k=>!k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&!k.includes(':check:')&&!k.includes(':reto:')&&!k.includes(':projects')&&!k.includes(':lastProject')&&!k.includes(':lessons_read')&&!k.includes(':apikey')&&!k.includes(':pin')).map(k=>S.get(k)).filter(Boolean);
+      const refs=S.list('flujo:'+u.id+':ref:').map(k=>S.get(k)).filter(Boolean);
+      const extra={projects:S.get('flujo:'+u.id+':projects')||[],lastProject:S.get('flujo:'+u.id+':lastProject')||null,lessonsRead:S.get('flujo:'+u.id+':lessons_read')||[]};
+      const pin=S.get('flujo:'+u.id+':pin')||null;
+      const backup={version:2,userId:u.id,profile:u,pin,library:lib,refs,extra,syncedAt:Date.now()};
+      const fid=ds.fileId||null;
+      const r=await driveUpload('flujo_'+u.id+'.json',backup,fid,ds.token);
+      if(r?.id)S.set('flujo:drive:'+u.id,{...ds,fileId:r.id,lastSync:Date.now()});
+    }catch(e){console.log('Auto-sync up error:',e.message);}
+  };
+
   const loadUser=u=>{
     const lib=S.list('flujo:'+u.id+':').filter(k=>
       !k.includes(':drive')&&!k.includes(':mood')&&!k.includes(':ref')&&
@@ -2685,34 +2720,44 @@ const App=()=>{
   useEffect(()=>{
     // Check if returning from Google OAuth redirect
     const auth=checkOAuthRedirect();
-    if(auth){
-      // Find which user was connecting (stored in sessionStorage before redirect)
-      const pendingUid=sessionStorage.getItem('drive_pending_uid');
-      sessionStorage.removeItem('drive_pending_uid');
-      if(pendingUid){
-        const ns={...S.get('flujo:drive:'+pendingUid)||{},...auth};
-        S.set('flujo:drive:'+pendingUid,ns);
-        setDriveRefresh(r=>r+1);
-      }
+    if(auth&&auth._uid){
+      const uid=auth._uid;
+      const existing=S.get('flujo:drive:'+uid)||{};
+      const ns={...existing,...auth};
+      delete ns._uid;
+      S.set('flujo:drive:'+uid,ns);
+      // Restore the user session automatically after redirect
+      const allUsers=S.get('flujo:users')||[];
+      const u=allUsers.find(x=>x.id===uid);
+      if(u){doLoginUser(u);}
+      setDriveRefresh(r=>r+1);
     }
   },[]);
   useEffect(()=>{if(currentUser)loadUser(currentUser)},[currentUser?.id]);
 
-  const createUser=u=>{const updated=[...users,u];setUsers(updated);S.set('flujo:users',updated);S.set('flujo:current',u.id);setCurrentUser(u);setLibrary([]);setReflections([]);setDriveState({});setView('dashboard')};
+  const createUser=u=>{const updated=[...users,u];setUsers(updated);S.set('flujo:users',updated);setLibrary([]);setReflections([]);setDriveState({});doLoginUser(u);};
+  const doLoginUser=async(u)=>{
+    S.set('flujo:current',u.id);
+    setCurrentUser(u);
+    setView('dashboard');
+    // Auto-download from Drive on login
+    await autoSyncDown(u);
+    loadUser(u);
+  };
+
   const selectUser=u=>{
     const stored=S.get('flujo:'+u.id+':pin');
     if(stored&&currentUser&&currentUser.id!==u.id){
-      // switching between users — need PIN
       setPendingSwitch(u);setSwitchPin('');setSwitchPinError(false);
     } else {
-      S.set('flujo:current',u.id);setCurrentUser(u);setView('dashboard');
+      doLoginUser(u);
     }
   };
   const confirmSwitchPin=()=>{
     const stored=S.get('flujo:'+pendingSwitch.id+':pin');
     if(switchPin===stored){
-      S.set('flujo:current',pendingSwitch.id);setCurrentUser(pendingSwitch);
-      setView('dashboard');setPendingSwitch(null);setSwitchPin('');
+      setPendingSwitch(null);setSwitchPin('');
+      doLoginUser(pendingSwitch);
     } else {setSwitchPinError(true);setSwitchPin('');}
   };
   const logout=()=>{S.set('flujo:current',null);setCurrentUser(null)};
@@ -2722,7 +2767,12 @@ const App=()=>{
   const goToBriefing=e=>{setEnergy(e);setView('briefing')};
   const startSession=cfg=>{setSessionConfig(cfg);setView('editor')};
   const finishDay=data=>{setSessionData(data);setView('postSession')};
-  const completeReflection=ref=>{if(ref){S.set('flujo:'+currentUser.id+':ref:'+ref.id,ref);setReflections(prev=>[ref,...prev])}setView('dashboard');loadUser(currentUser)};
+  const completeReflection=async ref=>{
+    if(ref){S.set('flujo:'+currentUser.id+':ref:'+ref.id,ref);setReflections(prev=>[ref,...prev]);}
+    setView('dashboard');loadUser(currentUser);
+    // Auto-upload to Drive after session ends
+    await autoSyncUp(currentUser);
+  };
 
   if(!currentUser)return <UserSelect users={users} onSelect={selectUser} onCreate={createUser} rememberedId={rememberedId}/>;
 
