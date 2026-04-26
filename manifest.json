@@ -1,7 +1,7 @@
 {
   "name": "Unstuck",
   "short_name": "Unstuck",
-  "start_url": "/unstuck/index.html",
+  "start_url": ".",
   "scope": "/unstuck/",
   "display": "standalone",
   "background_color": "#F4F2ED",
