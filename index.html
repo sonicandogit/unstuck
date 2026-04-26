@@ -1508,14 +1508,48 @@ const doPush=async(customExercise,customReto,currentProject,plainTxt,uid)=>{
 
 /* ─── GOOGLE DRIVE ────────────────────────────────── */
 const getOrigin=()=>{try{const o=window.location.origin;return o&&o!=='null'?o:''}catch{return''}};
-const getRedirectUri=()=>{try{const u=new URL(window.location.href);return u.origin+u.pathname}catch{return getOrigin()}};
+const getRedirectUri=()=>{
+  try{
+    const u=new URL(window.location.href);
+    // Always use the base path without query/hash
+    return u.origin+u.pathname;
+  }catch{return getOrigin()}
+};
 const oauthPopup=cid=>new Promise((res,rej)=>{
-  const ru=getRedirectUri();if(!ru){rej(new Error('no_origin'));return}
-  const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:cid,redirect_uri:ru,response_type:'token',scope:'https://www.googleapis.com/auth/drive.file',prompt:'consent'});
-  const p=window.open(url,'gdrive','width=500,height=640,scrollbars=yes');
+  const ru=getRedirectUri();
+  if(!ru){rej(new Error('no_origin'));return}
+  const url='https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({
+    client_id:cid,
+    redirect_uri:ru,
+    response_type:'token',
+    scope:'https://www.googleapis.com/auth/drive.file',
+    prompt:'consent',
+    include_granted_scopes:'true'
+  });
+  const p=window.open(url,'gdrive','width=520,height=660,scrollbars=yes,resizable=yes');
   if(!p){rej(new Error('blocked'));return}
-  const iv=setInterval(()=>{try{if(p.closed){clearInterval(iv);rej(new Error('closed'));return}try{const h=p.location.hash;if(h&&h.includes('access_token')){const q=new URLSearchParams(h.slice(1));clearInterval(iv);p.close();res({token:q.get('access_token'),expires_at:Date.now()+parseInt(q.get('expires_in')||'3600')*1000})}}catch{}}catch(e){clearInterval(iv);rej(e)}},250);
-  setTimeout(()=>{clearInterval(iv);try{p.close()}catch{};rej(new Error('timeout'))},300000);
+  let done=false;
+  const iv=setInterval(()=>{
+    if(done)return;
+    try{
+      if(p.closed){clearInterval(iv);if(!done)rej(new Error('closed'));return}
+      try{
+        const h=p.location.hash||'';
+        const s=p.location.search||'';
+        const src=h.includes('access_token')?h.slice(1):s.slice(1);
+        if(src&&src.includes('access_token')){
+          const q=new URLSearchParams(src);
+          const tok=q.get('access_token');
+          if(tok){done=true;clearInterval(iv);p.close();res({token:tok,expires_at:Date.now()+parseInt(q.get('expires_in')||'3600')*1000})}
+        }
+        if(h.includes('error')||s.includes('error')){
+          const q=new URLSearchParams(h.slice(1)||s.slice(1));
+          done=true;clearInterval(iv);p.close();rej(new Error(q.get('error')||'oauth_error'));
+        }
+      }catch{}
+    }catch(e){clearInterval(iv);rej(e)}
+  },300);
+  setTimeout(()=>{clearInterval(iv);if(!done){done=true;try{p.close()}catch{};rej(new Error('timeout'))}},300000);
 });
 const df=async(url,opts,tok)=>{const r=await fetch(url,{...opts,headers:{Authorization:'Bearer '+tok,...(opts?.headers||{})}});if(r.status===401)throw Object.assign(new Error('expired'),{code:401});if(!r.ok)throw new Error('Drive '+r.status);return r.status===204?null:r.json()};
 const driveUI=tok=>df('https://www.googleapis.com/oauth2/v2/userinfo',{},tok);
@@ -2296,7 +2330,12 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
             {sc&&<div style={{background:'#F9F8F5',border:'0.5px solid '+BDR,borderRadius:10,padding:14}}><div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>Reconectar</div><Btn variant="blue" onClick={connect} disabled={!!busy}>{busy==='c'?'Conectando…':'Reconectar con Google'}</Btn></div>}
             {[{n:1,t:'Crea un proyecto en Google Cloud',c:<><p style={{fontSize:12,color:MUTED,lineHeight:1.7}}>Ve a <a href="https://console.cloud.google.com/projectcreate" target="_blank" style={{color:'#1A73E8'}}>console.cloud.google.com/projectcreate</a> y pulsa Crear.</p><div style={{marginTop:10}}><Btn variant="primary" onClick={()=>setStep(2)} small>Proyecto creado →</Btn></div></>},
               {n:2,t:'Activa la Drive API',c:<><p style={{fontSize:12,color:MUTED,lineHeight:1.7}}>Abre la <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" style={{color:'#1A73E8'}}>Drive API</a> y haz clic en Habilitar.</p><div style={{display:'flex',gap:6,marginTop:10}}><Btn onClick={()=>setStep(1)} small>← Atrás</Btn><Btn variant="primary" onClick={()=>setStep(3)} small>Activada →</Btn></div></>},
-              {n:3,t:'Crea credenciales OAuth',c:<><ol style={{fontSize:12,color:MUTED,lineHeight:1.9,paddingLeft:18}}><li>Ve a <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" style={{color:'#1A73E8'}}>Pantalla de consentimiento</a> → Externo → Crear.</li><li>Credenciales → Crear → ID cliente OAuth → Aplicación web.</li><li>Añade en Orígenes JS autorizados:</li></ol><div style={{background:'rgba(0,0,0,0.04)',borderRadius:7,padding:'6px 10px',margin:'8px 0',display:'flex',alignItems:'center',gap:8}}><code style={{fontSize:11,wordBreak:'break-all'}}>{origin||'(usa HTTP, no file://)'}</code>{origin&&<button onClick={()=>navigator.clipboard?.writeText(origin)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 7px',fontSize:10,cursor:'pointer',color:MUTED}}>Copiar</button>}</div><div style={{display:'flex',gap:6,marginTop:8}}><Btn onClick={()=>setStep(2)} small>← Atrás</Btn><Btn variant="primary" onClick={()=>setStep(4)} small>Listo →</Btn></div></>},
+              {n:3,t:'Crea credenciales OAuth',c:<><ol style={{fontSize:12,color:MUTED,lineHeight:1.9,paddingLeft:18}}><li>Ve a <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" style={{color:'#1A73E8'}}>Pantalla de consentimiento</a> → Externo → Crear.</li><li>Credenciales → Crear → ID cliente OAuth → Aplicación web.</li><li>Añade en Orígenes JS autorizados:</li></ol><div style={{background:'rgba(0,0,0,0.04)',borderRadius:7,padding:'6px 10px',margin:'4px 0',display:'flex',flexDirection:'column',gap:4}}>
+                      <div style={{fontSize:10,color:FAINT,marginBottom:2}}>Origen (Orígenes JS autorizados):</div>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}><code style={{fontSize:10,wordBreak:'break-all',flex:1}}>{origin||'(usa HTTP)'}</code>{origin&&<button onClick={()=>navigator.clipboard?.writeText(origin)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 7px',fontSize:10,cursor:'pointer',color:MUTED,flexShrink:0}}>Copiar</button>}</div>
+                      <div style={{fontSize:10,color:FAINT,marginTop:2}}>URI redirección:</div>
+                      <div style={{display:'flex',alignItems:'center',gap:6}}><code style={{fontSize:10,wordBreak:'break-all',flex:1}}>{getRedirectUri()||'(usa HTTP)'}</code>{getRedirectUri()&&<button onClick={()=>navigator.clipboard?.writeText(getRedirectUri())} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 7px',fontSize:10,cursor:'pointer',color:MUTED,flexShrink:0}}>Copiar</button>}</div>
+                    </div><div style={{display:'flex',gap:6,marginTop:8}}><Btn onClick={()=>setStep(2)} small>← Atrás</Btn><Btn variant="primary" onClick={()=>setStep(4)} small>Listo →</Btn></div></>},
               {n:4,t:'Pega tu Client ID',c:<><input type="text" value={cid} onChange={e=>setCid(e.target.value)} placeholder="1234….apps.googleusercontent.com" style={{marginBottom:10,width:'100%'}}/><div style={{display:'flex',gap:6}}><Btn onClick={()=>setStep(3)} small>← Atrás</Btn><Btn variant="blue" onClick={connect} disabled={!!busy||!cid.trim()}>{busy==='c'?'Conectando…':'🔑 Conectar con Google'}</Btn></div>{busy==='c'&&<div style={{marginTop:10,background:'rgba(26,115,232,0.07)',border:'0.5px solid rgba(26,115,232,0.22)',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#1A73E8'}}>Autoriza en la ventana de Google.</div>}</>},
             ].map(({n,t,c})=>(<div key={n} style={{display:'flex',gap:12,opacity:step===n?1:step>n?0.55:0.3}}><div style={{flexShrink:0,width:24,height:24,borderRadius:'50%',background:step>n?'#0A7A58':step===n?TXT:'rgba(26,25,22,0.1)',display:'flex',alignItems:'center',justifyContent:'center',color:step>=n?'#fff':MUTED,fontSize:step>n?12:10,fontWeight:600}}>{step>n?'✓':n}</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:step===n?8:0}}>{t}</div>{step===n&&c}</div></div>))}
           </>)}
@@ -2679,17 +2718,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 
 <script>
 if('serviceWorker' in navigator){
-  // Inline service worker as blob URL so it works from any path
-  const swCode = `
-self.addEventListener('install', e => self.skipWaiting());
-self.addEventListener('activate', e => clients.claim());
-self.addEventListener('fetch', e => e.respondWith(fetch(e.request)));
-`;
-  const blob = new Blob([swCode], {type: 'application/javascript'});
-  const swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl, {scope: './'})
-    .then(() => console.log('SW registered'))
-    .catch(e => console.log('SW error', e));
+  navigator.serviceWorker.register('./sw.js')
+    .then(r=>console.log('SW ok',r.scope))
+    .catch(e=>console.log('SW fail',e));
 }
 </script>
 </body>
