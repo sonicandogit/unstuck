@@ -1,5 +1,5 @@
-// Unstuck Service Worker v2
-const CACHE = 'unstuck-v2';
+// Unstuck Service Worker v3
+const CACHE = 'unstuck-v3';
 
 self.addEventListener('install', e => {
   e.waitUntil(
