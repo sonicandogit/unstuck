@@ -1847,8 +1847,10 @@ const AuthScreen=({onAuth})=>{
         const meta={name:name.trim(),color_idx:ci,accent:c.accent,bg:c.bg,text_col:c.txt,initials:initials(name)};
         const {user}=await DB.signUp(email.trim(),password,meta);
         if(user){
-          await DB.upsertProfile({id:user.id,...meta});
-          onAuth({id:user.id,...meta});
+          // Trigger creates profile automatically — wait briefly then read it
+          await new Promise(r=>setTimeout(r,800));
+          const profile=await DB.getProfile(user.id);
+          onAuth(profile||{id:user.id,...meta});
         }
       }else{
         const {user}=await DB.signIn(email.trim(),password);
