@@ -1344,13 +1344,7 @@ const S={
   del:k=>{try{localStorage.removeItem(k)}catch{}},
   list:p=>Object.keys(localStorage).filter(k=>k.startsWith(p)),
 };
-// Version reset: clear all data if version changed
-const APP_VERSION='v2-pin';
-if(S.get('flujo:version')!==APP_VERSION){
-  const keys=[...Object.keys(localStorage)].filter(k=>k.startsWith('flujo:'));
-  keys.forEach(k=>localStorage.removeItem(k));
-  S.set('flujo:version',APP_VERSION);
-}
+// localStorage used only for local cache (Drive state, API keys, mood)
 const EXERCISE_BANK={
   low:[
     {id:'obs1',title:'Escribe lo que ves',family:'Observación',
@@ -1693,7 +1687,7 @@ const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes',
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
 const ratingMsg=v=>{if(v<=2)return'fue duro';if(v<=4)return'costó arrancar';if(v<=6)return'razonable';if(v<=8)return'bien';return'en el flujo ✦'};
 const computeStats=(library,reflections)=>{
-  const totalWords=library.reduce((s,e)=>s+(e.wordCount||0),0);
+  const totalWords=library.reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
   const dates=[...new Set(library.map(e=>e.date))].filter(Boolean).sort().reverse();
   let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
   for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/(864e5));if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
@@ -1997,6 +1991,9 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showTeams,setShowTeams]=useState(false);
   const [showSendChallenge,setShowSendChallenge]=useState(false);
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
+  const [showChallengesHistory,setShowChallengesHistory]=useState(false);
+  const [showProfile,setShowProfile]=useState(false);
+  const [readingEntry,setReadingEntry]=useState(null);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
 
   const stats=useMemo(()=>computeStats(library,reflections),[library,reflections]);
@@ -2011,6 +2008,9 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   return(
     <div style={{height:'100vh',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
 
+      {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
+      {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
+      {readingEntry&&<ReadingModal entry={readingEntry} reflection={reflections.find(r=>(r.session_title||r.sessionTitle)===readingEntry.title&&r.date===readingEntry.date)} onClose={()=>setReadingEntry(null)} onExport={()=>{const ref=reflections.find(r=>(r.session_title||r.sessionTitle)===readingEntry.title&&r.date===readingEntry.date);exportDocx(readingEntry,FONTS[readingEntry.font_idx||readingEntry.fontIdx||0]?.docx||'Georgia',readingEntry.editor_size||readingEntry.editorSize||17,ref?.feedback||'');}}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)}/>}
@@ -2022,6 +2022,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Biblioteca</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Equipos</button>
           <button onClick={()=>setShowSendChallenge(true)} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#A82020',cursor:'pointer',fontWeight:500}}>⏱ Retar</button>
+          <button onClick={()=>setShowChallengesHistory(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📨</button>
+          <button onClick={()=>setShowProfile(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👤</button>
 
           <button onClick={()=>exportZip(user,library,reflections,projects)} title="Descargar copia de seguridad (.zip)" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,color:MUTED}}>
             ↓ Backup
@@ -2092,6 +2094,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               <div style={{textAlign:'center'}}>
                 <div style={{fontSize:36,fontWeight:700,color:'#956010',letterSpacing:'-0.02em'}}>{stats.streak}</div>
                 <div style={{fontSize:11,color:MUTED}}>días seguidos</div>
+                {stats.streak>=7&&<div style={{fontSize:10,color:'#956010',marginTop:2}}>🔥 ¡semana completa!</div>}
+                {stats.streak>=30&&<div style={{fontSize:10,color:'#A82020',marginTop:2}}>⚡ ¡un mes seguido!</div>}
               </div>
               <div style={{flex:1}}>
                 <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
@@ -2106,6 +2110,9 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
             </div>
           )}
         </div>
+
+        {/* Stats chart */}
+        {library.length>=3&&<StatsChart library={library}/>}
 
         {/* Stats */}
         <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:8}}>
@@ -2361,8 +2368,8 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   // feedback is manual — no auto-trigger
 
   const save=()=>{
-    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,sessionTitle:sessionData.title,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'?feedback:''};
-    S.set('flujo:'+user.id+':ref:'+r.id,r);onComplete(r);
+    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'?feedback:''};
+    onComplete(r);
   };
 
   const parseLines=txt=>{if(!txt)return[];return txt.split('\n+').map(l=>l.trim()).filter(Boolean).map(l=>({n:l.match(/^(\d)\./)?l.match(/^(\d)\./)[1]:null,t:l.replace(/^\d\.\s*/,'')}))};
@@ -2438,7 +2445,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 };
 
 /* ─── EXERCISE LIBRARY ───────────────────────────── */
-const ExerciseLibrary=({user,library,reflections,onClose})=>{
+const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntry})=>{
   const [tab,setTab]=useState('checks');
   const checks=library.filter(e=>e.sk==='check').sort((a,b)=>b.ts-a.ts);
   const retos=library.filter(e=>e.sk==='reto').sort((a,b)=>b.ts-a.ts);
@@ -2470,7 +2477,9 @@ const ExerciseLibrary=({user,library,reflections,onClose})=>{
                   </div>
                   <div style={{display:'flex',gap:6,flexShrink:0}}>
                     {ref&&<span style={{background:ref.rating>=7?'rgba(10,122,88,0.1)':'rgba(0,0,0,0.05)',color:ref.rating>=7?'#0A7A58':MUTED,borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:500}}>{ref.rating}/10</span>}
-                    <button onClick={()=>{const ref=getRef(e);exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
+                    <button onClick={()=>setReadingEntry&&setReadingEntry(e)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>Leer</button>
+                    <button onClick={()=>{const ref=getRef(e);exportDocx(e,FONTS[e.font_idx||e.fontIdx||0]?.docx||'Georgia',e.editor_size||e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
+                    <button onClick={()=>{if(window.confirm('¿Eliminar "'+e.title+'"?'))onDelete&&onDelete(e.id)}} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:6,padding:'3px 8px',fontSize:11,color:'rgba(197,34,31,0.5)',cursor:'pointer'}}>✕</button>
                   </div>
                 </div>
                 {e.plain&&<div style={{padding:'0 16px 10px 33px',fontSize:12,color:'rgba(26,25,22,0.5)',lineHeight:1.6,fontStyle:'italic',overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical'}}>{e.plain.slice(0,300)}</div>}
@@ -2592,7 +2601,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const [bold,setBold]=useState(false);const [italic,setItalic]=useState(false);const [under,setUnder]=useState(false);const [align,setAlign]=useState('left');
   const [idleLimit,setIdleLimit]=useState(20);const [limChars,setLimChars]=useState(30);const [limDels,setLimDels]=useState(5);
   const [delsLeft,setDelsLeft]=useState(5);const [charsInDel,setCharsInDel]=useState(0);
-  const [showLib,setShowLib]=useState(false);const [showDrive,setShowDrive]=useState(false);const [showPanel,setShowPanel]=useState(false);const [showUserMenu,setShowUserMenu]=useState(false);
+  const [showLib,setShowLib]=useState(false);const [showDrive,setShowDrive]=useState(false);const [showUserMenu,setShowUserMenu]=useState(false);
 
   const edRef=useRef(null);const prevLen=useRef(0);const isDel=useRef(false);const lastSaved=useRef('');
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
@@ -2613,9 +2622,25 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const timerDur=sk==='check'?7*60:null; // reto & proyecto: no countdown
   const sessionXP=customExercise?.xp||80;
 
-  const NS=k=>'flujo:'+user.id+':'+k;
+
   const resetLim=(d=limDels)=>{isDel.current=false;setCharsInDel(0);setDelsLeft(d)};
-  const buildEntry=()=>({id:sk+'_'+Date.now(),ts:Date.now(),sk,date:today(),sessionLabel:headerFamily,title:headerTitle,html:edRef.current?.innerHTML||'',plain:plainTxt,wordCount:wc,elapsed,fontIdx,editorSize:sz,alignDir:align,weekId:sessionConfig.weekId||null,projectId:currentProject?.id||null});
+  const buildEntry=()=>{
+    const id=sk+'_'+Date.now();
+    return {
+      id,ts:Date.now(),sk,date:today(),
+      session_label:headerFamily,sessionLabel:headerFamily,
+      title:headerTitle,
+      html:edRef.current?.innerHTML||'',
+      plain:plainTxt,
+      word_count:wc,wordCount:wc,
+      elapsed,
+      font_idx:fontIdx,fontIdx,
+      editor_size:sz,editorSize:sz,
+      align_dir:align,alignDir:align,
+      week_id:sessionConfig.weekId||null,weekId:sessionConfig.weekId||null,
+      project_id:currentProject?.id||null,projectId:currentProject?.id||null,
+    };
+  };
 
   const saveNow=async(auto=false)=>{
     if(!plainTxt.trim())return;setSaveStatus('saving');
@@ -2647,24 +2672,47 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const el=edRef.current;
     const blocks=Array.from(el.children).filter(b=>b.nodeType===1&&b.tagName!=='BR');
     if(ab!=='tunel'){
-      blocks.forEach(b=>{b.style.filter='';b.style.opacity='';b.style.transition='';b.style.pointerEvents='';b.style.userSelect='';});
+      blocks.forEach(b=>{b.style.filter='';b.style.opacity='1';b.style.transition='';b.style.pointerEvents='';b.style.userSelect='';b.style.color='';});
       return;
     }
     if(!blocks.length)return;
+    // Find which block has the cursor
     let curIdx=blocks.length-1;
-    try{const sel=window.getSelection();if(sel?.rangeCount){const anchor=sel.anchorNode;blocks.forEach((b,i)=>{if(b===anchor||b.contains(anchor))curIdx=i})}}catch{}
+    try{
+      const sel=window.getSelection();
+      if(sel&&sel.rangeCount>0){
+        const range=sel.getRangeAt(0);
+        const anchor=range.startContainer;
+        blocks.forEach((b,i)=>{
+          if(b===anchor||b.contains(anchor)||anchor===b.parentNode)curIdx=i;
+        });
+      }
+    }catch{}
     blocks.forEach((b,i)=>{
       const isCur=i===curIdx;
-      b.style.filter=isCur?'none':'blur(2.8px)';
-      b.style.opacity=isCur?'1':'0.22';
-      b.style.transition='filter 0.4s ease,opacity 0.4s ease';
-      b.style.pointerEvents=isCur?'':'none';
-      b.style.userSelect=isCur?'':'none';
-      if(isCur)b.scrollIntoView({block:'nearest',behavior:'smooth'});
+      b.style.filter=isCur?'none':'blur(3px)';
+      b.style.opacity=isCur?'1':'0.18';
+      b.style.transition='filter 0.35s ease,opacity 0.35s ease';
+      b.style.pointerEvents=isCur?'auto':'none';
+      b.style.userSelect=isCur?'text':'none';
+      b.style.color=isCur?'#1A1916':'rgba(26,25,22,0.4)';
+      if(isCur){
+        b.scrollIntoView({block:'center',behavior:'smooth'});
+      }
     });
   };
 
   useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p')},[]);
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const handler=e=>{
+      const mod=e.metaKey||e.ctrlKey;
+      if(mod&&e.key==='s'){e.preventDefault();if(started&&plainTxt.trim())saveNow(false);}
+      if(mod&&e.key==='Enter'){e.preventDefault();if(started)handleFinishDay();}
+    };
+    document.addEventListener('keydown',handler);
+    return()=>document.removeEventListener('keydown',handler);
+  },[started,plainTxt]);
   useEffect(()=>{clearInterval(tRef.current);if(running&&timerDur){tRef.current=setInterval(()=>setTimer(s=>{if(s<=1){clearInterval(tRef.current);setRunning(false);setDone(true);return 0}return s-1}),1000)}return()=>clearInterval(tRef.current)},[running,timerDur]);
   useEffect(()=>{clearInterval(eRef.current);if(running)eRef.current=setInterval(()=>setElapsed(e=>e+1),1000);return()=>clearInterval(eRef.current)},[running]);
   useEffect(()=>{clearInterval(iRef.current);if(ab==='presion'&&running){iRef.current=setInterval(()=>setIdle(s=>{const n=s+1;if(n>=idleLimit-5)setIdleWarn(true);if(n>=idleLimit){const el=edRef.current;if(el){const bs=Array.from(el.querySelectorAll('p,div')).filter(e=>e.innerText?.trim());if(bs.length>1)bs[bs.length-1].remove();else{const ls=el.innerText.trimEnd().split('\n');if(ls.length>1){ls.pop();el.innerText=ls.join('\n')}else el.innerHTML=''}const np=el.innerText||'';prevLen.current=np.length;setPlainTxt(np);setWc(np.trim()?np.trim().split(/\s+/).filter(Boolean).length:0)}setIdleWarn(false);return 0}return n}),1000)}return()=>clearInterval(iRef.current)},[ab,running,idleLimit]);
@@ -2726,7 +2774,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             <button onClick={()=>{onLogout();setShowUserMenu(false)}} style={{display:'block',width:'100%',background:'transparent',border:'none',padding:'8px 12px',fontSize:12,color:MUTED,cursor:'pointer',textAlign:'left'}}>Cambiar usuario</button>
           </div>}
         </div>
-        <button onClick={()=>setShowPanel(v=>!v)} className="desk-only" style={{background:showPanel?'rgba(0,0,0,0.06)':'transparent',border:'0.5px solid '+BDR,color:showPanel?TXT:MUTED,fontSize:11,padding:'3px 7px',borderRadius:6,cursor:'pointer',flexShrink:0}}>Panel</button>
+
       </div>
 
       <div style={{display:'flex',flex:1,minHeight:0}}>
@@ -2803,7 +2851,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           </div>
           {/* BOTTOM BAR */}
           <div style={{height:36,borderTop:'0.5px solid '+BDR,background:'#F9F8F5',display:'flex',alignItems:'center',padding:'0 10px',gap:6,flexShrink:0}}>
-            <span style={{fontSize:13,fontWeight:500,color:wc>0?TXT:FAINT}}>{wc}</span><span style={{fontSize:11,color:FAINT}}>pal</span>
+            <span style={{fontSize:16,fontWeight:600,color:wc>0?headerAccent:FAINT,letterSpacing:'-0.02em'}}>{wc}</span><span style={{fontSize:11,color:FAINT,marginLeft:3}}>palabras</span>
             <div style={{width:1,height:9,background:BDR}}/>
             {wpm>0&&<><span style={{fontSize:11,color:FAINT}}>{wpm}/min</span><div style={{width:1,height:9,background:BDR}}/></>}
             <span style={{fontSize:11,color:started?headerAccent:FAINT}}>{started?fmt(elapsed):'—'}</span>
@@ -2814,7 +2862,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         </div>
 
         {/* SIDE PANEL */}
-        {showPanel&&<div className="desk-only" style={{width:190,borderLeft:'0.5px solid '+BDR,background:'#F4F2ED',overflow:'auto',flexShrink:0}}>
+        <div style={{width:200,borderLeft:'0.5px solid '+BDR,background:'#F4F2ED',overflow:'auto',flexShrink:0,display:window.innerWidth<600?'none':'block'}}>
           <div style={{padding:12}}>
             {/* Exercise description */}
             {(customExercise||customReto)&&<div style={{marginBottom:12}}>
@@ -2841,8 +2889,12 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:7}}>Sesión</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginBottom:12}}>{[{l:'Palabras',v:wc},{l:'Tiempo',v:elapsed>0?fmt(elapsed):'—'},{l:'Vel.',v:wpm>0?wpm+'/m':'—'},{l:'XP',v:sessionXP}].map(st=>(<div key={st.l} style={{background:'rgba(0,0,0,0.04)',borderRadius:7,padding:7,textAlign:'center'}}><div style={{fontSize:13,fontWeight:500,color:TXT}}>{st.v}</div><div style={{fontSize:9,color:FAINT,marginTop:1}}>{st.l}</div></div>))}</div>
             <button id="push-btn" onClick={()=>doPush(customExercise,customReto,currentProject,plainTxt,user.id)} style={{width:'100%',background:'rgba(85,80,184,0.07)',border:'0.5px solid rgba(85,80,184,0.2)',borderRadius:8,padding:9,color:'#5550B8',fontSize:11,cursor:'pointer',textAlign:'left',lineHeight:1.5}}>✦ Pedir impulso a Claude</button>
+            <div style={{marginTop:10,padding:'8px 10px',background:'rgba(0,0,0,0.03)',borderRadius:7,fontSize:10,color:FAINT,lineHeight:1.8}}>
+              <div>⌘S · Guardar</div>
+              <div>⌘↵ · Terminar sesión</div>
+            </div>
           </div>
-        </div>}
+        </div>
       </div>
     </div>
   );
@@ -2887,6 +2939,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
   const [running,setRunning]=useState(false);
   const [started,setStarted]=useState(false);
   const [published,setPublished]=useState(false);
+  const [publishedEntry,setPublishedEntry]=useState(null);
   const [elapsed,setElapsed]=useState(0);
   const [saveStatus,setSaveStatus]=useState('idle');
   const edRef=useRef(null);
@@ -2943,6 +2996,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
       setSaveStatus('saving');
       await saveEntry(entry);
       setSaveStatus('saved');
+      setPublishedEntry(entry);
       setPublished(true);
     }catch(e){setSaveStatus('error');console.error(e);}
   };
@@ -2962,7 +3016,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
       <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginBottom:24}}>
         {words.map(w=><span key={w} style={{background:'rgba(10,122,88,0.1)',border:'0.5px solid rgba(10,122,88,0.3)',borderRadius:20,padding:'3px 12px',fontSize:12,color:'#0A7A58',fontWeight:500,textDecoration:'line-through'}}>✓ {w}</span>)}
       </div>
-      <Btn variant="primary" onClick={onFinish}>Volver al dashboard →</Btn>
+      <Btn variant="primary" onClick={()=>onFinish(publishedEntry?.id)}>Volver al dashboard →</Btn>
     </div>
   );
 
@@ -3505,7 +3559,8 @@ const TeamDetail=({user,team,onBack,onInvite})=>{
   const [proposalTitle,setProposalTitle]=useState('');
   const [proposalDesc,setProposalDesc]=useState('');
   const [loading,setLoading]=useState(true);
-  const [sharing,setSharing]=useState(null); // entry being shared
+  const [sharing,setSharing]=useState(null);
+  const [readingModal,setReadingModal]=useState(null); // entry being shared
 
   const activeChallenge=challenges.find(c=>c.active);
   const weekNum=Math.floor(Date.now()/(7*24*3600*1000));
@@ -3562,6 +3617,7 @@ const TeamDetail=({user,team,onBack,onInvite})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:'#F4F2ED',zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      {readingModal&&<ReadingModal entry={readingModal} onClose={()=>setReadingModal(null)} onExport={()=>exportDocx(readingModal,'Georgia',17,'')}/>}
       {/* Share modal */}
       {sharing&&<div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)setSharing(null)}}>
         <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:440,maxHeight:'80vh',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 8px 40px rgba(0,0,0,0.15)'}}>
@@ -3655,7 +3711,10 @@ const TeamDetail=({user,team,onBack,onInvite})=>{
                     <div style={{fontSize:11,color:MUTED}}>{e.word_count||0} palabras · {(MODES.find(m=>m.id===e.mode)||MODES[0]).name}</div>
                   </div>
                 </div>
-                {e.plain&&<div style={{padding:'0 16px 12px 58px',fontSize:12,color:MUTED,lineHeight:1.7,fontStyle:'italic',overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical'}}>{e.plain.slice(0,300)}</div>}
+                {e.plain&&<>
+                  <div style={{padding:'0 16px 8px 58px',fontSize:12,color:MUTED,lineHeight:1.7,fontStyle:'italic',overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical'}}>{e.plain.slice(0,300)}</div>
+                  <div style={{padding:'0 16px 12px 58px'}}><button onClick={()=>setReadingModal(e)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>Leer completo</button></div>
+                </>}
               </div>
             ))}
           </div>
@@ -3680,6 +3739,225 @@ const TeamDetail=({user,team,onBack,onInvite})=>{
 };
 
 
+/* ─── STATS CHART ────────────────────────────────── */
+const StatsChart=({library})=>{
+  const weeks=12;
+  const now=new Date();
+  const data=Array.from({length:weeks},(_,i)=>{
+    const weekStart=new Date(now);
+    weekStart.setDate(now.getDate()-(weeks-1-i)*7);
+    weekStart.setHours(0,0,0,0);
+    const weekEnd=new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate()+7);
+    const label=weekStart.getDate()+'/'+(weekStart.getMonth()+1);
+    const words=library.filter(e=>{
+      const d=new Date(e.date);
+      return d>=weekStart&&d<weekEnd;
+    }).reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+    const sessions=library.filter(e=>{
+      const d=new Date(e.date);
+      return d>=weekStart&&d<weekEnd;
+    }).length;
+    return{label,words,sessions,isCurrentWeek:i===weeks-1};
+  });
+  const maxWords=Math.max(...data.map(d=>d.words),1);
+  const totalWords=library.reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+  const avgWordsPerSession=library.length?Math.round(totalWords/library.length):0;
+
+  return(
+    <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'18px 20px',marginBottom:16}}>
+      <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:500,color:TXT}}>Palabras por semana</div>
+        <div style={{fontSize:11,color:MUTED}}>últimas 12 semanas</div>
+      </div>
+      {/* Bar chart */}
+      <div style={{display:'flex',alignItems:'flex-end',gap:4,height:80,marginBottom:8}}>
+        {data.map((d,i)=>{
+          const h=maxWords>0?Math.max(2,(d.words/maxWords)*80):2;
+          return(
+            <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+              <div title={d.words+' palabras · '+d.sessions+' sesiones'} style={{
+                width:'100%',height:h,
+                background:d.isCurrentWeek?'#5550B8':d.words>0?'rgba(85,80,184,0.3)':'rgba(0,0,0,0.06)',
+                borderRadius:'3px 3px 0 0',
+                transition:'height 0.4s ease',
+                cursor:'default',
+                minHeight:2,
+              }}/>
+            </div>
+          );
+        })}
+      </div>
+      {/* X axis labels — only show a few */}
+      <div style={{display:'flex',gap:4}}>
+        {data.map((d,i)=>(
+          <div key={i} style={{flex:1,textAlign:'center',fontSize:9,color:d.isCurrentWeek?'#5550B8':FAINT}}>
+            {i===0||i===3||i===6||i===9||i===11?d.label:''}
+          </div>
+        ))}
+      </div>
+      {/* Summary stats */}
+      <div style={{display:'flex',gap:16,marginTop:14,paddingTop:12,borderTop:'0.5px solid '+BDR}}>
+        {[
+          {l:'Total palabras',v:totalWords>=1000?(totalWords/1000).toFixed(1)+'k':totalWords},
+          {l:'Sesiones',v:library.length},
+          {l:'Media por sesión',v:avgWordsPerSession+' pal.'},
+        ].map(s=>(
+          <div key={s.l}>
+            <div style={{fontSize:16,fontWeight:600,color:TXT,letterSpacing:'-0.02em'}}>{s.v}</div>
+            <div style={{fontSize:10,color:FAINT}}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ─── READING MODAL ──────────────────────────────── */
+const ReadingModal=({entry,reflection,onClose,onExport})=>{
+  if(!entry)return null;
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:680,maxHeight:'90vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
+        {/* Header */}
+        <div style={{padding:'16px 24px',borderBottom:'0.5px solid '+BDR,flexShrink:0,display:'flex',alignItems:'flex-start',gap:12}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,fontWeight:500,color:{check:'#0A7A58',reto:'#956010',proyecto:'#5550B8'}[entry.sk]||MUTED,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:3}}>{entry.session_label||entry.sessionLabel||entry.sk}</div>
+            <div style={{fontSize:18,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>{entry.title||'Sin título'}</div>
+            <div style={{fontSize:11,color:MUTED,marginTop:3}}>{fmtDate(entry.date)} · {entry.word_count||entry.wordCount||0} palabras</div>
+          </div>
+          <div style={{display:'flex',gap:6,flexShrink:0}}>
+            <button onClick={onExport} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
+            <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer',lineHeight:1}}>×</button>
+          </div>
+        </div>
+        {/* Text */}
+        <div style={{flex:1,overflowY:'auto',padding:'24px 32px'}}>
+          {entry.html
+            ?<div style={{fontFamily:'Lora,Georgia,serif',fontSize:17,lineHeight:1.85,color:TXT}} dangerouslySetInnerHTML={{__html:entry.html}}/>
+            :<div style={{fontFamily:'Lora,Georgia,serif',fontSize:17,lineHeight:1.85,color:TXT,whiteSpace:'pre-wrap'}}>{entry.plain||'(sin texto)'}</div>
+          }
+          {/* Reflection if exists */}
+          {reflection&&(reflection.notes||reflection.feedback)&&(
+            <div style={{marginTop:32,paddingTop:20,borderTop:'0.5px solid '+BDR}}>
+              {reflection.notes&&<>
+                <div style={{fontSize:11,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8}}>Lo que me llevé</div>
+                <p style={{fontSize:13,color:MUTED,lineHeight:1.75,fontStyle:'italic',marginBottom:16}}>"{reflection.notes}"</p>
+              </>}
+              {reflection.feedback&&<>
+                <div style={{fontSize:11,fontWeight:500,color:'#5550B8',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8}}>Revisión de Claude</div>
+                <div style={{fontSize:13,color:TXT,lineHeight:1.75,background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.15)',borderRadius:9,padding:'12px 16px',whiteSpace:'pre-wrap'}}>{reflection.feedback}</div>
+              </>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── SENT CHALLENGES HISTORY ─────────────────────── */
+const ChallengesHistory=({user,onClose})=>{
+  const [sent,setSent]=useState([]);
+  const [received,setReceived]=useState([]);
+  const [tab,setTab]=useState('sent');
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    const load=async()=>{
+      setLoading(true);
+      try{
+        const [s,r]=await Promise.all([DB.getSentChallenges(user.id),DB.getReceivedChallenges(user.id)]);
+        setSent(s);setReceived(r);
+      }catch(e){console.error(e);}
+      finally{setLoading(false);}
+    };
+    load();
+  },[]);
+
+  const items=tab==='sent'?sent:received;
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.4)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="fi" style={{background:'#F4F2ED',width:'100%',maxWidth:680,maxHeight:'80vh',borderRadius:'14px 14px 0 0',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 -4px 40px rgba(0,0,0,0.1)'}}>
+        <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
+          <div style={{fontSize:14,fontWeight:600,color:TXT}}>Retos contrareloj</div>
+          <div style={{flex:1}}/><button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+        </div>
+        <div style={{display:'flex',background:'#fff',borderBottom:'0.5px solid '+BDR,padding:'0 20px',flexShrink:0}}>
+          {[['sent','Enviados ('+sent.length+')'],['received','Recibidos ('+received.length+')']].map(([t,l])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{background:'transparent',border:'none',borderBottom:tab===t?'2px solid '+TXT:'2px solid transparent',padding:'10px 14px',fontSize:13,fontWeight:tab===t?500:400,color:tab===t?TXT:MUTED,cursor:'pointer',marginBottom:-1}}>{l}</button>
+          ))}
+        </div>
+        <div style={{flex:1,overflowY:'auto',padding:'12px 16px',display:'flex',flexDirection:'column',gap:8}}>
+          {loading&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Cargando…</div>}
+          {!loading&&items.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay retos aquí todavía.</div>}
+          {items.map(ch=>(
+            <div key={ch.id} style={{background:'#fff',border:'0.5px solid '+(ch.completed?'rgba(10,122,88,0.25)':BDR),borderRadius:11,padding:'12px 16px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:500,color:TXT}}>{tab==='sent'?'→ '+ch.from_name:'← '+ch.from_name}</div>
+                <div style={{flex:1}}/>
+                {ch.completed&&<span style={{fontSize:10,color:'#0A7A58',fontWeight:500,background:'rgba(10,122,88,0.1)',borderRadius:10,padding:'2px 8px'}}>✓ Completado</span>}
+                {!ch.completed&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Pendiente</span>}
+              </div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
+                {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
+              </div>
+              {ch.message&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginTop:6}}>"{ch.message}"</div>}
+              <div style={{fontSize:10,color:FAINT,marginTop:6}}>{fmtDate(ch.created_at?.slice?.(0,10)||'')}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── PUBLIC PROFILE ─────────────────────────────── */
+const PublicProfile=({user,library,reflections,onClose})=>{
+  const totalWords=library.reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+  const dates=[...new Set(library.map(e=>e.date))].filter(Boolean).sort().reverse();
+  let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
+  for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/864e5);if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
+  const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
+  const profileUrl=window.location.origin+window.location.pathname+'?user='+user.username;
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.4)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:380,boxShadow:'0 8px 50px rgba(0,0,0,0.15)',overflow:'hidden'}}>
+        {/* Header */}
+        <div style={{background:'linear-gradient(135deg,'+user.accent+'22,'+user.bg+')',padding:'28px 24px 20px',textAlign:'center',borderBottom:'0.5px solid '+BDR}}>
+          <div style={{width:64,height:64,borderRadius:'50%',background:user.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:700,color:user.accent,margin:'0 auto 12px',border:'3px solid '+user.accent+'33'}}>{user.initials}</div>
+          <div style={{fontSize:20,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>{user.name}</div>
+          <div style={{fontSize:13,color:MUTED,marginTop:2}}>@{user.username||'sin_username'}</div>
+        </div>
+        {/* Stats */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:1,background:BDR}}>
+          {[
+            {l:'Palabras',v:totalWords>=1000?(totalWords/1000).toFixed(1)+'k':totalWords},
+            {l:'Racha',v:streak+'d'},
+            {l:'Valoración',v:avgRating?avgRating+'/10':'—'},
+          ].map(s=>(
+            <div key={s.l} style={{background:'#fff',padding:'16px 12px',textAlign:'center'}}>
+              <div style={{fontSize:22,fontWeight:700,color:TXT,letterSpacing:'-0.02em'}}>{s.v}</div>
+              <div style={{fontSize:10,color:FAINT,marginTop:2}}>{s.l}</div>
+            </div>
+          ))}
+        </div>
+        {/* Share */}
+        <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
+          <div style={{fontSize:12,color:MUTED,textAlign:'center',lineHeight:1.5}}>Comparte tu perfil público con otros escritores</div>
+          <div style={{display:'flex',gap:8}}>
+            <div style={{flex:1,background:'rgba(0,0,0,0.04)',borderRadius:7,padding:'8px 10px',fontSize:11,color:MUTED,fontFamily:"'Courier New',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{profileUrl}</div>
+            <button onClick={()=>navigator.clipboard?.writeText(profileUrl).then(()=>alert('¡Copiado!'))} style={{background:TXT,border:'none',borderRadius:7,padding:'8px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer',flexShrink:0}}>Copiar</button>
+          </div>
+          <button onClick={onClose} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'9px',fontSize:13,color:MUTED,cursor:'pointer'}}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 /* ─── APP ROOT ─────────────────────────────────────── */
 const App=()=>{
   const [user,setUser]=useState(null);       // Supabase auth user merged with profile
@@ -3698,6 +3976,7 @@ const App=()=>{
 
   // ── Load user data from Supabase ──────────────────────────────────────────
   const loadUserData=async(uid)=>{
+    if(!uid)return;
     setSyncStatus('syncing');
     try{
       const [entries,refs,projs,lessons]=await Promise.all([
@@ -3719,6 +3998,9 @@ const App=()=>{
     }catch(e){
       console.error('loadUserData error',e);
       setSyncStatus('error');
+      // Fall back to offline cache
+      const cached=S.list('flujo:cache:'+uid+':').map(k=>S.get(k)).filter(Boolean).sort((a,b)=>b.ts-a.ts);
+      if(cached.length>0){setLibrary(cached);console.log('Loaded',cached.length,'entries from offline cache');}
     }
   };
 
@@ -3786,10 +4068,17 @@ const App=()=>{
   const saveEntry=async(entry)=>{
     if(!user)return;
     const e={...entry,user_id:user.id};
+    // Save to localStorage as offline cache first
+    S.set('flujo:cache:'+user.id+':'+e.id, e);
+    setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
     try{
       await DB.upsertEntry(e);
-      setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
-    }catch(err){console.error('save entry',err);}
+      // Remove from offline cache once synced
+      S.del('flujo:cache:'+user.id+':'+e.id);
+    }catch(err){
+      console.error('save entry - keeping in offline cache',err);
+      // Will sync next time
+    }
   };
 
   const deleteEntry=async(id)=>{
@@ -3835,7 +4124,7 @@ const App=()=>{
   if(view==='briefing')return<SessionBriefing user={user} energy={energy} library={library} projects={projects} saveProject={saveProject} onStart={startSession} onBack={()=>setView('dashboard')}/>;
 
   return<>
-    {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)}/>}
+    {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} setReadingEntry={undefined}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
       onOpenLibrary={()=>setShowExLibrary(true)} syncStatus={syncStatus}
