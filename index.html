@@ -1243,6 +1243,62 @@ const DB = {
     if (error) throw error;
     return data;
   },
+  // Public library
+  getPublicEntries: async (limit=30, offset=0) => {
+    const { data, error } = await getSB().from('entries')
+      .select('*, profiles(name, username, initials, accent, bg)')
+      .eq('visibility', 'abierto')
+      .not('plain', 'is', null)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+    return data || [];
+  },
+  getFriendsEntries: async (uid) => {
+    const { data, error } = await getSB().from('entries')
+      .select('*, profiles(name, username, initials, accent, bg)')
+      .eq('visibility', 'amigos')
+      .not('plain', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    return data || [];
+  },
+  updateVisibility: async (entryId, visibility) => {
+    const { error } = await getSB().from('entries').update({ visibility }).eq('id', entryId);
+    if (error) throw error;
+  },
+  // Follows
+  getFollowing: async (uid) => {
+    const { data, error } = await getSB().from('follows')
+      .select('following_id, profiles!follows_following_id_fkey(name, username, initials, accent, bg)')
+      .eq('follower_id', uid);
+    if (error) throw error;
+    return data || [];
+  },
+  getFollowers: async (uid) => {
+    const { data, error } = await getSB().from('follows')
+      .select('follower_id, profiles!follows_follower_id_fkey(name, username, initials, accent, bg)')
+      .eq('following_id', uid);
+    if (error) throw error;
+    return data || [];
+  },
+  follow: async (followerId, followingId) => {
+    const { error } = await getSB().from('follows')
+      .insert({ follower_id: followerId, following_id: followingId });
+    if (error) throw error;
+  },
+  unfollow: async (followerId, followingId) => {
+    const { error } = await getSB().from('follows')
+      .delete().eq('follower_id', followerId).eq('following_id', followingId);
+    if (error) throw error;
+  },
+  isFollowing: async (followerId, followingId) => {
+    const { data } = await getSB().from('follows')
+      .select('follower_id').eq('follower_id', followerId).eq('following_id', followingId).single();
+    return !!data;
+  },
+
   activateChallenge: async (id, groupId) => {
     await getSB().from('group_challenges').update({ active: false }).eq('group_id', groupId);
     const { error } = await getSB().from('group_challenges').update({ active: true }).eq('id', id);
@@ -1302,6 +1358,19 @@ const DB = {
   updateUsername: async (uid, username) => {
     const { error } = await getSB().from('profiles').update({ username }).eq('id', uid);
     if (error) throw error;
+  },
+  updateAvatar: async (uid, avatar) => {
+    const { error } = await getSB().from('profiles').update({ avatar }).eq('id', uid);
+    if (error) throw error;
+  },
+  searchUsers: async (query) => {
+    const q = query.startsWith('@') ? query.slice(1) : query;
+    const { data, error } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg, text_col, avatar')
+      .or(`username.ilike.${q}%,name.ilike.${q}%`)
+      .limit(20);
+    if (error) throw error;
+    return data || [];
   },
 
   // Direct challenges
@@ -1993,6 +2062,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showSendChallenge,setShowSendChallenge]=useState(false);
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
+  const [showBiblioteca,setShowBiblioteca]=useState(false);
+  const [showProfileSettings,setShowProfileSettings]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
   const [readingEntry,setReadingEntry]=useState(null);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
@@ -2009,6 +2080,9 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   return(
     <div style={{height:'100vh',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
 
+      {showProfileSettings&&<ProfileSettings user={user} onClose={()=>setShowProfileSettings(false)} onSave={updated=>{Object.assign(user,updated);setShowProfileSettings(false);}}/>}
+      {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
+        onVisibilityChange={(entryId,vis)=>setLibrary(prev=>prev.map(e=>e.id===entryId?{...e,visibility:vis}:e))}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} reflection={reflections.find(r=>(r.session_title||r.sessionTitle)===readingEntry.title&&r.date===readingEntry.date)} onClose={()=>setReadingEntry(null)} onExport={()=>{const ref=reflections.find(r=>(r.session_title||r.sessionTitle)===readingEntry.title&&r.date===readingEntry.date);exportDocx(readingEntry,FONTS[readingEntry.font_idx||readingEntry.fontIdx||0]?.docx||'Georgia',readingEntry.editor_size||readingEntry.editorSize||17,ref?.feedback||'');}}/>}
@@ -2020,11 +2094,15 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Unstuck</div>
         <div style={{flex:1}}/>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Biblioteca</button>
+          <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Lecciones</button>
+          <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📖 Biblioteca</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Equipos</button>
           <button onClick={()=>setShowSendChallenge(true)} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#A82020',cursor:'pointer',fontWeight:500}}>⏱ Retar</button>
           <button onClick={()=>setShowChallengesHistory(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📨</button>
-          <button onClick={()=>setShowProfile(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👤</button>
+          <button onClick={()=>setShowProfileSettings(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 6px',cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>
+            <UserAvatar user={user} size={22}/>
+            <span style={{fontSize:11,color:MUTED,maxWidth:60,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.name}</span>
+          </button>
 
           {syncStatus==='ok'&&<span style={{fontSize:10,color:'#0A7A58'}}>✓ Sincronizado</span>}
           <button onClick={onRefresh} title="Sincronizar con servidor" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 8px',cursor:'pointer',fontSize:12,color:MUTED}}>⟳</button>
@@ -2037,7 +2115,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           </button>
           <div style={{position:'relative'}}>
             <button onClick={()=>setShowUserMenu(v=>!v)} style={{display:'flex',alignItems:'center',gap:7,background:'transparent',border:'0.5px solid '+BDR,borderRadius:20,padding:'4px 10px 4px 6px',cursor:'pointer'}}>
-              <div style={{width:22,height:22,borderRadius:'50%',background:user.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:600,color:user.textCol}}>{user.initials}</div>
+              <UserAvatar user={user} size={22}/>
               <span style={{fontSize:12,fontWeight:500,color:TXT}}>{user.name}</span>
             </button>
             {showUserMenu&&<>
@@ -2140,7 +2218,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         {/* Lessons progress */}
         <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
           <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:8}}>
-            <div style={{fontSize:13,fontWeight:500,color:TXT}}>Biblioteca de teoría</div>
+            <div style={{fontSize:13,fontWeight:500,color:TXT}}>Lecciones de escritura</div>
             <div style={{fontSize:12,color:MUTED}}>{lessonsRead} <span style={{color:FAINT}}>/ 64 lecciones leídas</span></div>
           </div>
           <div style={{height:5,background:'rgba(0,0,0,0.07)',borderRadius:3,overflow:'hidden',marginBottom:8}}>
@@ -2178,6 +2256,16 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
 };
 
 /* ─── SESSION BRIEFING ───────────────────────────── */
+const SectionCard=({accent,tag,title,children})=>(
+  <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,overflow:'hidden',marginBottom:14}}>
+    <div style={{padding:'14px 18px 0'}}>
+      <div style={{fontSize:10,fontWeight:500,color:accent,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>{tag}</div>
+      <div style={{fontSize:16,fontWeight:600,color:TXT,letterSpacing:'-0.01em',marginBottom:12,fontFamily:'Lora,Georgia,serif'}}>{title}</div>
+    </div>
+    {children}
+  </div>
+);
+
 const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack})=>{
   const todayCheck=S.get('flujo:check:'+user.id+':'+today());
   const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
@@ -2213,15 +2301,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
   };
   const selectProject=p=>onStart({type:'proyecto',project:p});
 
-  const SectionCard=({accent,tag,title,children})=>(
-    <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,overflow:'hidden',marginBottom:14}}>
-      <div style={{padding:'14px 18px 0'}}>
-        <div style={{fontSize:10,fontWeight:500,color:accent,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>{tag}</div>
-        <div style={{fontSize:16,fontWeight:600,color:TXT,letterSpacing:'-0.01em',marginBottom:12,fontFamily:'Lora,Georgia,serif'}}>{title}</div>
-      </div>
-      {children}
-    </div>
-  );
+  // SectionCard defined outside — see below
 
   const openLeccion=r=>{
     setLeccionReto(r);setShowLeccion(true);
@@ -2273,7 +2353,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
               <>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
                   <ModeBadge modeId={reto.mode||'tunel'}/>
-                  <button onClick={()=>openLeccion(reto)} style={{background:'rgba(85,80,184,0.08)',border:'0.5px solid rgba(85,80,184,0.25)',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#5550B8',cursor:'pointer'}}>📖 Lección</button>
+                  <button onClick={()=>openLeccion(reto)} style={{background:'rgba(85,80,184,0.08)',border:'0.5px solid rgba(85,80,184,0.25)',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#5550B8',cursor:'pointer'}}>📖 Lecciones</button>
                   <button onClick={()=>{setRetoEdit({title:reto.titulo||reto.title,desc:reto.desc,goal:reto.goal});setEditingReto(true)}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 8px',fontSize:10,color:MUTED,cursor:'pointer'}}>✎ Personalizar</button>
                 </div>
                 <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:14}}>{reto.desc}</p>
@@ -3968,6 +4048,469 @@ const PublicProfile=({user,library,reflections,onClose})=>{
   );
 };
 
+
+/* ─── USER AVATAR ────────────────────────────────── */
+const UserAvatar=({user,size=36,onClick})=>{
+  const s={width:size,height:size,borderRadius:'50%',flexShrink:0,cursor:onClick?'pointer':'default'};
+  if(user?.avatar)return<img src={user.avatar} alt={user.name||''} onClick={onClick} style={{...s,objectFit:'cover',border:'0.5px solid '+BDR}}/>;
+  return<div onClick={onClick} style={{...s,background:user?.bg||'rgba(0,0,0,0.07)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.38,fontWeight:700,color:user?.accent||MUTED}}>{user?.initials||user?.name?.[0]?.toUpperCase()||'?'}</div>;
+};
+
+/* ─── PROFILE SETTINGS ───────────────────────────── */
+const ProfileSettings=({user,onClose,onSave})=>{
+  const [avatar,setAvatar]=useState(user.avatar||null);
+  const [name,setName]=useState(user.name||'');
+  const [username,setUsername]=useState(user.username||'');
+  const [checking,setChecking]=useState(false);
+  const [usernameOk,setUsernameOk]=useState(true);
+  const [usernameMsg,setUsernameMsg]=useState('');
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState('');
+
+  const pickAvatar=e=>{
+    const file=e.target.files[0];if(!file)return;
+    if(file.size>800000){setErr('La imagen debe pesar menos de 800KB');return;}
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      // Compress to max ~300KB by drawing on canvas
+      const img=new Image();
+      img.onload=()=>{
+        const canvas=document.createElement('canvas');
+        const MAX=400;
+        let w=img.width,h=img.height;
+        if(w>h){if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}}
+        else{if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}}
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        setAvatar(canvas.toDataURL('image/jpeg',0.82));
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const checkUsername=async(val)=>{
+    setUsername(val);setUsernameOk(false);setUsernameMsg('');
+    if(val===user.username){setUsernameOk(true);return;}
+    if(val.length<3){setUsernameMsg('Mínimo 3 caracteres');return;}
+    if(!/^[a-z0-9_]+$/.test(val)){setUsernameMsg('Solo letras minúsculas, números y _');return;}
+    setChecking(true);
+    try{
+      const r=await DB.searchByUsername(val);
+      const taken=r.find(u=>u.username===val&&u.id!==user.id);
+      if(taken){setUsernameMsg('Ya está en uso');}
+      else{setUsernameMsg('✓ Disponible');setUsernameOk(true);}
+    }catch{}
+    finally{setChecking(false);}
+  };
+
+  const save=async()=>{
+    if(!name.trim()){setErr('El nombre no puede estar vacío');return;}
+    setSaving(true);setErr('');
+    try{
+      const updates={name:name.trim(),avatar:avatar||null};
+      if(username!==user.username&&usernameOk)updates.username=username;
+      await getSB().from('profiles').update(updates).eq('id',user.id);
+      onSave({...user,...updates});
+      onClose();
+    }catch(e){setErr(e.message);}
+    finally{setSaving(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:400,maxHeight:'90vh',overflow:'auto',boxShadow:'0 8px 50px rgba(0,0,0,0.18)'}}>
+        <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Editar perfil</div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+        </div>
+        <div style={{padding:'20px',display:'flex',flexDirection:'column',gap:16}}>
+          {/* Avatar */}
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+            <div style={{position:'relative'}}>
+              <UserAvatar user={{...user,avatar}} size={80}/>
+              <label style={{position:'absolute',bottom:0,right:0,width:26,height:26,borderRadius:'50%',background:TXT,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:13,color:'#fff',border:'2px solid #fff'}}>
+                📷<input type="file" accept="image/*" onChange={pickAvatar} style={{display:'none'}}/>
+              </label>
+            </div>
+            {avatar&&avatar!==user.avatar&&<button onClick={()=>setAvatar(null)} style={{background:'transparent',border:'none',fontSize:11,color:MUTED,cursor:'pointer'}}>Quitar foto</button>}
+            <div style={{fontSize:11,color:FAINT}}>Máx. 800KB · Se comprime automáticamente</div>
+          </div>
+
+          {/* Name */}
+          <div>
+            <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:5}}>Nombre</div>
+            <input type="text" value={name} onChange={e=>setName(e.target.value)} style={{width:'100%'}}/>
+          </div>
+
+          {/* Username */}
+          <div>
+            <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:5}}>@Usuario</div>
+            <div style={{display:'flex',alignItems:'center',gap:4}}>
+              <span style={{fontSize:14,color:MUTED,fontWeight:500}}>@</span>
+              <input type="text" value={username} onChange={e=>checkUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,''))} style={{flex:1}}/>
+            </div>
+            {usernameMsg&&<div style={{fontSize:11,marginTop:4,color:usernameMsg.startsWith('✓')?'#0A7A58':'#956010'}}>{checking?'Comprobando…':usernameMsg}</div>}
+          </div>
+
+          {err&&<div style={{fontSize:12,color:'#C5221F',padding:'8px 11px',background:'rgba(197,34,31,0.06)',borderRadius:7}}>{err}</div>}
+
+          <div style={{display:'flex',gap:8}}>
+            <Btn onClick={onClose} variant="ghost" full>Cancelar</Btn>
+            <Btn onClick={save} variant="primary" disabled={saving||!name.trim()} full>{saving?'Guardando…':'Guardar cambios'}</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── USER SEARCH PANEL ──────────────────────────── */
+const UserSearchPanel=({user,following,onFollow,teams,onAddToTeam})=>{
+  const [query,setQuery]=useState('');
+  const [results,setResults]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [addingToTeam,setAddingToTeam]=useState(null);
+  const searchRef=React.useRef();
+
+  React.useEffect(()=>{
+    if(query.length<2){setResults([]);return;}
+    const t=setTimeout(async()=>{
+      setLoading(true);
+      try{const r=await DB.searchUsers(query);setResults(r.filter(u=>u.id!==user.id));}
+      catch(e){console.error(e);}
+      finally{setLoading(false);}
+    },300);
+    return()=>clearTimeout(t);
+  },[query]);
+
+  return(
+    <div style={{padding:'16px',display:'flex',flexDirection:'column',gap:12}}>
+      {/* Search input */}
+      <div style={{position:'relative'}}>
+        <input ref={searchRef} type="text" value={query} onChange={e=>setQuery(e.target.value)}
+          placeholder="Buscar por nombre o @usuario…"
+          style={{width:'100%',paddingLeft:32}}/>
+        <span style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:14,color:FAINT,pointerEvents:'none'}}>🔍</span>
+        {loading&&<span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',fontSize:11,color:MUTED}}>…</span>}
+      </div>
+
+      {query.length>0&&query.length<2&&<div style={{fontSize:12,color:FAINT,textAlign:'center'}}>Escribe al menos 2 caracteres</div>}
+      {query.length>=2&&!loading&&results.length===0&&<div style={{fontSize:12,color:MUTED,textAlign:'center',padding:16}}>No se encontraron usuarios</div>}
+
+      {/* Results */}
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {results.map(u=>{
+          const isFollowing=following.includes(u.id);
+          return(
+            <div key={u.id} style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,padding:'12px 16px',display:'flex',alignItems:'center',gap:12}}>
+              <UserAvatar user={u} size={42}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:500,color:TXT}}>{u.name}</div>
+                <div style={{fontSize:11,color:MUTED}}>@{u.username||'sin_usuario'}</div>
+              </div>
+              <div style={{display:'flex',gap:6,flexShrink:0,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                {/* Follow button */}
+                <button onClick={()=>onFollow(u.id,isFollowing)} style={{background:isFollowing?'rgba(0,0,0,0.05)':'rgba(85,80,184,0.08)',border:'0.5px solid '+(isFollowing?BDR:'rgba(85,80,184,0.3)'),borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:500,color:isFollowing?MUTED:'#5550B8',cursor:'pointer'}}>
+                  {isFollowing?'✓ Siguiendo':'Seguir'}
+                </button>
+                {/* Add to team */}
+                {teams&&teams.length>0&&<div style={{position:'relative'}}>
+                  <button onClick={()=>setAddingToTeam(addingToTeam===u.id?null:u.id)} style={{background:'rgba(10,122,88,0.07)',border:'0.5px solid rgba(10,122,88,0.25)',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:500,color:'#0A7A58',cursor:'pointer'}}>
+                    👥 Equipo
+                  </button>
+                  {addingToTeam===u.id&&<div className="fi" style={{position:'absolute',right:0,top:'calc(100% + 4px)',background:'#fff',border:'0.5px solid '+BDR,borderRadius:9,boxShadow:'0 4px 20px rgba(0,0,0,0.1)',overflow:'hidden',zIndex:10,minWidth:160}}>
+                    {teams.map(t=>(
+                      <button key={t.id} onClick={async()=>{
+                        try{
+                          const inv=await DB.createInvitation(t.id,null,user.id);
+                          const link=window.location.origin+window.location.pathname+'?team='+inv.code;
+                          navigator.clipboard?.writeText(link);
+                          alert('Enlace copiado para '+u.name+'\nCompártelo con él/ella');
+                        }catch(e){alert('Error: '+e.message);}
+                        setAddingToTeam(null);
+                      }} style={{display:'flex',alignItems:'center',gap:8,width:'100%',background:'transparent',border:'none',padding:'9px 12px',cursor:'pointer',fontSize:12,color:TXT,borderBottom:'0.5px solid '+BDR}}>
+                        <TeamAvatar team={t} size={20}/>
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>}
+                </div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Following list */}
+      {query.length===0&&following.length>0&&<>
+        <div style={{fontSize:11,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.07em',marginTop:4}}>A quién sigues</div>
+        <div style={{fontSize:12,color:MUTED}}>Busca a alguien para ver su perfil y gestionar tu seguimiento.</div>
+      </>}
+
+      {query.length===0&&following.length===0&&<div style={{textAlign:'center',padding:'24px 16px'}}>
+        <div style={{fontSize:28,marginBottom:10}}>🔍</div>
+        <div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:6}}>Busca escritores</div>
+        <div style={{fontSize:12,color:MUTED,lineHeight:1.65}}>Escribe un nombre o @usuario para encontrar a alguien. Puedes seguirles para ver sus textos "Amigos" o invitarles a un equipo.</div>
+      </div>}
+    </div>
+  );
+};
+
+/* ─── VISIBILITY BADGE ───────────────────────────── */
+const VisibilityBadge=({v,small})=>{
+  const cfg={
+    privado:{label:'Privado',icon:'🔒',bg:'rgba(0,0,0,0.05)',c:MUTED,bd:BDR},
+    amigos:{label:'Amigos',icon:'👥',bg:'rgba(85,80,184,0.07)',c:'#5550B8',bd:'rgba(85,80,184,0.25)'},
+    abierto:{label:'Abierto',icon:'🌐',bg:'rgba(10,122,88,0.07)',c:'#0A7A58',bd:'rgba(10,122,88,0.25)'},
+  }[v||'privado'];
+  return <span style={{display:'inline-flex',alignItems:'center',gap:4,background:cfg.bg,border:'0.5px solid '+cfg.bd,borderRadius:5,padding:small?'2px 7px':'3px 10px',fontSize:small?10:11,color:cfg.c,fontWeight:500}}>{cfg.icon} {cfg.label}</span>;
+};
+
+/* ─── VISIBILITY PICKER ──────────────────────────── */
+const VisibilityPicker=({value,onChange})=>{
+  const opts=[
+    {v:'privado',icon:'🔒',label:'Privado',desc:'Solo tú'},
+    {v:'amigos',icon:'👥',label:'Amigos',desc:'Seguidos mutuos'},
+    {v:'abierto',icon:'🌐',label:'Abierto',desc:'Todos los usuarios'},
+  ];
+  return(
+    <div style={{display:'flex',gap:6}}>
+      {opts.map(o=>(
+        <button key={o.v} onClick={()=>onChange(o.v)} style={{
+          flex:1,background:value===o.v?o.v==='abierto'?'rgba(10,122,88,0.08)':o.v==='amigos'?'rgba(85,80,184,0.08)':'rgba(0,0,0,0.05)':'transparent',
+          border:'0.5px solid '+(value===o.v?o.v==='abierto'?'rgba(10,122,88,0.3)':o.v==='amigos'?'rgba(85,80,184,0.3)':'rgba(0,0,0,0.2)':BDR),
+          borderRadius:8,padding:'8px 4px',cursor:'pointer',textAlign:'center',
+        }}>
+          <div style={{fontSize:16,marginBottom:2}}>{o.icon}</div>
+          <div style={{fontSize:11,fontWeight:value===o.v?600:400,color:value===o.v?TXT:MUTED}}>{o.label}</div>
+          <div style={{fontSize:9,color:FAINT}}>{o.desc}</div>
+        </button>
+      ))}
+    </div>
+  );
+};
+
+/* ─── MIS TEXTOS ─────────────────────────────────── */
+const MisTextos=({user,library,onVisibilityChange})=>{
+  const [filter,setFilter]=useState('all');
+  const [updating,setUpdating]=useState(null);
+  const [readEntry,setReadEntry]=useState(null);
+
+  const filtered=library.filter(e=>filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado'));
+
+  const changeVis=async(entry,vis)=>{
+    setUpdating(entry.id);
+    try{
+      await DB.updateVisibility(entry.id,vis);
+      onVisibilityChange(entry.id,vis);
+    }catch(e){alert('Error: '+e.message);}
+    finally{setUpdating(null);}
+  };
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
+      {readEntry&&<ReadingModal entry={readEntry} onClose={()=>setReadEntry(null)} onExport={()=>exportDocx(readEntry,'Georgia',17,'')}/>}
+      {/* Filter tabs */}
+      <div style={{display:'flex',gap:2,padding:'12px 16px 0',flexShrink:0}}>
+        {[['all','Todos'],['privado','Privados'],['amigos','Amigos'],['abierto','Abiertos']].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilter(v)} style={{background:filter===v?'rgba(0,0,0,0.07)':'transparent',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:filter===v?500:400,color:filter===v?TXT:MUTED,cursor:'pointer'}}>{l} {filter===v&&library.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length>0&&<span style={{fontSize:10,color:FAINT}}>({library.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length})</span>}</button>
+        ))}
+      </div>
+      {/* Entries */}
+      <div style={{flex:1,overflowY:'auto',padding:'10px 16px 24px',display:'flex',flexDirection:'column',gap:8}}>
+        {filtered.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay textos en esta categoría.</div>}
+        {filtered.map(e=>{
+          const vis=e.visibility||'privado';
+          const isUpdating=updating===e.id;
+          return(
+            <div key={e.id} style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,overflow:'hidden'}}>
+              {/* Entry header */}
+              <div style={{padding:'12px 16px',display:'flex',gap:10,alignItems:'flex-start'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
+                    <div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.title||'Sin título'}</div>
+                    <VisibilityBadge v={vis} small/>
+                  </div>
+                  <div style={{fontSize:11,color:MUTED}}>{e.date?.slice(0,10)||e.date} · {e.word_count||e.wordCount||0} palabras · {e.sk}</div>
+                </div>
+                <button onClick={()=>setReadEntry(e)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 9px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>Leer</button>
+              </div>
+              {/* Visibility picker */}
+              <div style={{padding:'0 16px 14px'}}>
+                <div style={{fontSize:10,color:FAINT,marginBottom:6}}>Visibilidad{isUpdating&&<span style={{marginLeft:6,color:'#5550B8'}}>Guardando…</span>}</div>
+                <VisibilityPicker value={vis} onChange={v=>changeVis(e,v)}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+/* ─── PUBLIC ENTRY CARD ──────────────────────────── */
+const PublicEntryCard=({entry,currentUser,onRead,onFollow,following})=>{
+  const author=entry.profiles;
+  const isMe=entry.user_id===currentUser?.id;
+  const isFollowing=following.includes(entry.user_id);
+
+  return(
+    <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,overflow:'hidden'}}>
+      {/* Author */}
+      <div style={{padding:'12px 16px 8px',display:'flex',alignItems:'center',gap:10}}>
+        <UserAvatar user={author} size={34}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:500,color:TXT}}>{author?.name||'Escritor'}</div>
+          <div style={{fontSize:11,color:MUTED}}>@{author?.username||'?'} · {entry.date?.slice(0,10)||entry.date}</div>
+        </div>
+        {!isMe&&<button onClick={()=>onFollow(entry.user_id,isFollowing)} style={{background:isFollowing?'rgba(0,0,0,0.05)':'rgba(85,80,184,0.08)',border:'0.5px solid '+(isFollowing?BDR:'rgba(85,80,184,0.3)'),borderRadius:6,padding:'4px 10px',fontSize:11,fontWeight:500,color:isFollowing?MUTED:'#5550B8',cursor:'pointer',flexShrink:0}}>
+          {isFollowing?'Siguiendo':'Seguir'}
+        </button>}
+      </div>
+      {/* Text */}
+      <div style={{padding:'0 16px 8px'}}>
+        <div style={{fontSize:14,fontWeight:500,color:TXT,marginBottom:4}}>{entry.title||'Sin título'}</div>
+        <div style={{fontSize:12,color:MUTED,lineHeight:1.7,display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{entry.plain?.slice(0,300)||''}</div>
+      </div>
+      {/* Footer */}
+      <div style={{padding:'8px 16px 12px',display:'flex',alignItems:'center',gap:8,borderTop:'0.5px solid '+BDR}}>
+        <span style={{fontSize:11,color:FAINT}}>{entry.word_count||entry.wordCount||0} palabras</span>
+        <span style={{fontSize:11,color:FAINT}}>·</span>
+        <span style={{fontSize:11,color:FAINT}}>{entry.sk}</span>
+        <div style={{flex:1}}/>
+        <button onClick={()=>onRead(entry)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>Leer completo</button>
+      </div>
+    </div>
+  );
+};
+
+/* ─── BIBLIOTECA SCREEN ──────────────────────────── */
+const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
+  const [tab,setTab]=useState('explorar'); // 'explorar'|'amigos'|'mis_textos'
+  const [publicEntries,setPublicEntries]=useState([]);
+  const [friendsEntries,setFriendsEntries]=useState([]);
+  const [following,setFollowing]=useState([]); // array of user_ids
+  const [loading,setLoading]=useState(false);
+  const [readEntry,setReadEntry]=useState(null);
+  const [page,setPage]=useState(0);
+  const [myTeams,setMyTeams]=useState([]);
+  const PER_PAGE=20;
+
+  const loadPublic=async(p=0)=>{
+    setLoading(true);
+    try{
+      const data=await DB.getPublicEntries(PER_PAGE,p*PER_PAGE);
+      setPublicEntries(prev=>p===0?data:[...prev,...data]);
+      setPage(p);
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
+
+  const loadFriends=async()=>{
+    setLoading(true);
+    try{const data=await DB.getFriendsEntries(user.id);setFriendsEntries(data);}
+    catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
+
+  const loadFollowing=async()=>{
+    try{
+      const data=await DB.getFollowing(user.id);
+      setFollowing(data.map(f=>f.following_id));
+    }catch(e){console.error(e);}
+  };
+
+  useEffect(()=>{
+    loadPublic(0);
+    loadFollowing();
+    DB.getMyGroups(user.id).then(setMyTeams).catch(()=>{});
+  },[]);
+
+  useEffect(()=>{
+    if(tab==='amigos')loadFriends();
+  },[tab]);
+
+  const handleFollow=async(targetId,isFollowing)=>{
+    try{
+      if(isFollowing){
+        await DB.unfollow(user.id,targetId);
+        setFollowing(prev=>prev.filter(id=>id!==targetId));
+      }else{
+        await DB.follow(user.id,targetId);
+        setFollowing(prev=>[...prev,targetId]);
+      }
+    }catch(e){alert('Error: '+e.message);}
+  };
+
+  const tabs=[
+    {id:'explorar',label:'Explorar',count:publicEntries.length},
+    {id:'amigos',label:'Amigos',count:friendsEntries.length},
+    {id:'buscar',label:'Buscar',count:0},
+    {id:'mis_textos',label:'Mis textos',count:library.length},
+  ];
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'#F4F2ED',zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      {readEntry&&<ReadingModal entry={readEntry} onClose={()=>setReadEntry(null)} onExport={()=>exportDocx(readEntry,'Georgia',17,'')}/>}
+
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
+        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Biblioteca</div>
+        <div style={{flex:1}}/>
+        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer',lineHeight:1}}>×</button>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:'flex',background:'#fff',borderBottom:'0.5px solid '+BDR,padding:'0 20px',flexShrink:0}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{background:'transparent',border:'none',borderBottom:tab===t.id?'2px solid '+TXT:'2px solid transparent',padding:'10px 14px',fontSize:13,fontWeight:tab===t.id?500:400,color:tab===t.id?TXT:MUTED,cursor:'pointer',marginBottom:-1,display:'flex',alignItems:'center',gap:5}}>
+            {t.label}
+            {t.count>0&&<span style={{fontSize:10,background:'rgba(0,0,0,0.07)',borderRadius:10,padding:'1px 6px',color:MUTED}}>{t.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{flex:1,overflowY:'auto',maxWidth:680,width:'100%',margin:'0 auto',padding:tab==='mis_textos'?0:'16px 16px 40px'}}>
+
+        {/* EXPLORAR */}
+        {tab==='explorar'&&<>
+          {loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando textos…</div>}
+          {!loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40}}>
+            <div style={{fontSize:32,marginBottom:12}}>📖</div>
+            <div style={{fontSize:14,fontWeight:500,color:TXT,marginBottom:6}}>La biblioteca está vacía</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.65}}>Nadie ha publicado textos todavía.<br/>Sé el primero — ve a "Mis textos" y cambia la visibilidad de alguno a "Abierto".</div>
+          </div>}
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {publicEntries.map(e=><PublicEntryCard key={e.id} entry={e} currentUser={user} onRead={setReadEntry} onFollow={handleFollow} following={following}/>)}
+          </div>
+          {publicEntries.length>=PER_PAGE&&<div style={{textAlign:'center',marginTop:16}}>
+            <Btn onClick={()=>loadPublic(page+1)} disabled={loading} variant="ghost">{loading?'Cargando…':'Ver más'}</Btn>
+          </div>}
+        </>}
+
+        {/* AMIGOS */}
+        {tab==='amigos'&&<>
+          {following.length===0&&<div style={{background:'rgba(85,80,184,0.05)',border:'0.5px solid rgba(85,80,184,0.2)',borderRadius:12,padding:'16px 20px',marginBottom:12,fontSize:13,color:'#5550B8',lineHeight:1.65}}>
+            Sigue a otros escritores desde la pestaña "Explorar" para ver aquí sus textos compartidos con amigos.
+          </div>}
+          {loading&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Cargando…</div>}
+          {!loading&&friendsEntries.length===0&&following.length>0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Tus amigos no han compartido textos contigo todavía.</div>}
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {friendsEntries.map(e=><PublicEntryCard key={e.id} entry={e} currentUser={user} onRead={setReadEntry} onFollow={handleFollow} following={following}/>)}
+          </div>
+        </>}
+
+        {/* BUSCAR */}
+        {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
+
+        {/* MIS TEXTOS */}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange}/>}
+      </div>
+    </div>
+  );
+};
 
 /* ─── APP ROOT ─────────────────────────────────────── */
 const App=()=>{
