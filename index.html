@@ -4631,9 +4631,23 @@ const App=()=>{
 
   const completeReflection=async(ref)=>{
     if(ref&&user){
+      setReflections(prev=>[ref,...prev.filter(r=>r.id!==ref.id)]);
+      const dbRef={
+        id:ref.id,
+        user_id:user.id,
+        rating:ref.rating||0,
+        notes:ref.notes||null,
+        feedback:ref.feedback||null,
+        sk:ref.sk||null,
+        session_title:ref.session_title||ref.sessionTitle||null,
+        word_count:ref.word_count||ref.wordCount||0,
+        elapsed:ref.elapsed||0,
+        mode:ref.mode||null,
+        date:ref.date||null,
+        ts:ref.ts||Date.now(),
+      };
       try{
-        await DB.upsertReflection({...ref,user_id:user.id});
-        setReflections(prev=>[ref,...prev.filter(r=>r.id!==ref.id)]);
+        await DB.upsertReflection(dbRef);
       }catch(e){console.error('save reflection',e);}
     }
     setView('dashboard');
@@ -4644,16 +4658,36 @@ const App=()=>{
   const saveEntry=async(entry)=>{
     if(!user)return;
     const e={...entry,user_id:user.id};
-    // Save to localStorage as offline cache first
+    // Save to localStorage as offline cache first (full object with camelCase)
     S.set('flujo:cache:'+user.id+':'+e.id, e);
     setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
+    // Strip to only DB column names before sending to Supabase
+    const dbEntry={
+      id:e.id,
+      user_id:e.user_id,
+      sk:e.sk||null,
+      title:e.title||null,
+      session_label:e.session_label||e.sessionLabel||null,
+      html:e.html||null,
+      plain:e.plain||null,
+      word_count:e.word_count||e.wordCount||0,
+      elapsed:e.elapsed||0,
+      font_idx:e.font_idx||e.fontIdx||0,
+      editor_size:e.editor_size||e.editorSize||17,
+      align_dir:e.align_dir||e.alignDir||'left',
+      week_id:e.week_id||e.weekId||null,
+      project_id:e.project_id||e.projectId||null,
+      date:e.date||null,
+      ts:e.ts||Date.now(),
+      visibility:e.visibility||'privado',
+      shared_group_id:e.shared_group_id||null,
+    };
     try{
-      await DB.upsertEntry(e);
+      await DB.upsertEntry(dbEntry);
       S.del('flujo:cache:'+user.id+':'+e.id);
     }catch(err){
       console.error('save entry error:',err?.message||err);
       setSyncStatus('error');
-      // Kept in offline cache — will retry on next load
     }
   };
 
@@ -4669,9 +4703,18 @@ const App=()=>{
   const saveProject=async(proj)=>{
     if(!user)return;
     const p={...proj,user_id:user.id};
+    setProjects(prev=>[p,...prev.filter(x=>x.id!==p.id)]);
+    const dbProj={
+      id:p.id,
+      user_id:p.user_id,
+      title:p.title||null,
+      type:p.type||null,
+      goal:p.goal||50000,
+      word_count:p.word_count||p.wordCount||0,
+      updated_at:p.updated_at||p.updatedAt||null,
+    };
     try{
-      await DB.upsertProject(p);
-      setProjects(prev=>[p,...prev.filter(x=>x.id!==p.id)]);
+      await DB.upsertProject(dbProj);
     }catch(e){console.error('save project',e);}
   };
 
