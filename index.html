@@ -1751,7 +1751,7 @@ const initials=n=>n.trim().split(' ').slice(0,2).map(w=>w[0]?.toUpperCase()||'')
 const fmt=s=>{if(s==null||s<0)return'—';return Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0')};
 const fmtTime=s=>{if(!s||s<=0)return'—';if(s<60)return s+'s';const hh=Math.floor(s/3600),mm=Math.floor((s%3600)/60);return hh>0?hh+'h '+mm+'m':mm+'m'};
 const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;try{segs=text.split(/(?<=[.!?…])\s+/).filter(s=>s.trim())}catch{segs=text.replace(/([.!?…])\s+/g,'$1\n').split('\n').filter(s=>s.trim())}let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
-const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id)||m.get(e.id).ts<e.ts)m.set(e.id,e)});return Array.from(m.values()).sort((a,b)=>b.ts-a.ts)};
+const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id)||m.get(e.id).ts<e.ts)m.set(e.id,e)});return Array.from(m.values()).sort((a,b)=>b.ts-a.tss)};
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
 const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return days[d.getDay()].charAt(0).toUpperCase()+days[d.getDay()].slice(1)+', '+d.getDate()};
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
@@ -1762,12 +1762,12 @@ const computeStats=(library,reflections)=>{
   let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
   for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/(864e5));if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
-  const thisWeek=library.filter(e=>new Date(e.date)>=weekAgo).length;
+  const thisWeek=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).length;
   const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
   const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
   const activeDates=new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
-  const weekElapsed=library.filter(e=>new Date(e.date)>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
+  const weekElapsed=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
   return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,totalElapsed};
 };
@@ -4533,10 +4533,6 @@ const App=()=>{
     if(!uid)return;
     setSyncStatus('syncing');
     try{
-      // Verify session is still valid before loading
-      const session=await DB.getSession();
-      if(!session){setSyncStatus('error');return;}
-
       const [entries,refs,projs,lessons]=await Promise.all([
         DB.getEntries(uid),
         DB.getReflections(uid),
@@ -4548,8 +4544,8 @@ const App=()=>{
       const lib=entries.map(e=>({
         ...e,
         id:e.id,
-        ts:e.ts||new Date(e.created_at||0).getTime(),
-        date:e.date,
+        ts:e.ts||new Date(e.created_at||e.date||0).getTime()||Date.now(),
+        date:e.date?.slice(0,10)||e.created_at?.slice(0,10)||'',
         title:e.title,
         sk:e.sk,
         word_count:e.word_count||e.wordCount||0,
