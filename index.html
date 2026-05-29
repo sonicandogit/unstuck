@@ -34,6 +34,7 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
 .fu{animation:fadeUp 0.22s ease forwards}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .fi{animation:fadeIn 0.18s ease forwards}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 /* Mobile */
 @media(max-width:600px){
   .desk-only{display:none!important}
@@ -1688,14 +1689,14 @@ const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check
 const ratingMsg=v=>{if(v<=2)return'fue duro';if(v<=4)return'costó arrancar';if(v<=6)return'razonable';if(v<=8)return'bien';return'en el flujo ✦'};
 const computeStats=(library,reflections)=>{
   const totalWords=library.reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
-  const dates=[...new Set(library.map(e=>e.date))].filter(Boolean).sort().reverse();
+  const dates=[...new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
   let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
   for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/(864e5));if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
   const thisWeek=library.filter(e=>new Date(e.date)>=weekAgo).length;
   const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
   const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
-  const activeDates=new Set(library.map(e=>e.date));
+  const activeDates=new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
   const weekElapsed=library.filter(e=>new Date(e.date)>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
@@ -2025,6 +2026,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <button onClick={()=>setShowChallengesHistory(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📨</button>
           <button onClick={()=>setShowProfile(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👤</button>
 
+          {syncStatus==='ok'&&<span style={{fontSize:10,color:'#0A7A58'}}>✓ Sincronizado</span>}
+          <button onClick={onRefresh} title="Sincronizar con servidor" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 8px',cursor:'pointer',fontSize:12,color:MUTED}}>⟳</button>
           <button onClick={()=>exportZip(user,library,reflections,projects)} title="Descargar copia de seguridad (.zip)" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,color:MUTED}}>
             ↓ Backup
           </button>
@@ -2052,6 +2055,14 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onDismiss={onDismissChallenge}/>
+        {syncStatus==='syncing'&&<div style={{background:'rgba(85,80,184,0.06)',border:'0.5px solid rgba(85,80,184,0.2)',borderRadius:10,padding:'10px 14px',marginBottom:12,display:'flex',alignItems:'center',gap:8,fontSize:12,color:'#5550B8'}}>
+          <span style={{animation:'spin 1s linear infinite',display:'inline-block'}}>⟳</span>
+          Cargando tus textos…
+        </div>}
+        {syncStatus==='error'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:10,padding:'10px 14px',marginBottom:12,display:'flex',alignItems:'center',gap:8,fontSize:12,color:'#C5221F'}}>
+          ⚠ Error al cargar datos.
+          <button onClick={onRefresh} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.3)',borderRadius:6,padding:'2px 8px',fontSize:11,color:'#C5221F',cursor:'pointer',marginLeft:'auto'}}>Reintentar</button>
+        </div>}
         <div className="fu" style={{marginBottom:28}}>
           <div style={{fontSize:24,fontWeight:600,color:TXT,letterSpacing:'-0.02em',marginBottom:4,fontFamily:'Lora,Georgia,serif'}}>{getGreeting(user.name)}</div>
           <div style={{fontSize:13,color:MUTED}}>{getSubline()}</div>
@@ -3979,16 +3990,38 @@ const App=()=>{
     if(!uid)return;
     setSyncStatus('syncing');
     try{
+      // Verify session is still valid before loading
+      const session=await DB.getSession();
+      if(!session){setSyncStatus('error');return;}
+
       const [entries,refs,projs,lessons]=await Promise.all([
         DB.getEntries(uid),
         DB.getReflections(uid),
         DB.getProjects(uid),
         DB.getLessonsRead(uid),
       ]);
-      // Normalize entries
-      const lib=entries.map(e=>({...e,id:e.id,ts:e.ts||0})).sort((a,b)=>b.ts-a.ts);
+
+      // Normalize entries — handle both snake_case (Supabase) and camelCase
+      const lib=entries.map(e=>({
+        ...e,
+        id:e.id,
+        ts:e.ts||new Date(e.created_at||0).getTime(),
+        date:e.date,
+        title:e.title,
+        sk:e.sk,
+        word_count:e.word_count||e.wordCount||0,
+        wordCount:e.word_count||e.wordCount||0,
+        elapsed:e.elapsed||0,
+        plain:e.plain||'',
+        html:e.html||'',
+      })).sort((a,b)=>b.ts-a.ts);
+
       setLibrary(lib);
-      setReflections(refs.sort((a,b)=>b.ts-a.ts));
+      setReflections(refs.map(r=>({...r,
+        sessionTitle:r.session_title||r.sessionTitle||'',
+        wordCount:r.word_count||r.wordCount||0,
+        rating:r.rating||0,
+      })).sort((a,b)=>b.ts-a.ts));
       setProjects(projs);
       S.set('flujo:lessons:'+uid, lessons);
       // Load received challenges
@@ -4030,6 +4063,10 @@ const App=()=>{
     // Listen for auth changes
     const {data:{subscription}}=DB.onAuthChange(async(event,session)=>{
       if(event==='SIGNED_OUT'){setUser(null);setLibrary([]);setReflections([]);setProjects([]);setView('dashboard');}
+      if(event==='TOKEN_REFRESHED'&&session?.user){
+        // Session refreshed — reload data if needed
+        console.log('Token refreshed');
+      }
     });
     return()=>subscription.unsubscribe();
   },[]);
@@ -4073,11 +4110,11 @@ const App=()=>{
     setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
     try{
       await DB.upsertEntry(e);
-      // Remove from offline cache once synced
       S.del('flujo:cache:'+user.id+':'+e.id);
     }catch(err){
-      console.error('save entry - keeping in offline cache',err);
-      // Will sync next time
+      console.error('save entry error:',err?.message||err);
+      setSyncStatus('error');
+      // Kept in offline cache — will retry on next load
     }
   };
 
