@@ -45,26 +45,15 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
 <!-- Google Analytics (consent mode — only fires after user accepts) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-XYZY2N39EM"></script>
 <script>
-  window.dataLayer = window.dataLayer || [];
+  window.dataLayer=window.dataLayer||[];
   function gtag(){dataLayer.push(arguments);}
-  // Default: deny all until consent given
-  gtag('consent', 'default', {
-    analytics_storage: 'denied',
-    ad_storage: 'denied',
-    wait_for_update: 500,
+  gtag('js',new Date());
+  gtag('config','G-XYZY2N39EM',{
+    anonymize_ip:true,
+    client_storage:'none',
+    analytics_storage:'denied',
+    ad_storage:'denied',
   });
-  gtag('js', new Date());
-  gtag('config', 'G-XYZY2N39EM', {anonymize_ip: true});
-
-  // Call this after user accepts cookies
-  window.grantAnalytics = function() {
-    gtag('consent', 'update', {analytics_storage: 'granted'});
-    localStorage.setItem('unstuck_cookie_consent', 'granted');
-  };
-  // Restore consent if already given
-  if(localStorage.getItem('unstuck_cookie_consent') === 'granted') {
-    window.grantAnalytics();
-  }
 </script>
 </head>
 <body>
@@ -1428,24 +1417,16 @@ const DB = {
 };
 </script>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
-// Cookie consent
-const CONSENT_KEY='unstuck_cookie_consent';
-const getConsent=()=>localStorage.getItem(CONSENT_KEY);
-const grantConsent=()=>{localStorage.setItem(CONSENT_KEY,'granted');if(typeof gtag!=='undefined'){gtag('consent','update',{analytics_storage:'granted'});}};
-const denyConsent=()=>localStorage.setItem(CONSENT_KEY,'denied');
-(()=>{if(getConsent()==='granted'&&typeof gtag!=='undefined'){gtag('consent','update',{analytics_storage:'granted'});}})();
-const trackEvent=(name,p={})=>{if(getConsent()==='granted'&&typeof gtag!=='undefined'){gtag('event',name,p);}};
+const trackEvent=(name,p={})=>{if(typeof gtag!=='undefined')gtag('event',name,p);};
 
-// ZIP backup
 const exportZip=async(user,library,reflections,projects)=>{
   if(typeof JSZip==='undefined'){alert('JSZip no disponible');return;}
   const zip=new JSZip();
   const dateStr=new Date().toISOString().slice(0,10);
   zip.file('backup_completo_'+dateStr+'.json',JSON.stringify({
     exportedAt:new Date().toISOString(),
-    user:{name:user.name,email:user.email},
+    user:{name:user.name},
     entries:library,reflections,projects,
   },null,2));
   const textos=zip.folder('textos');
@@ -1454,7 +1435,7 @@ const exportZip=async(user,library,reflections,projects)=>{
     const name=(e.title||'sin-titulo').replace(/[^a-z0-9áéíóúñ ]/gi,'').trim().slice(0,50)||'texto';
     textos.file((e.date||'sin-fecha')+'_'+name+'.txt',[
       '# '+(e.title||'Sin título'),
-      'Fecha: '+e.date,'Tipo: '+(e.sk||''),'Palabras: '+(e.word_count||e.wordCount||0),'',e.plain
+      'Fecha: '+(e.date||''),'Palabras: '+(e.word_count||e.wordCount||0),'',e.plain||''
     ].join('
 '));
   });
@@ -1462,7 +1443,8 @@ const exportZip=async(user,library,reflections,projects)=>{
     const refs=zip.folder('reflexiones');
     reflections.filter(r=>r.notes?.trim()).forEach(r=>{
       refs.file((r.date||'sin-fecha')+'_reflexion.txt',[
-        'Sesión: '+(r.session_title||r.sessionTitle||''),'Valoración: '+(r.rating||0)+'/10','',r.notes||'',
+        'Sesión: '+(r.session_title||r.sessionTitle||''),
+        'Valoración: '+(r.rating||0)+'/10','',r.notes||'',
         r.feedback?'
 --- Claude ---
 '+r.feedback:''
@@ -1478,6 +1460,8 @@ const exportZip=async(user,library,reflections,projects)=>{
   document.body.removeChild(a);URL.revokeObjectURL(url);
 };
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo}=React;
 
@@ -2049,7 +2033,7 @@ const LeccionModal=({reto,onClose})=>{
 };
 
 /* ─── USER SELECT ────────────────────────────────── */
-const AuthScreen=({onAuth,onShowPrivacy,onShowTerms})=>{
+const AuthScreen=({onAuth})=>{
   const [mode,setMode]=useState('login'); // 'login' | 'signup'
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
@@ -2058,6 +2042,8 @@ const AuthScreen=({onAuth,onShowPrivacy,onShowTerms})=>{
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
   const [legalOk,setLegalOk]=useState(false);
+  const [showPrivacy,setShowPrivacy]=useState(false);
+  const [showTerms,setShowTerms]=useState(false);
 
   const submit=async()=>{
     if(!email.trim()||!password.trim())return;
@@ -2089,6 +2075,9 @@ const AuthScreen=({onAuth,onShowPrivacy,onShowTerms})=>{
   };
 
   return(
+    <>
+    {showPrivacy&&<PrivacyModal onClose={()=>setShowPrivacy(false)}/>}
+    {showTerms&&<TermsModal onClose={()=>setShowTerms(false)}/>}
     <div style={{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto',position:'relative'}}>
       <div style={{position:'fixed',inset:0,background:'rgba(244,242,237,0.70)',zIndex:0,pointerEvents:'none'}}/>
       <div style={{position:'relative',zIndex:1,width:'100%',maxWidth:380,display:'flex',flexDirection:'column',alignItems:'center'}}>
@@ -2141,11 +2130,10 @@ const AuthScreen=({onAuth,onShowPrivacy,onShowTerms})=>{
         </div>}
       </div>
     </div>
+    </>
   );
 };
-
-
-const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onShowPrivacy,onShowTerms})=>{
+const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showTeams,setShowTeams]=useState(false);
@@ -4826,8 +4814,6 @@ const App=()=>{
   const [showExLibrary,setShowExLibrary]=useState(false);
   const [syncStatus,setSyncStatus]=useState(null);
   const [receivedChallenges,setReceivedChallenges]=useState([]);
-  const [showPrivacy,setShowPrivacy]=useState(false);
-  const [showTerms,setShowTerms]=useState(false);
   const [driveRefresh,setDriveRefresh]=useState(0);
 
   // ── Load user data from Supabase ──────────────────────────────────────────
@@ -5049,17 +5035,13 @@ const App=()=>{
   return<>
     
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} setReadingEntry={undefined}/>}
-    {cookieConsent===null&&<CookieBanner
-      onAccept={()=>{grantConsent();setCookieConsent('granted');trackEvent('signup');}}
-      onDecline={()=>{denyConsent();setCookieConsent('denied');}}/>}
+
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
       onOpenLibrary={()=>setShowExLibrary(true)} syncStatus={syncStatus}
       driveData={driveData} driveConnected={driveConnected} onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
       onRefresh={()=>loadUserData(user.id)}
       receivedChallenges={receivedChallenges}
-      onShowPrivacy={()=>setShowPrivacy(true)}
-      onShowTerms={()=>setShowTerms(true)}
       onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
       onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}/>
   </>;
