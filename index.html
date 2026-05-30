@@ -2225,10 +2225,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
                   <button onClick={()=>{setShowPrivacyModal(true);setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Privacidad</button>
                   <button onClick={()=>{setShowTermsModal(true);setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Términos</button>
                 </div>
-                <div style={{padding:'8px 14px',display:'flex',gap:10,borderTop:'0.5px solid '+BDR}}>
-                  <button onClick={()=>onShowPrivacy?.()} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0,textDecoration:'underline'}}>Privacidad</button>
-                  <button onClick={()=>onShowTerms?.()} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0,textDecoration:'underline'}}>Términos</button>
-                </div>
+
               </div>
             </>}
           </div>
