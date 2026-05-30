@@ -1462,7 +1462,7 @@ const exportZip=async(user,library,reflections,projects)=>{
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-<script type="text/babel" data-presets="react">
+<script type="text/babel" data-presets="react"><script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo}=React;
 
 /* ─── CONSTANTS ─────────────────────────────────── */
@@ -4713,97 +4713,13 @@ const TermsModal=({onClose})=>(
       </div>
     </div>
   </div>
-);
-
-/* ─── PRIVACY MODAL ─────────────────────────────── */
-const PrivacyModal=({onClose})=>(
-  <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-    <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:580,maxHeight:'85vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
-      <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Política de Privacidad</div>
-        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
-      </div>
-      <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
-        <p style={{color:MUTED,fontSize:11,marginBottom:16}}>Última actualización: junio 2025</p>
-        {[
-          ['1. Responsable del tratamiento','Unstuck es un servicio de escritura creativa desarrollado de forma independiente. Para cualquier consulta sobre privacidad, contacta a través del repositorio del proyecto en GitHub.'],
-          ['2. Datos que recogemos','Al registrarte: dirección de email y contraseña (cifrada). Al usar la app: textos que escribes, reflexiones, proyectos, estadísticas de sesión (palabras, tiempo). Al navegar: datos de uso anónimos mediante Google Analytics (solo con tu consentimiento explícito).'],
-          ['3. Finalidad del tratamiento','Prestarte el servicio de escritura creativa, sincronizar tus textos entre dispositivos, mostrarte tus estadísticas de progreso, y mejorar la aplicación mediante análisis de uso agregado y anónimo.'],
-          ['4. Base legal','La ejecución del contrato de servicio (prestarte Unstuck) y tu consentimiento explícito para el uso de cookies analíticas.'],
-          ['5. Dónde se almacenan tus datos','Tus datos se almacenan en Supabase (infraestructura sobre AWS en la región EU-West). Google Analytics solo se activa con tu consentimiento y anonimiza las IPs.'],
-          ['6. Plazo de conservación','Tus datos se conservan mientras tu cuenta esté activa. Puedes solicitar la eliminación completa de tu cuenta y todos tus datos escribiendo a través del repositorio del proyecto.'],
-          ['7. Tus derechos (RGPD)','Tienes derecho a acceder, rectificar, suprimir, portar y oponerte al tratamiento de tus datos. Para ejercerlos, contacta con nosotros. Tienes derecho a presentar una reclamación ante la Agencia Española de Protección de Datos (aepd.es).'],
-          ['8. Cookies','Unstuck no instala cookies de seguimiento. Google Analytics funciona en modo sin cookies (cookieless), sin almacenar identificadores en tu dispositivo. Solo usamos la cookie técnica de sesión de Supabase Auth, estrictamente necesaria para que puedas iniciar sesión.'],
-          ['9. Propiedad de tus textos','Todo el contenido que escribes en Unstuck es tuyo. No reclamamos ningún derecho sobre tus obras. No usamos tus textos para entrenar modelos de inteligencia artificial ni los cedemos a terceros.'],
-          ['10. Menores de edad','Unstuck no está dirigido a menores de 16 años. Si eres menor de 16 años, necesitas el consentimiento de tus padres o tutores para usar el servicio.'],
-        ].map(([title,text])=>(
-          <div key={title} style={{marginBottom:16}}>
-            <div style={{fontWeight:600,marginBottom:4}}>{title}</div>
-            <p style={{color:MUTED,margin:0}}>{text}</p>
-          </div>
-        ))}
-        <div style={{marginTop:16,padding:'12px 16px',background:'rgba(85,80,184,0.05)',borderRadius:8,fontSize:12,color:MUTED}}>
-          Google Analytics: al aceptar cookies, Google puede recopilar datos de uso según su <a href="https://policies.google.com/privacy" target="_blank" style={{color:'#5550B8'}}>política de privacidad</a>. Puedes conocer cómo usa Google los datos en <a href="https://policies.google.com/technologies/partner-sites" target="_blank" style={{color:'#5550B8'}}>google.com/policies/privacy/partners</a>.
-        </div>
-      </div>
-    </div>
-  </div>
-);
-
-/* ─── TERMS MODAL ────────────────────────────────── */
-const TermsModal=({onClose})=>(
-  <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-    <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:580,maxHeight:'85vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
-      <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Términos de Servicio</div>
-        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
-      </div>
-      <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
-        <p style={{color:MUTED,fontSize:11,marginBottom:16}}>Última actualización: junio 2025</p>
-        {[
-          ['1. Aceptación de los términos','Al registrarte y usar Unstuck, aceptas estos términos. Si no los aceptas, no debes usar el servicio.'],
-          ['2. Descripción del servicio','Unstuck es una aplicación web de escritura creativa que te permite escribir, guardar y organizar tus textos, seguir tu progreso y compartir retos con otros escritores.'],
-          ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña y de todas las actividades que ocurran bajo tu cuenta. Debes notificarnos inmediatamente de cualquier uso no autorizado.'],
-          ['4. Propiedad intelectual de los textos','Todo el contenido que creas en Unstuck es de tu propiedad. Unstuck no reivindica ningún derecho sobre tus obras. Nos concedes únicamente la licencia técnica mínima necesaria para almacenar y sincronizar tus textos entre tus dispositivos.'],
-          ['5. Uso aceptable','Te comprometes a no usar Unstuck para publicar contenido ilegal, ofensivo, que infrinja derechos de terceros o que acose a otros usuarios. Nos reservamos el derecho de eliminar contenido que viole estas condiciones y suspender cuentas en casos graves.'],
-          ['6. Contenido compartido públicamente','Si publicas textos como "Abierto" o "Amigos", eres responsable de ese contenido. Otros usuarios podrán leer tus textos según la visibilidad que hayas configurado.'],
-          ['7. Disponibilidad del servicio','Unstuck se ofrece "tal cual" y "según disponibilidad". No garantizamos que el servicio esté disponible de forma ininterrumpida. Hacemos copias de seguridad regularmente, pero te recomendamos descargar tus propias copias.'],
-          ['8. Limitación de responsabilidad','En la máxima medida permitida por la ley, Unstuck no será responsable de pérdidas de datos, interrupciones del servicio, daños indirectos o cualquier pérdida derivada del uso o la imposibilidad de uso del servicio.'],
-          ['9. Modificaciones','Podemos modificar estos términos. Te notificaremos los cambios relevantes. Si continúas usando Unstuck después de los cambios, aceptas los nuevos términos.'],
-          ['10. Ley aplicable','Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los juzgados y tribunales de España.'],
-        ].map(([title,text])=>(
-          <div key={title} style={{marginBottom:16}}>
-            <div style={{fontWeight:600,marginBottom:4}}>{title}</div>
-            <p style={{color:MUTED,margin:0}}>{text}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  </div>
-);
-
-/* ─── COOKIE BANNER ──────────────────────────────── */
-const CookieBanner=({onAccept,onDecline})=>(
-  <div className="fu" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:199,background:'#1A1916',padding:'14px 20px',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',boxShadow:'0 -2px 20px rgba(0,0,0,0.2)'}}>
-    <div style={{flex:1,minWidth:200}}>
-      <div style={{fontSize:13,fontWeight:500,color:'#fff',marginBottom:3}}>Cookies y analítica</div>
-      <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',lineHeight:1.6}}>
-        Usamos Google Analytics para entender cómo se usa la app y mejorarla. Solo se activa con tu consentimiento.
-        {' '}<a href="https://policies.google.com/technologies/partner-sites" target="_blank" style={{color:'rgba(255,255,255,0.4)',fontSize:10}}>Cómo usa Google los datos →</a>
-      </div>
-    </div>
-    <div style={{display:'flex',gap:8,flexShrink:0}}>
-      <button onClick={onDecline} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'7px 14px',fontSize:12,color:'rgba(255,255,255,0.5)',cursor:'pointer'}}>Solo esenciales</button>
-      <button onClick={onAccept} style={{background:'#fff',border:'none',borderRadius:7,padding:'7px 16px',fontSize:12,fontWeight:600,color:'#1A1916',cursor:'pointer'}}>Aceptar</button>
-    </div>
-  </div>
-);
+)
 
 
 /* ─── APP ROOT ─────────────────────────────────────── */
 const App=()=>{
-  const [user,setUser]=useState(null);       // Supabase auth user merged with profile
-  const [loading,setLoading]=useState(true); // checking session on mount
+  const [user,setUser]=useState(null);
+  const [loading,setLoading]=useState(true);
   const [view,setView]=useState('dashboard');
   const [energy,setEnergy]=useState(5);
   const [library,setLibrary]=useState([]);
@@ -4813,10 +4729,10 @@ const App=()=>{
   const [sessionData,setSessionData]=useState(null);
   const [showExLibrary,setShowExLibrary]=useState(false);
   const [syncStatus,setSyncStatus]=useState(null);
-  const [receivedChallenges,setReceivedChallenges]=useState([]);
   const [driveRefresh,setDriveRefresh]=useState(0);
+  const [receivedChallenges,setReceivedChallenges]=useState([]);
+  const [cuentoChallenge,setCuentoChallenge]=useState(null);
 
-  // ── Load user data from Supabase ──────────────────────────────────────────
   const loadUserData=async(uid)=>{
     if(!uid)return;
     setSyncStatus('syncing');
@@ -4827,22 +4743,16 @@ const App=()=>{
         DB.getProjects(uid),
         DB.getLessonsRead(uid),
       ]);
-
-      // Normalize entries — handle both snake_case (Supabase) and camelCase
       const lib=entries.map(e=>({
         ...e,
-        id:e.id,
         ts:e.ts||new Date(e.created_at||e.date||0).getTime()||Date.now(),
         date:e.date?.slice(0,10)||e.created_at?.slice(0,10)||'',
-        title:e.title,
-        sk:e.sk,
         word_count:e.word_count||e.wordCount||0,
         wordCount:e.word_count||e.wordCount||0,
         elapsed:e.elapsed||0,
         plain:e.plain||'',
         html:e.html||'',
       })).sort((a,b)=>b.ts-a.ts);
-
       setLibrary(lib);
       setReflections(refs.map(r=>({...r,
         sessionTitle:r.session_title||r.sessionTitle||'',
@@ -4850,22 +4760,19 @@ const App=()=>{
         rating:r.rating||0,
       })).sort((a,b)=>b.ts-a.ts));
       setProjects(projs);
-      S.set('flujo:lessons:'+uid, lessons);
-      // Load received challenges
+      S.set('flujo:lessons:'+uid,lessons);
       try{const chs=await DB.getReceivedChallenges(uid);setReceivedChallenges(chs);}catch{}
       setSyncStatus('ok');
-      setTimeout(()=>setSyncStatus(null),2000);
+      setTimeout(()=>setSyncStatus(s=>s==='ok'?null:s),2000);
     }catch(e){
-      console.error('loadUserData error',e);
+      console.error('loadUserData error:',e?.message||e);
       setSyncStatus('error');
-      // Fall back to offline cache
       const cached=S.list('flujo:cache:'+uid+':').map(k=>S.get(k)).filter(Boolean).sort((a,b)=>b.ts-a.ts);
-      if(cached.length>0){setLibrary(cached);console.log('Loaded',cached.length,'entries from offline cache');}
+      if(cached.length>0){setLibrary(cached);}
     }
   };
 
-  // ── Check session on mount ────────────────────────────────────────────────
-  // Handle team invite link
+  // Team invite URL check
   useEffect(()=>{
     const url=new URL(window.location.href);
     const teamCode=url.searchParams.get('team');
@@ -4876,29 +4783,34 @@ const App=()=>{
     }
   },[]);
 
+  // Session check on mount
   useEffect(()=>{
+    const timeout=setTimeout(()=>setLoading(false),5000);
     DB.getSession().then(async session=>{
-      if(session?.user){
-        const profile=await DB.getProfile(session.user.id);
-        if(profile){
-          setUser({...session.user,...profile});
-          await loadUserData(session.user.id);
+      try{
+        if(session?.user){
+          const profile=await DB.getProfile(session.user.id);
+          if(profile){
+            setUser({...session.user,...profile});
+            await loadUserData(session.user.id);
+          }else{
+            setUser(session.user);
+            await loadUserData(session.user.id);
+          }
         }
-      }
+      }catch(e){console.error('Session load error:',e);}
+      finally{clearTimeout(timeout);setLoading(false);}
+    }).catch(e=>{
+      console.error('getSession error:',e);
+      clearTimeout(timeout);
       setLoading(false);
     });
-    // Listen for auth changes
     const {data:{subscription}}=DB.onAuthChange(async(event,session)=>{
       if(event==='SIGNED_OUT'){setUser(null);setLibrary([]);setReflections([]);setProjects([]);setView('dashboard');}
-      if(event==='TOKEN_REFRESHED'&&session?.user){
-        // Session refreshed — reload data if needed
-        console.log('Token refreshed');
-      }
     });
     return()=>subscription.unsubscribe();
   },[]);
 
-  // ── Auth ─────────────────────────────────────────────────────────────────
   const handleAuth=async(profile)=>{
     const session=await DB.getSession();
     if(session?.user){
@@ -4909,64 +4821,47 @@ const App=()=>{
   };
   const logout=async()=>{await DB.signOut();setUser(null);setView('dashboard');};
 
-  // ── Navigation ────────────────────────────────────────────────────────────
-  const goToBriefing=e=>{setEnergy(e);setView('briefing')};
-  const [cuentoChallenge,setCuentoChallenge]=useState(null);
-  const startCuentoWithChallenge=ch=>{setCuentoChallenge(ch);setView('cuento');}; 
-  const startSession=cfg=>{if(cfg.type==='cuento'){setView('cuento');}else{setSessionConfig(cfg);setView('editor');}};
-
-  const finishDay=data=>{setSessionData(data);setView('postSession')};
+  const goToBriefing=e=>{setEnergy(e);setView('briefing');};
+  const startCuentoWithChallenge=ch=>{setCuentoChallenge(ch);setView('cuento');};
+  const startSession=cfg=>{
+    if(cfg.type==='cuento'){setView('cuento');}
+    else{setSessionConfig(cfg);setView('editor');}
+  };
+  const finishDay=data=>{setSessionData(data);setView('postSession');};
 
   const completeReflection=async(ref)=>{
     if(ref&&user){
       setReflections(prev=>[ref,...prev.filter(r=>r.id!==ref.id)]);
       const dbRef={
-        id:ref.id,
-        user_id:user.id,
-        rating:ref.rating||0,
-        notes:ref.notes||null,
-        feedback:ref.feedback||null,
-        sk:ref.sk||null,
+        id:ref.id,user_id:user.id,rating:ref.rating||0,notes:ref.notes||null,
+        feedback:ref.feedback||null,sk:ref.sk||null,
         session_title:ref.session_title||ref.sessionTitle||null,
         word_count:ref.word_count||ref.wordCount||0,
-        elapsed:ref.elapsed||0,
-        mode:ref.mode||null,
-        date:ref.date||null,
-        ts:ref.ts||Date.now(),
+        elapsed:ref.elapsed||0,mode:ref.mode||null,
+        date:ref.date||null,ts:ref.ts||Date.now(),
       };
-      try{
-        await DB.upsertReflection(dbRef);
-      }catch(e){console.error('save reflection',e);}
+      try{await DB.upsertReflection(dbRef);}catch(e){console.error('save reflection',e);}
     }
     setView('dashboard');
     loadUserData(user.id);
   };
 
-  // ── Save entry ────────────────────────────────────────────────────────────
   const saveEntry=async(entry)=>{
     if(!user)return;
     const e={...entry,user_id:user.id};
-    // Save to localStorage as offline cache first (full object with camelCase)
-    S.set('flujo:cache:'+user.id+':'+e.id, e);
+    S.set('flujo:cache:'+user.id+':'+e.id,e);
     setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
-    // Strip to only DB column names before sending to Supabase
     const dbEntry={
-      id:e.id,
-      user_id:e.user_id,
-      sk:e.sk||null,
-      title:e.title||null,
+      id:e.id,user_id:e.user_id,sk:e.sk||null,title:e.title||null,
       session_label:e.session_label||e.sessionLabel||null,
-      html:e.html||null,
-      plain:e.plain||null,
+      html:e.html||null,plain:e.plain||null,
       word_count:e.word_count||e.wordCount||0,
-      elapsed:e.elapsed||0,
-      font_idx:e.font_idx||e.fontIdx||0,
+      elapsed:e.elapsed||0,font_idx:e.font_idx||e.fontIdx||0,
       editor_size:e.editor_size||e.editorSize||17,
       align_dir:e.align_dir||e.alignDir||'left',
       week_id:e.week_id||e.weekId||null,
       project_id:e.project_id||e.projectId||null,
-      date:e.date||null,
-      ts:e.ts||Date.now(),
+      date:e.date||null,ts:e.ts||Date.now(),
       visibility:e.visibility||'privado',
       shared_group_id:e.shared_group_id||null,
     };
@@ -4981,38 +4876,22 @@ const App=()=>{
 
   const deleteEntry=async(id)=>{
     if(!user)return;
-    try{
-      await DB.deleteEntry(id);
-      setLibrary(prev=>prev.filter(e=>e.id!==id));
-    }catch(e){console.error('delete entry',e);}
+    try{await DB.deleteEntry(id);setLibrary(prev=>prev.filter(e=>e.id!==id));}
+    catch(e){console.error('delete entry',e);}
   };
 
-  // ── Projects ──────────────────────────────────────────────────────────────
   const saveProject=async(proj)=>{
     if(!user)return;
     const p={...proj,user_id:user.id};
     setProjects(prev=>[p,...prev.filter(x=>x.id!==p.id)]);
-    const dbProj={
-      id:p.id,
-      user_id:p.user_id,
-      title:p.title||null,
-      type:p.type||null,
-      goal:p.goal||50000,
-      word_count:p.word_count||p.wordCount||0,
-      updated_at:p.updated_at||p.updatedAt||null,
-    };
-    try{
-      await DB.upsertProject(dbProj);
-    }catch(e){console.error('save project',e);}
+    const dbProj={id:p.id,user_id:p.user_id,title:p.title||null,type:p.type||null,goal:p.goal||50000,word_count:p.word_count||p.wordCount||0,updated_at:p.updated_at||p.updatedAt||null};
+    try{await DB.upsertProject(dbProj);}catch(e){console.error('save project',e);}
   };
 
-  // ── Drive ─────────────────────────────────────────────────────────────────
   const driveData=user?S.get('flujo:drive:'+user.id)||{}:{};
   const driveConnected=!!(driveData.token&&driveData.expires_at>Date.now()+30000);
 
   if(loading)return<div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:MUTED}}>Cargando Unstuck…</div>;
-
-
 
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
@@ -5033,13 +4912,12 @@ const App=()=>{
   if(view==='briefing')return<SessionBriefing user={user} energy={energy} library={library} projects={projects} saveProject={saveProject} onStart={startSession} onBack={()=>setView('dashboard')}/>;
 
   return<>
-    
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} setReadingEntry={undefined}/>}
-
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
       onOpenLibrary={()=>setShowExLibrary(true)} syncStatus={syncStatus}
-      driveData={driveData} driveConnected={driveConnected} onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
+      driveData={driveData} driveConnected={driveConnected}
+      onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
       onRefresh={()=>loadUserData(user.id)}
       receivedChallenges={receivedChallenges}
       onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
