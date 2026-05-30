@@ -42,9 +42,34 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
   input[type=range]::-webkit-slider-thumb{width:22px;height:22px}
 }
 </style>
+<!-- Google Analytics (consent mode — only fires after user accepts) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XYZY2N39EM"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  // Default: deny all until consent given
+  gtag('consent', 'default', {
+    analytics_storage: 'denied',
+    ad_storage: 'denied',
+    wait_for_update: 500,
+  });
+  gtag('js', new Date());
+  gtag('config', 'G-XYZY2N39EM', {anonymize_ip: true});
+
+  // Call this after user accepts cookies
+  window.grantAnalytics = function() {
+    gtag('consent', 'update', {analytics_storage: 'granted'});
+    localStorage.setItem('unstuck_cookie_consent', 'granted');
+  };
+  // Restore consent if already given
+  if(localStorage.getItem('unstuck_cookie_consent') === 'granted') {
+    window.grantAnalytics();
+  }
+</script>
 </head>
 <body>
 <div id="root"><div style="height:100vh;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6B6963">Cargando Unstuck…</div></div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script type="module">import*as d from'https://esm.sh/docx@8.5.0';window.__docx=d;window.dispatchEvent(new Event('docxReady'));</script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -1404,6 +1429,55 @@ const DB = {
 </script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+// Cookie consent
+const CONSENT_KEY='unstuck_cookie_consent';
+const getConsent=()=>localStorage.getItem(CONSENT_KEY);
+const grantConsent=()=>{localStorage.setItem(CONSENT_KEY,'granted');if(typeof gtag!=='undefined'){gtag('consent','update',{analytics_storage:'granted'});}};
+const denyConsent=()=>localStorage.setItem(CONSENT_KEY,'denied');
+(()=>{if(getConsent()==='granted'&&typeof gtag!=='undefined'){gtag('consent','update',{analytics_storage:'granted'});}})();
+const trackEvent=(name,p={})=>{if(getConsent()==='granted'&&typeof gtag!=='undefined'){gtag('event',name,p);}};
+
+// ZIP backup
+const exportZip=async(user,library,reflections,projects)=>{
+  if(typeof JSZip==='undefined'){alert('JSZip no disponible');return;}
+  const zip=new JSZip();
+  const dateStr=new Date().toISOString().slice(0,10);
+  zip.file('backup_completo_'+dateStr+'.json',JSON.stringify({
+    exportedAt:new Date().toISOString(),
+    user:{name:user.name,email:user.email},
+    entries:library,reflections,projects,
+  },null,2));
+  const textos=zip.folder('textos');
+  library.forEach(e=>{
+    if(!e.plain?.trim())return;
+    const name=(e.title||'sin-titulo').replace(/[^a-z0-9áéíóúñ ]/gi,'').trim().slice(0,50)||'texto';
+    textos.file((e.date||'sin-fecha')+'_'+name+'.txt',[
+      '# '+(e.title||'Sin título'),
+      'Fecha: '+e.date,'Tipo: '+(e.sk||''),'Palabras: '+(e.word_count||e.wordCount||0),'',e.plain
+    ].join('
+'));
+  });
+  if(reflections.length){
+    const refs=zip.folder('reflexiones');
+    reflections.filter(r=>r.notes?.trim()).forEach(r=>{
+      refs.file((r.date||'sin-fecha')+'_reflexion.txt',[
+        'Sesión: '+(r.session_title||r.sessionTitle||''),'Valoración: '+(r.rating||0)+'/10','',r.notes||'',
+        r.feedback?'
+--- Claude ---
+'+r.feedback:''
+      ].join('
+'));
+    });
+  }
+  const blob=await zip.generateAsync({type:'blob'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='unstuck_backup_'+dateStr+'.zip';
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(url);
+};
+</script>
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo}=React;
 
@@ -1975,7 +2049,7 @@ const LeccionModal=({reto,onClose})=>{
 };
 
 /* ─── USER SELECT ────────────────────────────────── */
-const AuthScreen=({onAuth})=>{
+const AuthScreen=({onAuth,onShowPrivacy,onShowTerms})=>{
   const [mode,setMode]=useState('login'); // 'login' | 'signup'
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
@@ -1983,11 +2057,13 @@ const AuthScreen=({onAuth})=>{
   const [ci,setCi]=useState(0);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
+  const [legalOk,setLegalOk]=useState(false);
 
   const submit=async()=>{
     if(!email.trim()||!password.trim())return;
     if(mode==='signup'&&!name.trim()){setError('Añade tu nombre');return;}
     if(mode==='signup'&&password.length<6){setError('La contraseña debe tener al menos 6 caracteres');return;}
+    if(mode==='signup'&&!legalOk){setError('Debes aceptar la política de privacidad y los términos de servicio');return;}
     setLoading(true);setError('');
     try{
       if(mode==='signup'){
@@ -2041,7 +2117,21 @@ const AuthScreen=({onAuth})=>{
 
           {error&&<div style={{fontSize:12,color:'#C5221F',marginBottom:12,padding:'7px 10px',background:'rgba(197,34,31,0.06)',borderRadius:7,border:'0.5px solid rgba(197,34,31,0.2)'}}>{error}</div>}
 
-          <button onClick={submit} disabled={loading} style={{width:'100%',background:TXT,border:'none',borderRadius:8,padding:'11px',fontSize:14,fontWeight:500,color:'#fff',cursor:'pointer',opacity:loading?0.6:1}}>
+          {mode==='signup'&&<label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',marginBottom:4}}>
+            <input type="checkbox" id="legal-check" style={{marginTop:2,flexShrink:0}}/>
+            <span style={{fontSize:11,color:MUTED,lineHeight:1.6}}>
+              He leído y acepto la{' '}
+              <button type="button" onClick={e=>{e.preventDefault();onShowPrivacy?.();}} style={{background:'none',border:'none',color:'#5550B8',cursor:'pointer',fontSize:11,padding:0,textDecoration:'underline'}}>Política de Privacidad</button>
+              {' '}y los{' '}
+              <button type="button" onClick={e=>{e.preventDefault();onShowTerms?.();}} style={{background:'none',border:'none',color:'#5550B8',cursor:'pointer',fontSize:11,padding:0,textDecoration:'underline'}}>Términos de Servicio</button>
+            </span>
+          </label>}
+          <button onClick={()=>{
+            if(mode==='signup'&&!document.getElementById('legal-check')?.checked){
+              setError('Debes aceptar la Política de Privacidad y los Términos de Servicio');return;
+            }
+            submit();
+          }} disabled={loading} style={{width:'100%',background:TXT,border:'none',borderRadius:8,padding:'11px',fontSize:14,fontWeight:500,color:'#fff',cursor:'pointer',opacity:loading?0.6:1}}>
             {loading?'…':mode==='login'?'Entrar':'Crear cuenta y entrar'}
           </button>
         </div>
@@ -2055,7 +2145,7 @@ const AuthScreen=({onAuth})=>{
 };
 
 
-const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge})=>{
+const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onShowPrivacy,onShowTerms})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showTeams,setShowTeams]=useState(false);
@@ -2063,6 +2153,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
   const [showBiblioteca,setShowBiblioteca]=useState(false);
+  const [showPrivacyModal,setShowPrivacyModal]=useState(false);
+  const [showTermsModal,setShowTermsModal]=useState(false);
   const [showProfileSettings,setShowProfileSettings]=useState(false);
   const [showProfile,setShowProfile]=useState(false);
   const [readingEntry,setReadingEntry]=useState(null);
@@ -2081,6 +2173,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
     <div style={{height:'100vh',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
 
       {showProfileSettings&&<ProfileSettings user={user} onClose={()=>setShowProfileSettings(false)} onSave={updated=>{Object.assign(user,updated);setShowProfileSettings(false);}}/>}
+      {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
+      {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={(entryId,vis)=>setLibrary(prev=>prev.map(e=>e.id===entryId?{...e,visibility:vis}:e))}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
@@ -2098,21 +2192,55 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📖 Biblioteca</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Equipos</button>
           <button onClick={()=>setShowSendChallenge(true)} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#A82020',cursor:'pointer',fontWeight:500}}>⏱ Retar</button>
-          <button onClick={()=>setShowChallengesHistory(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📨</button>
-          <button onClick={()=>setShowProfileSettings(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 6px',cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>
-            <UserAvatar user={user} size={22}/>
-            <span style={{fontSize:11,color:MUTED,maxWidth:60,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.name}</span>
-          </button>
+          {/* User menu button */}
+          <div style={{position:'relative'}}>
+            <button onClick={()=>setShowUserMenu(v=>!v)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:20,padding:'3px 10px 3px 4px',cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+              <UserAvatar user={user} size={24}/>
+              <span style={{fontSize:11,fontWeight:500,color:TXT,maxWidth:70,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.name}</span>
+              {receivedChallenges?.length>0&&<span style={{width:7,height:7,borderRadius:'50%',background:'#A82020',flexShrink:0}}/>}
+            </button>
+            {showUserMenu&&<>
+              <div onClick={()=>setShowUserMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
+              <div className="fi" style={{position:'absolute',right:0,top:'calc(100% + 6px)',width:210,background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,boxShadow:'0 4px 24px rgba(0,0,0,0.1)',overflow:'hidden',zIndex:50}}>
+                {/* Profile header */}
+                <div style={{padding:'12px 14px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',gap:10}}>
+                  <UserAvatar user={user} size={36}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.name}</div>
+                    <div style={{fontSize:11,color:MUTED}}>@{user.username||'—'}</div>
+                  </div>
+                </div>
+                {/* Menu items */}
+                {[
+                  {icon:'✏️',label:'Editar perfil',action:()=>{setShowProfileSettings(true);setShowUserMenu(false);}},
+                  {icon:'📨',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
+                  {icon:'⚙',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);},dot:getApiKey(user.id)?'#0A7A58':null},
+                  {icon:'↓',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
+                  {icon:'🔗',label:'Mi perfil público',action:()=>{setShowProfile(true);setShowUserMenu(false);}},
+                ].map(item=>(
+                  <button key={item.label} onClick={item.action} style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'0.5px solid '+BDR,textAlign:'left'}}>
+                    <span style={{fontSize:14,width:20,textAlign:'center',flexShrink:0}}>{item.icon}</span>
+                    <span style={{fontSize:12,color:TXT,flex:1}}>{item.label}</span>
+                    {item.badge>0&&<span style={{background:'#A82020',color:'#fff',borderRadius:10,padding:'1px 6px',fontSize:10,fontWeight:600}}>{item.badge}</span>}
+                    {item.dot&&<span style={{width:7,height:7,borderRadius:'50%',background:item.dot,flexShrink:0}}/>}
+                  </button>
+                ))}
+                <button onClick={()=>{onLogout();setShowUserMenu(false);}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',textAlign:'left',borderBottom:'0.5px solid '+BDR}}>
+                  <span style={{fontSize:14,width:20,textAlign:'center'}}>←</span>
+                  <span style={{fontSize:12,color:MUTED}}>Cerrar sesión</span>
+                </button>
+                <div style={{padding:'8px 14px',display:'flex',gap:12}}>
+                  <button onClick={()=>{setShowPrivacyModal(true);setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Privacidad</button>
+                  <button onClick={()=>{setShowTermsModal(true);setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Términos</button>
+                </div>
+                <div style={{padding:'8px 14px',display:'flex',gap:10,borderTop:'0.5px solid '+BDR}}>
+                  <button onClick={()=>onShowPrivacy?.()} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0,textDecoration:'underline'}}>Privacidad</button>
+                  <button onClick={()=>onShowTerms?.()} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0,textDecoration:'underline'}}>Términos</button>
+                </div>
+              </div>
+            </>}
+          </div>
 
-          {syncStatus==='ok'&&<span style={{fontSize:10,color:'#0A7A58'}}>✓ Sincronizado</span>}
-          <button onClick={onRefresh} title="Sincronizar con servidor" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 8px',cursor:'pointer',fontSize:12,color:MUTED}}>⟳</button>
-          <button onClick={()=>exportZip(user,library,reflections,projects)} title="Descargar copia de seguridad (.zip)" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,color:MUTED}}>
-            ↓ Backup
-          </button>
-          <button onClick={()=>setShowKeyPanel(true)} style={{background:getApiKey(user.id)?'rgba(10,122,88,0.08)':'rgba(85,80,184,0.07)',border:'0.5px solid '+(getApiKey(user.id)?'rgba(10,122,88,0.25)':'rgba(85,80,184,0.25)'),borderRadius:6,padding:'4px 10px',display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:11,fontWeight:500,color:getApiKey(user.id)?'#0A7A58':'#5550B8'}}>
-            <span>{getApiKey(user.id)?'✦':'⚙'}</span>
-            <span>{getApiKey(user.id)?'Claude conectado':'Añadir API key'}</span>
-          </button>
           <div style={{position:'relative'}}>
             <button onClick={()=>setShowUserMenu(v=>!v)} style={{display:'flex',alignItems:'center',gap:7,background:'transparent',border:'0.5px solid '+BDR,borderRadius:20,padding:'4px 10px 4px 6px',cursor:'pointer'}}>
               <UserAvatar user={user} size={22}/>
@@ -4512,6 +4640,178 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
   );
 };
 
+/* ─── COOKIE BANNER ─────────────────────────────── */
+const CookieBanner=({onAccept,onDecline})=>(
+  <div className="fi" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:500,background:'#1A1916',color:'#fff',padding:'16px 20px',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'0 -4px 24px rgba(0,0,0,0.3)'}}>
+    <div style={{flex:1,minWidth:200}}>
+      <div style={{fontSize:13,fontWeight:500,marginBottom:4}}>Usamos cookies analíticas</div>
+      <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',lineHeight:1.6}}>
+        Unstuck usa Google Analytics para entender cómo se usa la app. No usamos cookies publicitarias. {' '}
+        <a href="/unstuck/privacidad.html" target="_blank" style={{color:'rgba(255,255,255,0.7)',textDecoration:'underline'}}>Política de privacidad</a>
+      </div>
+    </div>
+    <div style={{display:'flex',gap:8,flexShrink:0}}>
+      <button onClick={onDecline} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.25)',borderRadius:7,padding:'8px 14px',fontSize:12,color:'rgba(255,255,255,0.6)',cursor:'pointer'}}>Solo esenciales</button>
+      <button onClick={onAccept} style={{background:'#fff',border:'none',borderRadius:7,padding:'8px 16px',fontSize:12,fontWeight:600,color:'#1A1916',cursor:'pointer'}}>Aceptar</button>
+    </div>
+  </div>
+);
+
+/* ─── PRIVACY MODAL ──────────────────────────────── */
+const PrivacyModal=({onClose})=>(
+  <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:600,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
+      <div style={{padding:'16px 24px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Política de Privacidad</div>
+        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
+        <p style={{color:MUTED,marginBottom:16}}>Última actualización: {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</p>
+
+        {[
+          ['¿Quién es el responsable?','Unstuck es un servicio de escritura creativa operado por Lucas Sánchez (sonicandogit@gmail.com). Para cualquier consulta sobre privacidad, puedes escribirnos a ese correo.'],
+          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Son completamente privados por defecto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.'],
+          ['¿Para qué usamos tus datos?','— Para proporcionarte el servicio de escritura y guardar tus textos.\n— Para mejorar la app mediante análisis de uso agregado y anónimo.\n— Nunca vendemos tus datos a terceros.\n— Nunca usamos tus textos para entrenar modelos de IA.'],
+          ['¿Dónde se almacenan?','Tus datos se almacenan en Supabase (infraestructura AWS en Europa). Google Analytics almacena datos de uso en servidores de Google. Puedes consultar la política de Google en google.com/policies/privacy/partners.'],
+          ['Cookies','Solo usamos cookies analíticas de Google Analytics, y únicamente si has dado tu consentimiento. Puedes rechazarlas sin que ello afecte al funcionamiento de la app.'],
+          ['Tus derechos (GDPR)','Tienes derecho a: acceder a tus datos, rectificarlos, eliminarlos ("derecho al olvido"), portabilidad de datos, y oponerte al tratamiento. Para ejercer cualquiera de estos derechos, escríbenos a sonicandogit@gmail.com. Para eliminar tu cuenta y todos tus datos, puedes solicitarlo por email y lo haremos en un plazo máximo de 30 días.'],
+          ['API de Claude (Anthropic)','Si introduces una API key de Claude, tus textos se envían a la API de Anthropic para generar feedback. Anthropic tiene su propia política de privacidad. Unstuck no almacena tu API key en el servidor — se guarda solo en tu dispositivo.'],
+          ['Menores de edad','Unstuck no está dirigido a menores de 16 años. Si eres menor, necesitas el consentimiento de tus padres o tutores.'],
+          ['Cambios en esta política','Notificaremos cambios relevantes por email. El uso continuado del servicio tras los cambios implica la aceptación de la nueva política.'],
+        ].map(([title,text])=>(
+          <div key={title} style={{marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:600,color:TXT,marginBottom:6}}>{title}</div>
+            <div style={{fontSize:12,color:MUTED,lineHeight:1.75,whiteSpace:'pre-line'}}>{text}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{padding:'12px 24px',borderTop:'0.5px solid '+BDR,flexShrink:0,textAlign:'right'}}>
+        <button onClick={onClose} style={{background:TXT,border:'none',borderRadius:8,padding:'9px 20px',fontSize:13,fontWeight:500,color:'#fff',cursor:'pointer'}}>Cerrar</button>
+      </div>
+    </div>
+  </div>
+);
+
+/* ─── TERMS MODAL ────────────────────────────────── */
+const TermsModal=({onClose})=>(
+  <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:600,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
+      <div style={{padding:'16px 24px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Términos de Servicio</div>
+        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
+        <p style={{color:MUTED,marginBottom:16}}>Última actualización: {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</p>
+        {[
+          ['1. Aceptación','Al crear una cuenta en Unstuck, aceptas estos términos. Si no estás de acuerdo, no uses el servicio.'],
+          ['2. El servicio','Unstuck es una herramienta de escritura creativa. Proporcionamos el servicio "tal cual" y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
+          ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña. Notifícanos si detectas uso no autorizado.'],
+          ['4. Propiedad de tus textos','Los textos que escribes en Unstuck son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo.'],
+          ['5. Uso aceptable','No puedes usar Unstuck para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar contenido que viole estas normas.'],
+          ['6. Privacidad de los textos','Los textos marcados como "Privado" solo son accesibles por ti. Los marcados como "Amigos" son accesibles por tus seguidores mutuos. Los marcados como "Abierto" son visibles para todos los usuarios registrados.'],
+          ['7. API de Claude','Si usas la función de feedback de Claude, aceptas los términos de uso de Anthropic. Unstuck actúa como intermediario y no almacena el contenido procesado.'],
+          ['8. Limitación de responsabilidad','Unstuck no garantiza la disponibilidad continua del servicio. No somos responsables de la pérdida de datos. Recomendamos hacer backups periódicos con la función incluida en la app.'],
+          ['9. Cancelación','Puedes eliminar tu cuenta en cualquier momento escribiéndonos a sonicandogit@gmail.com. Eliminaremos todos tus datos en un plazo de 30 días.'],
+          ['10. Legislación aplicable','Estos términos se rigen por la legislación española y europea aplicable.'],
+        ].map(([title,text])=>(
+          <div key={title} style={{marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:600,color:TXT,marginBottom:6}}>{title}</div>
+            <div style={{fontSize:12,color:MUTED,lineHeight:1.75}}>{text}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{padding:'12px 24px',borderTop:'0.5px solid '+BDR,flexShrink:0,textAlign:'right'}}>
+        <button onClick={onClose} style={{background:TXT,border:'none',borderRadius:8,padding:'9px 20px',fontSize:13,fontWeight:500,color:'#fff',cursor:'pointer'}}>Cerrar</button>
+      </div>
+    </div>
+  </div>
+);
+
+/* ─── PRIVACY MODAL ─────────────────────────────── */
+const PrivacyModal=({onClose})=>(
+  <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:580,maxHeight:'85vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
+      <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Política de Privacidad</div>
+        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
+        <p style={{color:MUTED,fontSize:11,marginBottom:16}}>Última actualización: junio 2025</p>
+        {[
+          ['1. Responsable del tratamiento','Unstuck es un servicio de escritura creativa desarrollado de forma independiente. Para cualquier consulta sobre privacidad, contacta a través del repositorio del proyecto en GitHub.'],
+          ['2. Datos que recogemos','Al registrarte: dirección de email y contraseña (cifrada). Al usar la app: textos que escribes, reflexiones, proyectos, estadísticas de sesión (palabras, tiempo). Al navegar: datos de uso anónimos mediante Google Analytics (solo con tu consentimiento explícito).'],
+          ['3. Finalidad del tratamiento','Prestarte el servicio de escritura creativa, sincronizar tus textos entre dispositivos, mostrarte tus estadísticas de progreso, y mejorar la aplicación mediante análisis de uso agregado y anónimo.'],
+          ['4. Base legal','La ejecución del contrato de servicio (prestarte Unstuck) y tu consentimiento explícito para el uso de cookies analíticas.'],
+          ['5. Dónde se almacenan tus datos','Tus datos se almacenan en Supabase (infraestructura sobre AWS en la región EU-West). Google Analytics solo se activa con tu consentimiento y anonimiza las IPs.'],
+          ['6. Plazo de conservación','Tus datos se conservan mientras tu cuenta esté activa. Puedes solicitar la eliminación completa de tu cuenta y todos tus datos escribiendo a través del repositorio del proyecto.'],
+          ['7. Tus derechos (RGPD)','Tienes derecho a acceder, rectificar, suprimir, portar y oponerte al tratamiento de tus datos. Para ejercerlos, contacta con nosotros. Tienes derecho a presentar una reclamación ante la Agencia Española de Protección de Datos (aepd.es).'],
+          ['8. Cookies','Unstuck no instala cookies de seguimiento. Google Analytics funciona en modo sin cookies (cookieless), sin almacenar identificadores en tu dispositivo. Solo usamos la cookie técnica de sesión de Supabase Auth, estrictamente necesaria para que puedas iniciar sesión.'],
+          ['9. Propiedad de tus textos','Todo el contenido que escribes en Unstuck es tuyo. No reclamamos ningún derecho sobre tus obras. No usamos tus textos para entrenar modelos de inteligencia artificial ni los cedemos a terceros.'],
+          ['10. Menores de edad','Unstuck no está dirigido a menores de 16 años. Si eres menor de 16 años, necesitas el consentimiento de tus padres o tutores para usar el servicio.'],
+        ].map(([title,text])=>(
+          <div key={title} style={{marginBottom:16}}>
+            <div style={{fontWeight:600,marginBottom:4}}>{title}</div>
+            <p style={{color:MUTED,margin:0}}>{text}</p>
+          </div>
+        ))}
+        <div style={{marginTop:16,padding:'12px 16px',background:'rgba(85,80,184,0.05)',borderRadius:8,fontSize:12,color:MUTED}}>
+          Google Analytics: al aceptar cookies, Google puede recopilar datos de uso según su <a href="https://policies.google.com/privacy" target="_blank" style={{color:'#5550B8'}}>política de privacidad</a>. Puedes conocer cómo usa Google los datos en <a href="https://policies.google.com/technologies/partner-sites" target="_blank" style={{color:'#5550B8'}}>google.com/policies/privacy/partners</a>.
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/* ─── TERMS MODAL ────────────────────────────────── */
+const TermsModal=({onClose})=>(
+  <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:580,maxHeight:'85vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
+      <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Términos de Servicio</div>
+        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
+        <p style={{color:MUTED,fontSize:11,marginBottom:16}}>Última actualización: junio 2025</p>
+        {[
+          ['1. Aceptación de los términos','Al registrarte y usar Unstuck, aceptas estos términos. Si no los aceptas, no debes usar el servicio.'],
+          ['2. Descripción del servicio','Unstuck es una aplicación web de escritura creativa que te permite escribir, guardar y organizar tus textos, seguir tu progreso y compartir retos con otros escritores.'],
+          ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña y de todas las actividades que ocurran bajo tu cuenta. Debes notificarnos inmediatamente de cualquier uso no autorizado.'],
+          ['4. Propiedad intelectual de los textos','Todo el contenido que creas en Unstuck es de tu propiedad. Unstuck no reivindica ningún derecho sobre tus obras. Nos concedes únicamente la licencia técnica mínima necesaria para almacenar y sincronizar tus textos entre tus dispositivos.'],
+          ['5. Uso aceptable','Te comprometes a no usar Unstuck para publicar contenido ilegal, ofensivo, que infrinja derechos de terceros o que acose a otros usuarios. Nos reservamos el derecho de eliminar contenido que viole estas condiciones y suspender cuentas en casos graves.'],
+          ['6. Contenido compartido públicamente','Si publicas textos como "Abierto" o "Amigos", eres responsable de ese contenido. Otros usuarios podrán leer tus textos según la visibilidad que hayas configurado.'],
+          ['7. Disponibilidad del servicio','Unstuck se ofrece "tal cual" y "según disponibilidad". No garantizamos que el servicio esté disponible de forma ininterrumpida. Hacemos copias de seguridad regularmente, pero te recomendamos descargar tus propias copias.'],
+          ['8. Limitación de responsabilidad','En la máxima medida permitida por la ley, Unstuck no será responsable de pérdidas de datos, interrupciones del servicio, daños indirectos o cualquier pérdida derivada del uso o la imposibilidad de uso del servicio.'],
+          ['9. Modificaciones','Podemos modificar estos términos. Te notificaremos los cambios relevantes. Si continúas usando Unstuck después de los cambios, aceptas los nuevos términos.'],
+          ['10. Ley aplicable','Estos términos se rigen por la legislación española. Cualquier disputa se someterá a los juzgados y tribunales de España.'],
+        ].map(([title,text])=>(
+          <div key={title} style={{marginBottom:16}}>
+            <div style={{fontWeight:600,marginBottom:4}}>{title}</div>
+            <p style={{color:MUTED,margin:0}}>{text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+/* ─── COOKIE BANNER ──────────────────────────────── */
+const CookieBanner=({onAccept,onDecline})=>(
+  <div className="fu" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:199,background:'#1A1916',padding:'14px 20px',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',boxShadow:'0 -2px 20px rgba(0,0,0,0.2)'}}>
+    <div style={{flex:1,minWidth:200}}>
+      <div style={{fontSize:13,fontWeight:500,color:'#fff',marginBottom:3}}>Cookies y analítica</div>
+      <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',lineHeight:1.6}}>
+        Usamos Google Analytics para entender cómo se usa la app y mejorarla. Solo se activa con tu consentimiento.
+        {' '}<a href="https://policies.google.com/technologies/partner-sites" target="_blank" style={{color:'rgba(255,255,255,0.4)',fontSize:10}}>Cómo usa Google los datos →</a>
+      </div>
+    </div>
+    <div style={{display:'flex',gap:8,flexShrink:0}}>
+      <button onClick={onDecline} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'7px 14px',fontSize:12,color:'rgba(255,255,255,0.5)',cursor:'pointer'}}>Solo esenciales</button>
+      <button onClick={onAccept} style={{background:'#fff',border:'none',borderRadius:7,padding:'7px 16px',fontSize:12,fontWeight:600,color:'#1A1916',cursor:'pointer'}}>Aceptar</button>
+    </div>
+  </div>
+);
+
+
 /* ─── APP ROOT ─────────────────────────────────────── */
 const App=()=>{
   const [user,setUser]=useState(null);       // Supabase auth user merged with profile
@@ -4526,6 +4826,8 @@ const App=()=>{
   const [showExLibrary,setShowExLibrary]=useState(false);
   const [syncStatus,setSyncStatus]=useState(null);
   const [receivedChallenges,setReceivedChallenges]=useState([]);
+  const [showPrivacy,setShowPrivacy]=useState(false);
+  const [showTerms,setShowTerms]=useState(false);
   const [driveRefresh,setDriveRefresh]=useState(0);
 
   // ── Load user data from Supabase ──────────────────────────────────────────
@@ -4724,6 +5026,8 @@ const App=()=>{
 
   if(loading)return<div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:MUTED}}>Cargando Unstuck…</div>;
 
+
+
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
   if(view==='postSession')return<PostSession sessionData={sessionData} onComplete={completeReflection} onBack={()=>{setView('dashboard');loadUserData(user.id);}} user={user}/>;
@@ -4743,13 +5047,19 @@ const App=()=>{
   if(view==='briefing')return<SessionBriefing user={user} energy={energy} library={library} projects={projects} saveProject={saveProject} onStart={startSession} onBack={()=>setView('dashboard')}/>;
 
   return<>
+    
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} setReadingEntry={undefined}/>}
+    {cookieConsent===null&&<CookieBanner
+      onAccept={()=>{grantConsent();setCookieConsent('granted');trackEvent('signup');}}
+      onDecline={()=>{denyConsent();setCookieConsent('denied');}}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
       onOpenLibrary={()=>setShowExLibrary(true)} syncStatus={syncStatus}
       driveData={driveData} driveConnected={driveConnected} onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
       onRefresh={()=>loadUserData(user.id)}
       receivedChallenges={receivedChallenges}
+      onShowPrivacy={()=>setShowPrivacy(true)}
+      onShowTerms={()=>setShowTerms(true)}
       onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
       onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}/>
   </>;
