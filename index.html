@@ -1462,16 +1462,8 @@ const exportZip=async(user,library,reflections,projects)=>{
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-<script type="text/babel" data-presets="react">
-const {useState,useEffect,useRef,useMemo}=React;
 
-/* ─── CONSTANTS ─────────────────────────────────── */
-const S={
-  get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch(e){return null}},
-  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},
-  del:k=>{try{localStorage.removeItem(k)}catch(e){}},
-  list:p=>Object.keys(localStorage).filter(k=>k.startsWith(p)),
-};
+<script>
 // localStorage used only for local cache (Drive state, API keys, mood)
 const EXERCISE_BANK={
   low:[
@@ -1772,6 +1764,18 @@ Usa esas seis palabras como primera línea y expándelas. No las expliques. Deja
 La expansión no debe "resolver" las seis palabras. Debe hacer que el lector sienta más, no que entienda más.`},
   ],
 };
+</script>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useRef,useMemo}=React;
+
+/* ─── CONSTANTS ─────────────────────────────────── */
+const S={
+  get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch(e){return null}},
+  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},
+  del:k=>{try{localStorage.removeItem(k)}catch(e){}},
+  list:p=>Object.keys(localStorage).filter(k=>k.startsWith(p)),
+};
+
 const getExercises=energy=>{if(energy<=3)return EXERCISE_BANK.low;if(energy<=6)return EXERCISE_BANK.mid;return EXERCISE_BANK.high};
 const pickExercise=(energy,usedIds=[])=>{const bank=getExercises(energy);const avail=bank.filter(e=>!usedIds.includes(e.id));return avail.length?avail[Math.floor(Math.random()*avail.length)]:bank[Math.floor(Math.random()*bank.length)]};
 const PROJECT_TYPES=['Novela','Relato corto','Poemario','Ensayo','Microrrelatos','Guión','Diario creativo'];
@@ -1808,7 +1812,7 @@ const fmtDT=ts=>{if(!ts)return null;const d=new Date(ts);return d.toLocaleDateSt
 const initials=n=>n.trim().split(' ').slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('');
 const fmt=s=>{if(s==null||s<0)return'—';return Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0')};
 const fmtTime=s=>{if(!s||s<=0)return'—';if(s<60)return s+'s';const hh=Math.floor(s/3600),mm=Math.floor((s%3600)/60);return hh>0?hh+'h '+mm+'m':mm+'m'};
-const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;try{segs=text.split(/(?<=[.!?…])\s+/).filter(s=>s.trim())}catch(e){segs=text.replace(/([.!?…])\s+/g,'$1\n').split('\n').filter(s=>s.trim())}let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
+const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;segs=text.replace(/([.!?])/g,'$1\n').split('\n').filter(s=>s.trim());let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
 const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id)||m.get(e.id).ts<e.ts)m.set(e.id,e)});return Array.from(m.values()).sort((a,b)=>b.ts-a.tss)};
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
 const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return days[d.getDay()].charAt(0).toUpperCase()+days[d.getDay()].slice(1)+', '+d.getDate()};
@@ -2225,22 +2229,6 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
                   <button onClick={()=>onShowPrivacy?.()} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0,textDecoration:'underline'}}>Privacidad</button>
                   <button onClick={()=>onShowTerms?.()} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0,textDecoration:'underline'}}>Términos</button>
                 </div>
-              </div>
-            </>}
-          </div>
-
-          <div style={{position:'relative'}}>
-            <button onClick={()=>setShowUserMenu(v=>!v)} style={{display:'flex',alignItems:'center',gap:7,background:'transparent',border:'0.5px solid '+BDR,borderRadius:20,padding:'4px 10px 4px 6px',cursor:'pointer'}}>
-              <UserAvatar user={user} size={22}/>
-              <span style={{fontSize:12,fontWeight:500,color:TXT}}>{user.name}</span>
-            </button>
-            {showUserMenu&&<>
-              <div onClick={()=>setShowUserMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
-              <div className="fi" style={{position:'absolute',right:0,top:'calc(100% + 6px)',width:170,background:'#fff',border:'0.5px solid '+BDR,borderRadius:10,boxShadow:'0 4px 20px rgba(0,0,0,0.08)',overflow:'hidden',zIndex:50}}>
-                {users.filter(u=>u.id!==user.id).map(u=><button key={u.id} onClick={()=>{onSwitchUser(u);setShowUserMenu(false)}} style={{display:'flex',alignItems:'center',gap:7,width:'100%',background:'transparent',border:'none',padding:'8px 12px',cursor:'pointer'}}><div style={{width:20,height:20,borderRadius:'50%',background:u.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:600,color:u.textCol}}>{u.initials}</div><span style={{fontSize:12,color:TXT}}>{u.name}</span></button>)}
-                <div style={{borderTop:'0.5px solid '+BDR}}/>
-                <button onClick={()=>{onLogout();setShowUserMenu(false)}} style={{display:'block',width:'100%',background:'transparent',border:'none',padding:'8px 12px',fontSize:12,color:MUTED,cursor:'pointer',textAlign:'left'}}>Cambiar usuario</button>
-                <button onClick={()=>{if(window.confirm('¿Eliminar el perfil de '+user.name+'?'))onDeleteUser(user.id);setShowUserMenu(false)}} style={{display:'block',width:'100%',background:'transparent',border:'none',padding:'8px 12px',fontSize:12,color:'rgba(168,32,32,0.6)',cursor:'pointer',textAlign:'left'}}>Eliminar perfil</button>
               </div>
             </>}
           </div>
