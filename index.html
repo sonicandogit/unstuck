@@ -1467,9 +1467,9 @@ const {useState,useEffect,useRef,useMemo}=React;
 
 /* ─── CONSTANTS ─────────────────────────────────── */
 const S={
-  get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}},
-  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}},
-  del:k=>{try{localStorage.removeItem(k)}catch{}},
+  get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch(e){return null}},
+  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},
+  del:k=>{try{localStorage.removeItem(k)}catch(e){}},
   list:p=>Object.keys(localStorage).filter(k=>k.startsWith(p)),
 };
 // localStorage used only for local cache (Drive state, API keys, mood)
@@ -1803,12 +1803,12 @@ const TXT='#1A1916',MUTED='#6B6963',FAINT='rgba(26,25,22,0.38)',BDR='rgba(0,0,0,
 /* ─── UTILS ──────────────────────────────────────── */
 const uid=()=>Math.random().toString(36).slice(2,10);
 const today=()=>new Date().toISOString().slice(0,10);
-const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}catch{return iso}};
+const fmtDate=iso=>{try{return new Date(iso).toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}catch(e){return iso}};
 const fmtDT=ts=>{if(!ts)return null;const d=new Date(ts);return d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})+' '+d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')};
 const initials=n=>n.trim().split(' ').slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('');
 const fmt=s=>{if(s==null||s<0)return'—';return Math.floor(s/60)+':'+(s%60).toString().padStart(2,'0')};
 const fmtTime=s=>{if(!s||s<=0)return'—';if(s<60)return s+'s';const hh=Math.floor(s/3600),mm=Math.floor((s%3600)/60);return hh>0?hh+'h '+mm+'m':mm+'m'};
-const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;try{segs=text.split(/(?<=[.!?…])\s+/).filter(s=>s.trim())}catch{segs=text.replace(/([.!?…])\s+/g,'$1\n').split('\n').filter(s=>s.trim())}let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
+const lastSents=(text,n,max)=>{if(!text?.trim())return'';let segs;try{segs=text.split(/(?<=[.!?…])\s+/).filter(s=>s.trim())}catch(e){segs=text.replace(/([.!?…])\s+/g,'$1\n').split('\n').filter(s=>s.trim())}let r=segs.length>n?segs.slice(-n).join(' '):text;if(r.length>max){const c=r.slice(-max);const sp=c.indexOf(' ');r='…'+(sp>0?c.slice(sp+1):c)}return r.trim()};
 const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id)||m.get(e.id).ts<e.ts)m.set(e.id,e)});return Array.from(m.values()).sort((a,b)=>b.ts-a.tss)};
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
 const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return days[d.getDay()].charAt(0).toUpperCase()+days[d.getDay()].slice(1)+', '+d.getDate()};
@@ -1842,7 +1842,7 @@ const callClaude=async(system,userMsg,maxTokens=600,uid)=>{
     body:JSON.stringify({model:'claude-opus-4-7',max_tokens:maxTokens,system,messages:[{role:'user',content:userMsg}]}),
   });
   if(r.status===401)throw new Error('invalid_key');
-  if(!r.ok){let msg='Error HTTP '+r.status;try{const e=await r.json();msg=e.error?.message?e.error.message+' ('+r.status+')':msg}catch{}throw new Error(msg)}
+  if(!r.ok){let msg='Error HTTP '+r.status;try{const e=await r.json();msg=e.error?.message?e.error.message+' ('+r.status+')':msg}catch(e){}throw new Error(msg)}
   const d=await r.json();
   return d.content?.filter(b=>b.type==='text').map(b=>b.text).join('')||'';
 };
@@ -1859,7 +1859,7 @@ const doPush=async(customExercise,customReto,currentProject,plainTxt,uid)=>{
 };
 
 /* ─── GOOGLE DRIVE ────────────────────────────────── */
-const getOrigin=()=>{try{const o=window.location.origin;return o&&o!=='null'?o:''}catch{return''}};
+const getOrigin=()=>{try{const o=window.location.origin;return o&&o!=='null'?o:''}catch(e){return''}};
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.appdata';
 
 // OAuth via redirect — most compatible with mobile PWAs
@@ -2871,7 +2871,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     clearTimeout(toastRef.current);setToast(MODES.find(x=>x.id===m));toastRef.current=setTimeout(()=>setToast(null),2500);
   };
   const cmd=c=>{edRef.current?.focus();document.execCommand(c,false,null);syncFmt()};
-  const syncFmt=()=>{try{setBold(document.queryCommandState('bold'));setItalic(document.queryCommandState('italic'));setUnder(document.queryCommandState('underline'))}catch{}};
+  const syncFmt=()=>{try{setBold(document.queryCommandState('bold'));setItalic(document.queryCommandState('italic'));setUnder(document.queryCommandState('underline'))}catch(e){}};
   const doAlign=d=>{setAlign(d);edRef.current?.focus();document.execCommand({left:'justifyLeft',center:'justifyCenter',right:'justifyRight'}[d],false,null)};
 
   const updateTunnelStyle=()=>{
@@ -2894,7 +2894,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           if(b===anchor||b.contains(anchor)||anchor===b.parentNode)curIdx=i;
         });
       }
-    }catch{}
+    }catch(e){}
     blocks.forEach((b,i)=>{
       const isCur=i===curIdx;
       b.style.filter=isCur?'none':'blur(3px)';
@@ -3485,7 +3485,7 @@ const UsernamePanel=({user,onClose,onSave})=>{
       const taken=r.find(u=>u.username===val&&u.id!==user.id);
       if(taken){setMsg('Este nombre ya está en uso');setOk(false);}
       else{setMsg('✓ Disponible');setOk(true);}
-    }catch{}
+    }catch(e){}
     finally{setChecking(false);}
   };
 
@@ -4216,7 +4216,7 @@ const ProfileSettings=({user,onClose,onSave})=>{
       const taken=r.find(u=>u.username===val&&u.id!==user.id);
       if(taken){setUsernameMsg('Ya está en uso');}
       else{setUsernameMsg('✓ Disponible');setUsernameOk(true);}
-    }catch{}
+    }catch(e){}
     finally{setChecking(false);}
   };
 
@@ -4761,7 +4761,7 @@ const App=()=>{
       })).sort((a,b)=>b.ts-a.ts));
       setProjects(projs);
       S.set('flujo:lessons:'+uid,lessons);
-      try{const chs=await DB.getReceivedChallenges(uid);setReceivedChallenges(chs);}catch{}
+      try{const chs=await DB.getReceivedChallenges(uid);setReceivedChallenges(chs);}catch(e){}
       setSyncStatus('ok');
       setTimeout(()=>setSyncStatus(s=>s==='ok'?null:s),2000);
     }catch(e){
@@ -4785,21 +4785,26 @@ const App=()=>{
 
   // Session check on mount
   useEffect(()=>{
-    const timeout=setTimeout(()=>setLoading(false),5000);
+    const timeout=setTimeout(()=>setLoading(false),3000);
     DB.getSession().then(async session=>{
       try{
         if(session?.user){
+          // Show app immediately, load profile + data in background
+          clearTimeout(timeout);
+          setLoading(false);
           const profile=await DB.getProfile(session.user.id);
-          if(profile){
-            setUser({...session.user,...profile});
-            await loadUserData(session.user.id);
-          }else{
-            setUser(session.user);
-            await loadUserData(session.user.id);
-          }
+          const resolvedProfile=profile||{id:session.user.id,name:session.user.email?.split('@')[0]||'Usuario',initials:'U',accent:'#5550B8',bg:'#EEEDFE',text_col:'#3C3489'};
+          setUser({...session.user,...resolvedProfile});
+          loadUserData(session.user.id); // non-blocking
+        }else{
+          clearTimeout(timeout);
+          setLoading(false);
         }
-      }catch(e){console.error('Session load error:',e);}
-      finally{clearTimeout(timeout);setLoading(false);}
+      }catch(e){
+        console.error('Session load error:',e);
+        clearTimeout(timeout);
+        setLoading(false);
+      }
     }).catch(e=>{
       console.error('getSession error:',e);
       clearTimeout(timeout);
