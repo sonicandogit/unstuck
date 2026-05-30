@@ -2082,9 +2082,8 @@ const AuthScreen=({onAuth})=>{
     <>
     {showPrivacy&&<PrivacyModal onClose={()=>setShowPrivacy(false)}/>}
     {showTerms&&<TermsModal onClose={()=>setShowTerms(false)}/>}
-    <div style={{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto',position:'relative'}}>
-      <div style={{position:'fixed',inset:0,background:'rgba(244,242,237,0.70)',zIndex:0,pointerEvents:'none'}}/>
-      <div style={{position:'relative',zIndex:1,width:'100%',maxWidth:380,display:'flex',flexDirection:'column',alignItems:'center'}}>
+    <div style={{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto'}}>
+      <div style={{width:'100%',maxWidth:380,display:'flex',flexDirection:'column',alignItems:'center'}}>
         <div style={{fontSize:40,fontWeight:700,letterSpacing:'-0.05em',color:TXT,marginBottom:6,fontFamily:'Lora,Georgia,serif'}}>Unstuck</div>
         <div style={{fontSize:13,color:MUTED,marginBottom:36}}>editor de escritura creativa</div>
 
@@ -2777,14 +2776,14 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const customExercise=sessionConfig.exercise||null;
   const customReto=sessionConfig.reto||null;
   const currentProject=sessionConfig.project||null;
-  const RETO_MODES=['rio','limite','tunel'];
+  const RETO_MODES=['normal','rio','limite','tunel','presion'];
 
   const [started,setStarted]=useState(false);
   const [timerSec,setTimer]=useState(sk==='check'?7*60:null);
   const [running,setRunning]=useState(false);
   const lockedMode=null; // modes are always user-selectable
   const allowedModes=sk==='proyecto'?null:RETO_MODES;
-  const [ab,setAb]=useState(customExercise?.mode||'tunel');
+  const [ab,setAb]=useState(customExercise?.mode||'normal');
   const [idle,setIdle]=useState(0);const [idleWarn,setIdleWarn]=useState(false);
   const [elapsed,setElapsed]=useState(0);const [done,setDone]=useState(false);const [toast,setToast]=useState(null);
   const [autoSave,setAutoSave]=useState(true);const [asCd,setAsCd]=useState(AUTOSAVE);const [saveStatus,setSaveStatus]=useState('idle');
