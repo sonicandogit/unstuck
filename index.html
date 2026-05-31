@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pretexto</title>
+<title>Unstuck</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="icon" type="image/png" href="pretextofavicon.png">
-<link rel="apple-touch-icon" href="pretextofavicon.png">
+<link rel="icon" type="image/png" href="unstuckfavicon.png">
+<link rel="apple-touch-icon" href="unstuckfavicon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Pretexto">
+<meta name="apple-mobile-web-app-title" content="Unstuck">
 <link rel="manifest" href="manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#F4F2ED">
@@ -57,7 +57,7 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
 </script>
 </head>
 <body>
-<div id="root"><div style="height:100vh;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6B6963">Cargando Pretexto…</div></div>
+<div id="root"><div style="height:100vh;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6B6963">Cargando Unstuck…</div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script type="module">import*as d from'https://esm.sh/docx@8.5.0';window.__docx=d;window.dispatchEvent(new Event('docxReady'));</script>
@@ -1455,7 +1455,7 @@ const exportZip=async(user,library,reflections,projects)=>{
   const blob=await zip.generateAsync({type:'blob'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url;a.download='pretexto_backup_'+dateStr+'.zip';
+  a.href=url;a.download='unstuck_backup_'+dateStr+'.zip';
   document.body.appendChild(a);a.click();
   document.body.removeChild(a);URL.revokeObjectURL(url);
 };
@@ -1956,8 +1956,8 @@ const exportDocx=async(entry,fDocx,fSize,feedbackTxt)=>{
       feedbackParas.push(new Paragraph({children:[new TextRun({text:line.trim(),size:fSize*2-2,font:fDocx,color:'444444'})],spacing:{after:120}}));
     });
   }
-  const doc=new Document({styles:{default:{document:{run:{font:fDocx,size:fSize*2}}}},sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1440,right:1440,bottom:1440,left:1440}}},children:[new Paragraph({children:[new TextRun({text:entry.title||'Pretexto',bold:true,size:36,font:fDocx})],spacing:{after:240}}),new Paragraph({children:[new TextRun({text:(entry.sessionLabel||'')+' · '+fmtDate(entry.date)+' · '+entry.wordCount+' palabras',size:18,color:'888888',font:'Arial'})],spacing:{after:480}}),...paras,...feedbackParas]}]});
-  const blob=await Packer.toBlob(doc);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=((entry.title||'pretexto').replace(/[^a-z0-9áéíóúñ ]/gi,'').trim()||'pretexto')+'.docx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+  const doc=new Document({styles:{default:{document:{run:{font:fDocx,size:fSize*2}}}},sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1440,right:1440,bottom:1440,left:1440}}},children:[new Paragraph({children:[new TextRun({text:entry.title||'Unstuck',bold:true,size:36,font:fDocx})],spacing:{after:240}}),new Paragraph({children:[new TextRun({text:(entry.sessionLabel||'')+' · '+fmtDate(entry.date)+' · '+entry.wordCount+' palabras',size:18,color:'888888',font:'Arial'})],spacing:{after:480}}),...paras,...feedbackParas]}]});
+  const blob=await Packer.toBlob(doc);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=((entry.title||'unstuck').replace(/[^a-z0-9áéíóúñ ]/gi,'').trim()||'unstuck')+'.docx';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 };
 
 /* ─── MICRO COMPONENTS ───────────────────────────── */
@@ -2084,7 +2084,7 @@ const AuthScreen=({onAuth})=>{
     {showTerms&&<TermsModal onClose={()=>setShowTerms(false)}/>}
     <div style={{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto'}}>
       <div style={{width:'100%',maxWidth:380,display:'flex',flexDirection:'column',alignItems:'center'}}>
-        <div style={{fontSize:40,fontWeight:700,letterSpacing:'-0.05em',color:TXT,marginBottom:6,fontFamily:'Lora,Georgia,serif'}}>Pretexto</div>
+        <div style={{fontSize:40,fontWeight:700,letterSpacing:'-0.05em',color:TXT,marginBottom:6,fontFamily:'Lora,Georgia,serif'}}>Unstuck</div>
         <div style={{fontSize:13,color:MUTED,marginBottom:36}}>editor de escritura creativa</div>
 
         <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:24,width:'100%',boxShadow:'0 4px 24px rgba(0,0,0,0.07)'}}>
@@ -2178,7 +2178,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
-        <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Pretexto</div>
+        <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Unstuck</div>
         <div style={{flex:1}}/>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Lecciones</button>
@@ -2407,7 +2407,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
       {showLeccion&&<LeccionModal reto={leccionReto} onClose={()=>setShowLeccion(false)}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:46,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0,gap:10}}>
         <button onClick={onBack} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:4}}>← Volver</button>
-        <div style={{fontSize:14,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Pretexto</div>
+        <div style={{fontSize:14,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>Unstuck</div>
         <div style={{flex:1}}/>
         <div style={{fontSize:12,color:MUTED}}>Energía <strong style={{color:TXT}}>{energy}/10</strong></div>
       </div>
@@ -2943,7 +2943,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       {/* TOPBAR */}
       <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:44,background:'#fff',borderBottom:'0.5px solid '+BDR,gap:4,flexShrink:0,zIndex:10}}>
         <button onClick={()=>{if(started&&plainTxt.trim()){if(!window.confirm('¿Volver al menú?'))return;}if(started)saveNow(false);onBack();}} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:12,display:'flex',alignItems:'center',gap:3,padding:'3px 6px',borderRadius:5,flexShrink:0}}>← Menú</button>
-        <div style={{fontSize:14,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',marginRight:4}}>Pretexto</div>
+        <div style={{fontSize:14,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',marginRight:4}}>Unstuck</div>
         <div style={{display:'flex',gap:2,flex:1}}>
           {['check','reto','proyecto'].map(id=><button key={id} onClick={()=>{if(id!==sk){if(started&&plainTxt.trim()){if(!window.confirm('¿Cambiar de sección? El texto se guardará.'))return;saveNow(false);}onBack();}}} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:id!==sk?'pointer':'default',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
         </div>
@@ -3689,8 +3689,8 @@ const InvitePanel=({user,team,onBack})=>{
     try{
       const inv=await DB.createInvitation(team.id,email.trim(),user.id);
       const link=baseUrl+'?team='+inv.code;
-      const subject=encodeURIComponent(user.name+' te invita al equipo "'+team.name+'" en Pretexto');
-      const body=encodeURIComponent('Hola,\n\n'+user.name+' te ha invitado a unirte al equipo "'+team.name+'" en Pretexto, un editor de escritura creativa.\n\nEntra con este enlace:\n'+link+'\n\nHasta pronto,\nEl equipo Pretexto');
+      const subject=encodeURIComponent(user.name+' te invita al equipo "'+team.name+'" en Unstuck');
+      const body=encodeURIComponent('Hola,\n\n'+user.name+' te ha invitado a unirte al equipo "'+team.name+'" en Unstuck, un editor de escritura creativa.\n\nEntra con este enlace:\n'+link+'\n\nHasta pronto,\nEl equipo Unstuck');
       window.open('mailto:'+email.trim()+'?subject='+subject+'&body='+body);
       setStatus('¡Invitación preparada para '+email+'!');
       setEmail('');
@@ -4727,7 +4727,7 @@ const CookieBanner=({onAccept,onDecline})=>(
     <div style={{flex:1,minWidth:200}}>
       <div style={{fontSize:13,fontWeight:500,marginBottom:4}}>Usamos cookies analíticas</div>
       <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',lineHeight:1.6}}>
-        Pretexto usa Google Analytics para entender cómo se usa la app. No usamos cookies publicitarias. {' '}
+        Unstuck usa Google Analytics para entender cómo se usa la app. No usamos cookies publicitarias. {' '}
         <a href="/unstuck/privacidad.html" target="_blank" style={{color:'rgba(255,255,255,0.7)',textDecoration:'underline'}}>Política de privacidad</a>
       </div>
     </div>
@@ -4750,14 +4750,14 @@ const PrivacyModal=({onClose})=>(
         <p style={{color:MUTED,marginBottom:16}}>Última actualización: {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</p>
 
         {[
-          ['¿Quién es el responsable?','Pretexto es un servicio de escritura creativa operado por Lucas Sánchez (sonicandogit@gmail.com). Para cualquier consulta sobre privacidad, puedes escribirnos a ese correo.'],
+          ['¿Quién es el responsable?','Unstuck es un servicio de escritura creativa operado por Lucas Sánchez (sonicandogit@gmail.com). Para cualquier consulta sobre privacidad, puedes escribirnos a ese correo.'],
           ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Son completamente privados por defecto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.'],
           ['¿Para qué usamos tus datos?','— Para proporcionarte el servicio de escritura y guardar tus textos.\n— Para mejorar la app mediante análisis de uso agregado y anónimo.\n— Nunca vendemos tus datos a terceros.\n— Nunca usamos tus textos para entrenar modelos de IA.'],
           ['¿Dónde se almacenan?','Tus datos se almacenan en Supabase (infraestructura AWS en Europa). Google Analytics almacena datos de uso en servidores de Google. Puedes consultar la política de Google en google.com/policies/privacy/partners.'],
           ['Cookies','Solo usamos cookies analíticas de Google Analytics, y únicamente si has dado tu consentimiento. Puedes rechazarlas sin que ello afecte al funcionamiento de la app.'],
           ['Tus derechos (GDPR)','Tienes derecho a: acceder a tus datos, rectificarlos, eliminarlos ("derecho al olvido"), portabilidad de datos, y oponerte al tratamiento. Para ejercer cualquiera de estos derechos, escríbenos a sonicandogit@gmail.com. Para eliminar tu cuenta y todos tus datos, puedes solicitarlo por email y lo haremos en un plazo máximo de 30 días.'],
-          ['API de Claude (Anthropic)','Si introduces una API key de Claude, tus textos se envían a la API de Anthropic para generar feedback. Anthropic tiene su propia política de privacidad. Pretexto no almacena tu API key en el servidor — se guarda solo en tu dispositivo.'],
-          ['Menores de edad','Pretexto no está dirigido a menores de 16 años. Si eres menor, necesitas el consentimiento de tus padres o tutores.'],
+          ['API de Claude (Anthropic)','Si introduces una API key de Claude, tus textos se envían a la API de Anthropic para generar feedback. Anthropic tiene su propia política de privacidad. Unstuck no almacena tu API key en el servidor — se guarda solo en tu dispositivo.'],
+          ['Menores de edad','Unstuck no está dirigido a menores de 16 años. Si eres menor, necesitas el consentimiento de tus padres o tutores.'],
           ['Cambios en esta política','Notificaremos cambios relevantes por email. El uso continuado del servicio tras los cambios implica la aceptación de la nueva política.'],
         ].map(([title,text])=>(
           <div key={title} style={{marginBottom:20}}>
@@ -4784,14 +4784,14 @@ const TermsModal=({onClose})=>(
       <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
         <p style={{color:MUTED,marginBottom:16}}>Última actualización: {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</p>
         {[
-          ['1. Aceptación','Al crear una cuenta en Pretexto, aceptas estos términos. Si no estás de acuerdo, no uses el servicio.'],
-          ['2. El servicio','Pretexto es una herramienta de escritura creativa. Proporcionamos el servicio "tal cual" y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
+          ['1. Aceptación','Al crear una cuenta en Unstuck, aceptas estos términos. Si no estás de acuerdo, no uses el servicio.'],
+          ['2. El servicio','Unstuck es una herramienta de escritura creativa. Proporcionamos el servicio "tal cual" y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
           ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña. Notifícanos si detectas uso no autorizado.'],
-          ['4. Propiedad de tus textos','Los textos que escribes en Pretexto son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo.'],
-          ['5. Uso aceptable','No puedes usar Pretexto para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar contenido que viole estas normas.'],
+          ['4. Propiedad de tus textos','Los textos que escribes en Unstuck son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo.'],
+          ['5. Uso aceptable','No puedes usar Unstuck para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar contenido que viole estas normas.'],
           ['6. Privacidad de los textos','Los textos marcados como "Privado" solo son accesibles por ti. Los marcados como "Amigos" son accesibles por tus seguidores mutuos. Los marcados como "Abierto" son visibles para todos los usuarios registrados.'],
-          ['7. API de Claude','Si usas la función de feedback de Claude, aceptas los términos de uso de Anthropic. Pretexto actúa como intermediario y no almacena el contenido procesado.'],
-          ['8. Limitación de responsabilidad','Pretexto no garantiza la disponibilidad continua del servicio. No somos responsables de la pérdida de datos. Recomendamos hacer backups periódicos con la función incluida en la app.'],
+          ['7. API de Claude','Si usas la función de feedback de Claude, aceptas los términos de uso de Anthropic. Unstuck actúa como intermediario y no almacena el contenido procesado.'],
+          ['8. Limitación de responsabilidad','Unstuck no garantiza la disponibilidad continua del servicio. No somos responsables de la pérdida de datos. Recomendamos hacer backups periódicos con la función incluida en la app.'],
           ['9. Cancelación','Puedes eliminar tu cuenta en cualquier momento escribiéndonos a sonicandogit@gmail.com. Eliminaremos todos tus datos en un plazo de 30 días.'],
           ['10. Legislación aplicable','Estos términos se rigen por la legislación española y europea aplicable.'],
         ].map(([title,text])=>(
@@ -4808,149 +4808,6 @@ const TermsModal=({onClose})=>(
   </div>
 )
 
-
-/* ─── ONBOARDING MODAL ─────────────────────────────── */
-const ONBOARDING_KEY='pretexto:onboarding:seen:v1';
-const OnboardingModal=({onClose})=>{
-  const [cur,setCur]=useState(0);
-  const [noShow,setNoShow]=useState(false);
-  const total=6;
-  const handleClose=()=>{
-    if(noShow)localStorage.setItem(ONBOARDING_KEY,'1');
-    onClose();
-  };
-  const slides=[
-    {
-      title:'Bienvenido a Pretexto',
-      body:()=><>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Escribir duele. Como cualquier disciplina que valga la pena, los primeros días son los peores. La hoja en blanco intimida, las palabras no salen como querías, y la tentación de dejarlo para mañana es enorme. Pero ocurre algo curioso cuando no paras: el dolor disminuye. No desaparece del todo —los buenos escritores siguen sintiéndolo— pero se convierte en algo más manejable, casi en un compañero de trabajo.</p>
-        <div style={{borderLeft:'2px solid #5550B8',paddingLeft:10,margin:'10px 0',fontStyle:'italic',fontSize:12,color:MUTED,lineHeight:1.6}}><span style={{color:TXT}}>«Escribir es sentarse a una máquina de escribir y abrir las venas.»</span><br/><span style={{fontSize:11,color:FAINT,fontStyle:'normal'}}>— Red Smith</span></div>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Pretexto nació para ayudarte a no parar. Con ejercicios diarios, retos que puedes compartir, y los textos de otros escritores como compañía. Porque la mejor forma de escribir solos es saber que no eres el único haciéndolo.</p>
-        <div style={{borderLeft:'2px solid #5550B8',paddingLeft:10,margin:'10px 0',fontStyle:'italic',fontSize:12,color:MUTED,lineHeight:1.6}}><span style={{color:TXT}}>«Un escritor que espera las condiciones perfectas para trabajar no producirá nada.»</span><br/><span style={{fontSize:11,color:FAINT,fontStyle:'normal'}}>— E.B. White</span></div>
-        <div style={{background:BG2,border:'0.5px solid '+BDR,borderRadius:10,padding:12,marginTop:10}}>
-          <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:8,padding:'6px 10px',marginBottom:8,display:'flex',alignItems:'center',gap:8}}>
-            <span style={{fontSize:12,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>pretexto</span>
-            <span style={{flex:1}}/>
-            <span style={{fontSize:10,background:'rgba(85,80,184,0.12)',color:'#5550B8',borderRadius:20,padding:'2px 8px'}}>Biblioteca</span>
-            <span style={{fontSize:10,background:BG2,border:'0.5px solid '+BDR,borderRadius:20,padding:'2px 8px',color:MUTED}}>Equipos</span>
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3,marginBottom:8}}>
-            {['L','M','X','J','V','S','D'].map((d,i)=><div key={d} style={{aspectRatio:'1',borderRadius:4,background:i<4?'rgba(85,80,184,0.12)':i===4?'#5550B8':'rgba(0,0,0,0.04)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,color:i<4?'#5550B8':i===4?'#fff':FAINT,border:'0.5px solid '+(i<5?'transparent':BDR)}}>{d}</div>)}
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:5}}>
-            {[['1.240','palabras'],['4','sesiones'],['🔥 4','racha']].map(([v,l])=><div key={l} style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:'6px 8px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:500,color:TXT}}>{v}</div><div style={{fontSize:9,color:FAINT}}>{l}</div></div>)}
-          </div>
-        </div>
-      </>
-    },
-    {
-      title:'Lo importante es no fallar',
-      body:()=><>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Cada día hay un reto. Puede ser corto o largo, libre o con restricciones, pero está ahí esperándote. La clave es simple: aguanta una semana seguida y ganarás comodines que puedes usar cuando la vida no te deje escribir. Porque los días imposibles existen, y lo sabemos.</p>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Además del reto diario, cada semana hay un reto temático nuevo. Y si quieres más adrenalina, puedes retar directamente a otro escritor: le mandas cinco palabras y tiene que construir un relato con ellas en contrarreloj.</p>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>¿Prefieres escribir en tu propio proyecto? Puedes sustituir cualquier reto por tiempo dedicado a tu obra. Lo que cuenta es que no pares.</p>
-        <div style={{background:BG2,border:'0.5px solid '+BDR,borderRadius:10,padding:12,marginTop:10}}>
-          {[['✏','Reto diario — «Describe un lugar que ya no existe»','✓ hecho','#EAF3DE','#3B6D11'],['📅','Reto semanal — Un diálogo sin adverbios','4 días','rgba(0,0,0,0.06)',MUTED],['👤','Reto de Marta — «lluvia · tren · silencio · rojo · adiós»','pendiente','rgba(0,0,0,0.06)',MUTED]].map(([ic,lbl,badge,bgb,cb])=><div key={lbl} style={{display:'flex',alignItems:'center',gap:8,background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:'6px 8px',marginBottom:5}}><span style={{fontSize:13}}>{ic}</span><span style={{fontSize:10,color:MUTED,flex:1}}>{lbl}</span><span style={{fontSize:9,borderRadius:10,padding:'1px 7px',background:bgb,color:cb}}>{badge}</span></div>)}
-          <div style={{display:'flex',gap:6,marginTop:8}}>
-            <div style={{flex:1,background:'#FEF3E8',border:'0.5px solid transparent',borderRadius:6,padding:'6px 8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:10,color:'#c26010'}}>Racha actual</span><span style={{fontSize:11,fontWeight:500,color:'#c26010'}}>🔥 11 días</span></div>
-            <div style={{flex:1,background:'#EAF3DE',border:'0.5px solid transparent',borderRadius:6,padding:'6px 8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:10,color:'#3B6D11'}}>Comodines</span><span style={{fontSize:11,fontWeight:500,color:'#3B6D11'}}>2 💚</span></div>
-          </div>
-        </div>
-      </>
-    },
-    {
-      title:'El editor y sus modos',
-      body:()=><>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>El editor normal funciona como esperas. Pero Pretexto tiene tres modos diseñados para que el filtro interno se calle y las palabras fluyan.</p>
-        <div style={{background:BG2,border:'0.5px solid '+BDR,borderRadius:10,padding:12,marginTop:10}}>
-          <div style={{display:'flex',gap:4,marginBottom:8}}>
-            {['Normal','Río','Límite','Presión'].map((m,i)=><div key={m} style={{flex:1,fontSize:10,borderRadius:5,padding:'4px 6px',textAlign:'center',background:i===1?'#5550B8':'#fff',color:i===1?'#fff':MUTED,border:'0.5px solid '+(i===1?'#5550B8':BDR)}}>{m}</div>)}
-          </div>
-          <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:8,fontSize:10,color:MUTED,lineHeight:1.6,minHeight:60}}>El tren llegó con veinte minutos de retraso y nadie en el andén parecía sorprendido. Ella sostenía el paraguas cerrado aunque llovía<span style={{display:'inline-block',width:1,height:11,background:'#5550B8',verticalAlign:'middle',marginLeft:1}}/></div>
-          <div style={{display:'flex',justifyContent:'flex-end',gap:4,marginTop:5}}><span style={{fontSize:9,padding:'3px 8px',borderRadius:5,border:'0.5px solid '+BDR,background:BG2,color:MUTED}}>483 palabras</span><span style={{fontSize:9,padding:'3px 8px',borderRadius:5,border:'0.5px solid '+BDR,background:BG2,color:MUTED}}>18 min</span><span style={{fontSize:9,padding:'3px 8px',borderRadius:5,background:'#5550B8',color:'#fff'}}>Guardar</span></div>
-        </div>
-        <div style={{marginTop:10}}>
-          {[['💧','Río','No puedes editar lo que ya escribiste. Solo hacia adelante. Para los que juzgan cada frase antes de terminarla.'],['⌫','Límite','Como el Río, pero con un número limitado de borrados. Para quienes no pueden con un error visible, pero necesitan soltar.'],['⚡','Presión','Si paras de escribir, el texto se borra. Sin piedad. El modo para maratones y para cuando necesitas no pensar.']].map(([ic,nom,desc])=><div key={nom} style={{display:'flex',gap:8,background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:'7px 9px',marginBottom:5}}><span style={{fontSize:14,flexShrink:0}}>{ic}</span><div><div style={{fontSize:10,fontWeight:500,color:TXT,marginBottom:2}}>{nom}</div><div style={{fontSize:9,color:MUTED,lineHeight:1.5}}>{desc}</div></div></div>)}
-        </div>
-        <p style={{fontSize:12,color:MUTED,lineHeight:1.6,marginTop:8}}>Puedes cambiar de modo cuando quieras. No hay elección incorrecta.</p>
-      </>
-    },
-    {
-      title:'Equipos',
-      body:()=><>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Crea tu propio equipo e invita a quien quieras. Podéis ser amigos, compañeros de taller, o desconocidos que descubristeis que escribíais a la misma hora.</p>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Cada semana, un miembro del equipo propone el reto. El resto vota cuál. El que más votos recibe es el reto de la semana para todo el grupo. Todos escriben, todos leen, todos proponen.</p>
-        <div style={{background:BG2,border:'0.5px solid '+BDR,borderRadius:10,padding:12,marginTop:10}}>
-          <div style={{fontSize:10,color:FAINT,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:6}}>Tu equipo — Los del jueves</div>
-          {[['A','Ana (tú)','«Un final feliz que dé miedo»','#E6EBF9','#2A52BE',3],['J','Jorge','«El primer recuerdo inventado»','#EAF3DE','#3B6D11',1],['M','Marta','«Escribe desde el objeto»','#FAECE7','#993C1D',2],['L','Laia','«Sin usar la palabra "tiempo"»','#FAEEDA','#854F0B',4]].map(([initial,name,reto,bg,col,votes])=><div key={name} style={{display:'flex',alignItems:'center',gap:7,background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:'5px 8px',marginBottom:4}}><div style={{width:22,height:22,borderRadius:'50%',background:bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:500,color:col,flexShrink:0}}>{initial}</div><span style={{fontSize:10,color:TXT,flex:1}}>{name}</span><span style={{fontSize:9,color:FAINT,fontStyle:'italic',marginRight:4}}>{reto}</span><span style={{fontSize:9,borderRadius:10,padding:'1px 7px',background:'rgba(85,80,184,0.1)',color:'#5550B8'}}>👍 {votes}</span></div>)}
-          <div style={{background:'#fff',border:'0.5px solid #5550B8',borderRadius:6,padding:8,marginTop:6}}><div style={{fontSize:9,color:'#5550B8',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:3}}>Reto de esta semana</div><div style={{fontSize:11,fontWeight:500,color:TXT}}>«Sin usar la palabra "tiempo"»</div><div style={{fontSize:9,color:FAINT,marginTop:2}}>Propuesto por Laia · 4 votos · 3 días restantes</div></div>
-        </div>
-      </>
-    },
-    {
-      title:'La biblioteca',
-      body:()=><>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Cada texto que escribas queda guardado. Tú decides si se queda solo para ti, si lo compartes con tu equipo, o si lo abres a toda la comunidad. Leer lo que escriben otros —sin filtros de editoriales ni algoritmos— es una de las mejores formas de desatascarse.</p>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Puedes comentar los textos que leas y recibir reacciones en los tuyos. El feedback de otra persona que también está intentándolo vale más de lo que parece.</p>
-        <div style={{background:BG2,border:'0.5px solid '+BDR,borderRadius:10,padding:12,marginTop:10}}>
-          <div style={{display:'flex',gap:4,marginBottom:8}}>
-            {[['Explorar',true],['Amigos',false],['Mis textos',false]].map(([l,a])=><span key={l} style={{fontSize:10,borderRadius:20,padding:'3px 9px',background:a?'rgba(85,80,184,0.12)':'rgba(0,0,0,0.04)',color:a?'#5550B8':MUTED}}>{l}</span>)}
-          </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5}}>
-            {[['El último verano','Ese verano aprendí que las despedidas no siempre tienen forma de abrazo...','abierto','#EAF3DE','#3B6D11','@carmen'],['Sin título','La ciudad a las tres de la mañana huele diferente. Más honesta...','amigos','rgba(85,80,184,0.1)','#5550B8','@jorge_m'],['Borrador #12','Solo quería escribir sobre mi abuela y acabé escribiendo sobre el miedo...','privado','rgba(0,0,0,0.05)',MUTED,'tú'],['Instrucciones','Para abrir una puerta que nadie ha cerrado. Primero, fingir que existe...','abierto','#EAF3DE','#3B6D11','@laia']].map(([t,b,vis,vbg,vcol,aut])=><div key={t} style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:8}}><div style={{fontSize:10,fontWeight:500,color:TXT,marginBottom:3}}>{t}</div><div style={{fontSize:9,color:MUTED,lineHeight:1.5,marginBottom:5}}>{b}</div><div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:9,borderRadius:10,padding:'1px 6px',background:vbg,color:vcol}}>{vis}</span><span style={{fontSize:9,color:FAINT}}>{aut}</span></div></div>)}
-          </div>
-        </div>
-      </>
-    },
-    {
-      title:'Revisión con Claude',
-      body:()=><>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Si conectas tu propia API key de Claude (Anthropic), podrás pedir feedback sobre cualquier texto privado. No un corrector ortográfico: una lectura real, con observaciones sobre ritmo, estructura, voz y lo que funciona —y lo que no.</p>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginBottom:8}}>Tu clave nunca sale de tu dispositivo y solo se usa cuando tú lo pides. Completamente opcional.</p>
-        <div style={{background:BG2,border:'0.5px solid '+BDR,borderRadius:10,padding:12,marginTop:10}}>
-          <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:6,padding:8,marginBottom:8}}>
-            <div style={{display:'flex',gap:6,marginBottom:6}}><div style={{flex:1,fontSize:10,fontFamily:'monospace',background:BG2,border:'0.5px solid '+BDR,borderRadius:4,padding:'4px 8px',color:MUTED}}>sk-ant-api03-••••••••••••••••••</div><span style={{fontSize:10,padding:'4px 10px',background:'#5550B8',color:'#fff',borderRadius:4}}>Guardar</span></div>
-            <div style={{fontSize:9,color:FAINT}}>Tu clave solo se guarda en tu navegador.</div>
-          </div>
-          <div style={{background:'#fff',borderLeft:'2px solid #5550B8',borderRadius:'0 6px 6px 0',padding:'6px 8px',fontSize:9,color:MUTED,lineHeight:1.5}}><strong style={{fontSize:10,color:TXT,display:'block',marginBottom:3}}>Borrador #12 — Feedback de Claude</strong>La voz narrativa es consistente y tiene personalidad. El giro en el segundo párrafo funciona: la abuela como excusa para hablar del olvido es honesto sin ser sentimental. Ojo con la acumulación de subordinadas en el cierre; el ritmo se ralentiza justo donde querías impacto.</div>
-        </div>
-        <div style={{borderLeft:'2px solid #5550B8',paddingLeft:10,margin:'12px 0 0',fontStyle:'italic',fontSize:12,color:MUTED,lineHeight:1.6}}><span style={{color:TXT}}>«El primer borrador de todo es una mierda.»</span><br/><span style={{fontSize:11,color:FAINT,fontStyle:'normal'}}>— Ernest Hemingway</span></div>
-        <p style={{fontSize:13,color:MUTED,lineHeight:1.6,marginTop:8}}>Y ahora ya no tienes excusa para no empezar. Nos vemos dentro.</p>
-      </>
-    }
-  ];
-  const slide=slides[cur];
-  const SlideBody=slide.body;
-  return(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,padding:16}}>
-      <div style={{background:'#faf9f6',borderRadius:16,border:'0.5px solid rgba(0,0,0,0.12)',width:'100%',maxWidth:520,maxHeight:'90vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 40px rgba(0,0,0,0.18)'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 18px 12px',borderBottom:'0.5px solid rgba(0,0,0,0.08)'}}>
-          <span style={{fontSize:15,fontWeight:600,color:TXT,letterSpacing:'-0.02em',fontFamily:'Lora,Georgia,serif'}}>pre<span style={{color:'#5550B8'}}>texto</span></span>
-          <span style={{fontSize:12,color:FAINT}}>{cur+1} / {total}</span>
-        </div>
-        <div style={{flex:1,overflowY:'auto',padding:'14px 18px'}}>
-          <div style={{fontSize:15,fontWeight:500,color:TXT,marginBottom:10,fontFamily:'Lora,Georgia,serif'}}>{slide.title}</div>
-          <SlideBody/>
-        </div>
-        <div style={{borderTop:'0.5px solid rgba(0,0,0,0.08)'}}>
-          <div style={{display:'flex',alignItems:'center',padding:'10px 18px 0',gap:8}}>
-            <button disabled={cur===0} onClick={()=>setCur(c=>c-1)} style={{fontSize:12,padding:'5px 14px',borderRadius:8,border:'0.5px solid rgba(0,0,0,0.14)',background:BG2,color:TXT,cursor:cur===0?'default':'pointer',opacity:cur===0?0.3:1}}>← Anterior</button>
-            <div style={{flex:1,display:'flex',justifyContent:'center',gap:5}}>
-              {Array.from({length:total}).map((_,i)=><div key={i} onClick={()=>setCur(i)} style={{height:6,borderRadius:10,background:i===cur?'#5550B8':'rgba(0,0,0,0.15)',width:i===cur?18:6,cursor:'pointer',transition:'width 0.2s,background 0.2s'}}/>)}
-            </div>
-            <button onClick={cur===total-1?handleClose:()=>setCur(c=>c+1)} style={{fontSize:12,padding:'5px 14px',borderRadius:8,border:'none',background:'#5550B8',color:'#fff',cursor:'pointer'}}>{cur===total-1?'¡Empezar! →':'Siguiente →'}</button>
-          </div>
-          <div onClick={()=>setNoShow(v=>!v)} style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,padding:'8px 18px 12px',cursor:'pointer'}}>
-            <div style={{width:14,height:14,borderRadius:3,border:'1px solid '+(noShow?'#5550B8':'rgba(0,0,0,0.2)'),background:noShow?'#5550B8':'#fff',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-              {noShow&&<svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-            </div>
-            <span style={{fontSize:11,color:noShow?MUTED:FAINT,userSelect:'none'}}>No volver a mostrar esto</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 /* ─── APP ROOT ─────────────────────────────────────── */
 const App=()=>{
@@ -4969,7 +4826,6 @@ const App=()=>{
   const [receivedChallenges,setReceivedChallenges]=useState([]);
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
   const [editingEntry,setEditingEntry]=useState(null);
-  const [showOnboarding,setShowOnboarding]=useState(false);
 
   const loadUserData=async(uid)=>{
     if(!uid)return;
@@ -5034,7 +4890,6 @@ const App=()=>{
           const resolvedProfile=profile||{id:session.user.id,name:session.user.email?.split('@')[0]||'Usuario',initials:'U',accent:'#5550B8',bg:'#EEEDFE',text_col:'#3C3489'};
           setUser({...session.user,...resolvedProfile});
           loadUserData(session.user.id); // non-blocking
-          if(!localStorage.getItem(ONBOARDING_KEY))setShowOnboarding(true);
         }else{
           clearTimeout(timeout);
           setLoading(false);
@@ -5061,7 +4916,6 @@ const App=()=>{
       setUser({...session.user,...profile});
       await loadUserData(session.user.id);
       setView('dashboard');
-      if(!localStorage.getItem(ONBOARDING_KEY))setShowOnboarding(true);
     }
   };
   const logout=async()=>{await DB.signOut();setUser(null);setView('dashboard');};
@@ -5136,7 +4990,7 @@ const App=()=>{
   const driveData=user?S.get('flujo:drive:'+user.id)||{}:{};
   const driveConnected=!!(driveData.token&&driveData.expires_at>Date.now()+30000);
 
-  if(loading)return<div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:MUTED}}>Cargando Pretexto…</div>;
+  if(loading)return<div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:MUTED}}>Cargando Unstuck…</div>;
 
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
@@ -5166,7 +5020,6 @@ const App=()=>{
   if(view==='briefing')return<SessionBriefing user={user} energy={energy} library={library} projects={projects} saveProject={saveProject} onStart={startSession} onBack={()=>setView('dashboard')}/>;
 
   return<>
-    {showOnboarding&&<OnboardingModal onClose={()=>setShowOnboarding(false)}/>}
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} setReadingEntry={undefined}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
