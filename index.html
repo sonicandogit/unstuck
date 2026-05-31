@@ -1826,7 +1826,7 @@ const computeStats=(library,reflections)=>{
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
   const thisWeek=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).length;
   const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
-  const last7=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
+  const _firstDay=library.length?library[library.length-1].date?.slice(0,10)||today():today();const last7=Array.from({length:7},(_,i)=>{const d=new Date(_firstDay+'T12:00:00');d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
   const activeDates=new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
   const weekElapsed=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
@@ -2264,8 +2264,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'18px 22px',marginBottom:16}}>
           {showCalendar?(
             <>
-              <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>Primeros 7 días</div>
-              <div style={{fontSize:11,color:MUTED,marginBottom:14}}>Escribe 7 días para desbloquear la racha.</div>
+              <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>Primeros 7 días desde que empezaste</div>
+              <div style={{fontSize:11,color:MUTED,marginBottom:14}}>Escribe al menos un día de cada uno de los primeros 7 para desbloquear la racha.</div>
               <div style={{display:'flex',gap:8,justifyContent:'space-between'}}>
                 {stats.last7status.map((d,i)=>{
                   const isToday=d.date===today();
