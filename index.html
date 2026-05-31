@@ -2136,7 +2136,7 @@ const AuthScreen=({onAuth})=>{
     </>
   );
 };
-const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge})=>{
+const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showTeams,setShowTeams]=useState(false);
@@ -2144,6 +2144,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
   const [showBiblioteca,setShowBiblioteca]=useState(false);
+  const [showStats,setShowStats]=useState(false);
   const [showPrivacyModal,setShowPrivacyModal]=useState(false);
   const [showTermsModal,setShowTermsModal]=useState(false);
   const [showProfileSettings,setShowProfileSettings]=useState(false);
@@ -2166,6 +2167,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showProfileSettings&&<ProfileSettings user={user} onClose={()=>setShowProfileSettings(false)} onSave={updated=>{Object.assign(user,updated);setShowProfileSettings(false);}}/>}
       {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
       {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
+      {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={(entryId,vis)=>setLibrary(prev=>prev.map(e=>e.id===entryId?{...e,visibility:vis}:e))}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
@@ -2181,6 +2183,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Lecciones</button>
           <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📖 Biblioteca</button>
+          <button onClick={()=>setShowStats(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📊 Estadísticas</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Equipos</button>
           <button onClick={()=>setShowSendChallenge(true)} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#A82020',cursor:'pointer',fontWeight:500}}>⏱ Retar</button>
           {/* User menu button */}
@@ -2264,8 +2267,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'18px 22px',marginBottom:16}}>
           {showCalendar?(
             <>
-              <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>Primeros 7 días desde que empezaste</div>
-              <div style={{fontSize:11,color:MUTED,marginBottom:14}}>Escribe al menos un día de cada uno de los primeros 7 para desbloquear la racha.</div>
+              <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>Primeros 7 días</div>
+              <div style={{fontSize:11,color:MUTED,marginBottom:14}}>Escribe los 7 primeros días para desbloquear la racha.</div>
               <div style={{display:'flex',gap:8,justifyContent:'space-between'}}>
                 {stats.last7status.map((d,i)=>{
                   const isToday=d.date===today();
@@ -2315,17 +2318,6 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <StatCard label="Lecciones" value={lessonsRead+'/64'} sub={lessonsPct+'% leído'} accent={lessonsRead>0?'#5550B8':TXT}/>
         </div>
 
-        {/* Lessons progress */}
-        <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
-          <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:8}}>
-            <div style={{fontSize:13,fontWeight:500,color:TXT}}>Lecciones de escritura</div>
-            <div style={{fontSize:12,color:MUTED}}>{lessonsRead} <span style={{color:FAINT}}>/ 64 lecciones leídas</span></div>
-          </div>
-          <div style={{height:5,background:'rgba(0,0,0,0.07)',borderRadius:3,overflow:'hidden',marginBottom:8}}>
-            <div style={{height:'100%',width:lessonsPct+'%',background:lessonsPct>=100?'#0A7A58':'#5550B8',borderRadius:3,transition:'width 0.4s'}}/>
-          </div>
-          <div style={{fontSize:11,color:FAINT}}>{lessonsPct===0?'Abre cualquier reto y pulsa 📖 Lección para empezar':lessonsPct>=100?'¡Has leído todas las lecciones! ✦':100-lessonsPct+'% restante — cada reto tiene ficha de teoría con fragmentos y recomendaciones'}</div>
-        </div>
 
         {/* Recent notes */}
         {recentNotes.length>0&&<div className="fu" style={{marginBottom:16}}>
@@ -2345,6 +2337,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
             {library.slice(0,3).map(e=>{const sc={check:'#0A7A58',reto:'#956010',proyecto:'#5550B8'}[e.sk]||MUTED;return <div key={e.id} style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:9,padding:'10px 14px',display:'flex',alignItems:'center',gap:10}}>
               <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.title}</div><div style={{fontSize:11,color:MUTED}}>{fmtDate(e.date)} · {e.wordCount} palabras</div></div>
+              <button onClick={()=>onEditEntry&&onEditEntry(e)} title="Editar" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>✏</button>
               <button onClick={()=>{const ref=reflections.find(r=>r.sessionTitle===e.title&&r.date===e.date);exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>↓</button>
               <button onClick={()=>{if(window.confirm('¿Eliminar "'+e.title+'"?'))onDeleteEntry(e.id)}} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:6,padding:'3px 8px',fontSize:11,color:'rgba(197,34,31,0.5)',cursor:'pointer',flexShrink:0}}>✕</button>
             </div>})}
@@ -2399,7 +2392,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
     await saveProject(p);
     onStart({type:'proyecto',project:p});
   };
-  const selectProject=p=>onStart({type:'proyecto',project:p});
+  const selectProject=p=>{const lastEntry=library.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});};
 
   // SectionCard defined outside — see below
 
@@ -2795,6 +2788,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const [showLib,setShowLib]=useState(false);const [showDrive,setShowDrive]=useState(false);const [showUserMenu,setShowUserMenu]=useState(false);
 
   const edRef=useRef(null);const prevLen=useRef(0);const isDel=useRef(false);const lastSaved=useRef('');
+  const entryIdRef=useRef(sessionConfig.entryId||(sk+'_'+user.id.slice(-6)+'_'+Date.now()));
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
 
   const fontObj=FONTS[fontIdx];
@@ -2816,7 +2810,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
   const resetLim=(d=limDels)=>{isDel.current=false;setCharsInDel(0);setDelsLeft(d)};
   const buildEntry=()=>{
-    const id=sk+'_'+Date.now();
+    const id=entryIdRef.current;
     return {
       id,ts:Date.now(),sk,date:today(),
       session_label:headerFamily,sessionLabel:headerFamily,
@@ -2893,7 +2887,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     });
   };
 
-  useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p')},[]);
+  useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p');const init=sessionConfig.initialHtml||'';if(init&&edRef.current){edRef.current.innerHTML=init;const txt=edRef.current.innerText||'';setPlainTxt(txt);setWc(txt.trim().split(/\s+/).filter(Boolean).length);}},[]);
   // Keyboard shortcuts
   useEffect(()=>{
     const handler=e=>{
@@ -4612,6 +4606,121 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
   );
 };
 
+
+/* ─── ESTADÍSTICAS ─────────────────────────────────────────── */
+const EstadísticasScreen=({library,reflections,onClose,stats})=>{
+  const {totalWords,totalSessions,totalElapsed,weekWords,weekSessions,avgRating}=stats;
+
+  // Words per week (last 12 weeks) — same as StatsChart
+  const weekBars=useMemo(()=>{
+    const now=new Date();
+    return Array.from({length:12},(_,i)=>{
+      const d=new Date(now);d.setDate(d.getDate()-((11-i)*7));
+      const wStart=new Date(d);wStart.setDate(d.getDate()-d.getDay());
+      const wEnd=new Date(wStart);wEnd.setDate(wStart.getDate()+6);
+      const ws=wStart.toISOString().slice(0,10);const we=wEnd.toISOString().slice(0,10);
+      const words=library.filter(e=>{const dt=e.date?.slice(0,10)||'';return dt>=ws&&dt<=we;}).reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+      const label=wStart.toLocaleDateString('es-ES',{month:'short',day:'numeric'});
+      return{label,words};
+    });
+  },[library]);
+  const maxW=Math.max(...weekBars.map(b=>b.words),1);
+
+  // Pie data: words by category (sk)
+  const catWords={};const catMins={};
+  library.forEach(e=>{
+    const k={check:'Check diario',reto:'Reto semanal',proyecto:'Proyecto',cuento:'Cuento'}[e.sk]||'Otro';
+    catWords[k]=(catWords[k]||0)+(e.word_count||e.wordCount||0);
+    catMins[k]=(catMins[k]||0)+Math.round((e.elapsed||0)/60);
+  });
+  const catColors={'Check diario':'#0A7A58','Reto semanal':'#956010','Proyecto':'#5550B8','Cuento':'#A82020','Otro':MUTED};
+  const totalW=Object.values(catWords).reduce((s,v)=>s+v,0)||1;
+  const totalM=Object.values(catMins).reduce((s,v)=>s+v,0)||1;
+  const cats=Object.keys(catWords);
+
+  // SVG pie chart helper
+  const PieChart=({data,total,unit})=>{
+    let angle=0;
+    const slices=data.map(([k,v])=>{
+      const pct=v/total;const a=pct*2*Math.PI;
+      const x1=50+40*Math.sin(angle);const y1=50-40*Math.cos(angle);
+      angle+=a;
+      const x2=50+40*Math.sin(angle);const y2=50-40*Math.cos(angle);
+      const large=pct>0.5?1:0;
+      return{k,v,pct,d:`M50 50 L${x1} ${y1} A40 40 0 ${large} 1 ${x2} ${y2} Z`,color:catColors[k]};
+    });
+    return(
+      <div style={{display:'flex',alignItems:'center',gap:20}}>
+        <svg viewBox="0 0 100 100" style={{width:120,height:120,flexShrink:0}}>
+          {slices.map(s=><path key={s.k} d={s.d} fill={s.color} stroke="#fff" strokeWidth="1"/>)}
+        </svg>
+        <div style={{display:'flex',flexDirection:'column',gap:5}}>
+          {slices.map(s=>(
+            <div key={s.k} style={{display:'flex',alignItems:'center',gap:6,fontSize:11}}>
+              <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}}/>
+              <span style={{color:MUTED}}>{s.k}</span>
+              <span style={{fontWeight:500,color:TXT,marginLeft:'auto',paddingLeft:8}}>{s.v.toLocaleString()} {unit}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:200,overflowY:'auto',display:'flex',justifyContent:'center',alignItems:'flex-start',padding:'24px 16px'}}>
+      <div style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:640,padding:'28px 24px'}}>
+        {/* Header */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24}}>
+          <div style={{fontSize:20,fontWeight:700,letterSpacing:'-0.02em',color:TXT}}>Estadísticas</div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,cursor:'pointer',color:MUTED,padding:'0 4px'}}>✕</button>
+        </div>
+
+        {/* Stat cards */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:24}}>
+          <StatCard label="Palabras escritas" value={(totalWords||0).toLocaleString()} accent="#5550B8"/>
+          <StatCard label="Sesiones totales" value={totalSessions||0} accent="#5550B8"/>
+          <StatCard label="Tiempo escrito" value={totalElapsed>0?Math.round(totalElapsed/60)+'min':'—'} accent="#5550B8"/>
+          <StatCard label="Palabras esta semana" value={(weekWords||0).toLocaleString()} accent="#0A7A58"/>
+          <StatCard label="Sesiones esta semana" value={weekSessions||0} accent="#0A7A58"/>
+          <StatCard label="Valoración media" value={avgRating?avgRating+'/10':'—'} accent="#956010"/>
+        </div>
+
+        {/* Words per week chart */}
+        <div style={{background:'#F8F7F4',borderRadius:12,padding:'16px',marginBottom:20}}>
+          <div style={{fontSize:12,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:12}}>Palabras por semana</div>
+          <div style={{display:'flex',alignItems:'flex-end',gap:4,height:80}}>
+            {weekBars.map((b,i)=>(
+              <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+                <div style={{width:'100%',background:'#5550B8',borderRadius:'3px 3px 0 0',height:Math.max(2,Math.round((b.words/maxW)*72))+'px',opacity:b.words>0?1:0.15}}/>
+              </div>
+            ))}
+          </div>
+          <div style={{display:'flex',gap:4,marginTop:4}}>
+            {weekBars.map((b,i)=>(
+              <div key={i} style={{flex:1,textAlign:'center',fontSize:8,color:FAINT,overflow:'hidden'}}>{b.label.split(' ')[0]}</div>
+            ))}
+          </div>
+        </div>
+
+        {/* Pie charts */}
+        {cats.length>0&&(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+            <div style={{background:'#F8F7F4',borderRadius:12,padding:'16px'}}>
+              <div style={{fontSize:12,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:12}}>Palabras por tipo</div>
+              <PieChart data={cats.map(k=>[k,catWords[k]])} total={totalW} unit="pal."/>
+            </div>
+            <div style={{background:'#F8F7F4',borderRadius:12,padding:'16px'}}>
+              <div style={{fontSize:12,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:12}}>Minutos por tipo</div>
+              <PieChart data={cats.map(k=>[k,catMins[k]])} total={totalM} unit="min"/>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ─── COOKIE BANNER ─────────────────────────────── */
 const CookieBanner=({onAccept,onDecline})=>(
   <div className="fi" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:500,background:'#1A1916',color:'#fff',padding:'16px 20px',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'0 -4px 24px rgba(0,0,0,0.3)'}}>
@@ -4716,6 +4825,7 @@ const App=()=>{
   const [driveRefresh,setDriveRefresh]=useState(0);
   const [receivedChallenges,setReceivedChallenges]=useState([]);
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
+  const [editingEntry,setEditingEntry]=useState(null);
 
   const loadUserData=async(uid)=>{
     if(!uid)return;
@@ -4884,6 +4994,15 @@ const App=()=>{
 
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
+  // Edit existing entry
+  if(editingEntry)return<Editor user={user} library={library} saveEntry={saveEntry} saveProject={saveProject}
+    onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
+    onBack={()=>setEditingEntry(null)}
+    driveData={driveData}
+    sessionConfig={{type:'edit',sk:editingEntry.sk||'check',
+      initialHtml:editingEntry.html||'',initialPlain:editingEntry.plain||'',
+      entryId:editingEntry.id}}/>;
+
   if(view==='postSession')return<PostSession sessionData={sessionData} onComplete={completeReflection} onBack={()=>{setView('dashboard');loadUserData(user.id);}} user={user}/>;
 
   if(view==='cuento')return<CuentoContrareloj user={user} saveEntry={saveEntry}
@@ -4910,7 +5029,8 @@ const App=()=>{
       onRefresh={()=>loadUserData(user.id)}
       receivedChallenges={receivedChallenges}
       onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
-      onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}/>
+      onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
+      onEditEntry={e=>setEditingEntry(e)}/>
   </>;
 };
 
