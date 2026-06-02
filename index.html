@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pretexto</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" type="image/png" href="unstuckfavicon.png">
@@ -41,6 +42,112 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
   .mob-pad{padding-left:14px!important;padding-right:14px!important}
   input[type=range]::-webkit-slider-thumb{width:22px;height:22px}
 }
+
+/* ── WELCOME CAROUSEL ─────────────────────────────── */
+.wc-overlay{position:fixed;inset:0;background:rgba(10,8,6,0.85);display:flex;align-items:center;justify-content:center;z-index:500;padding:20px;backdrop-filter:blur(4px);}
+.wc-modal{background:#faf8f5;border:1px solid #e8e2d9;border-radius:4px;width:100%;max-width:680px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,0.5);}
+.wc-header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px 14px;border-bottom:1px solid #e8e2d9;flex-shrink:0;}
+.wc-logo{font-family:'Playfair Display',serif;font-style:italic;font-size:20px;color:#1a1612;letter-spacing:-0.3px;}
+.wc-counter{font-size:11px;font-weight:500;color:#a89f94;letter-spacing:1.5px;text-transform:uppercase;}
+.wc-slides-wrap{flex:1;overflow:hidden;position:relative;}
+.wc-slides{display:flex;height:100%;transition:transform 0.4s cubic-bezier(0.25,0.46,0.45,0.94);}
+.wc-slide{min-width:100%;padding:28px 28px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:20px;}
+.wc-eyebrow{font-size:10px;font-weight:500;letter-spacing:2.5px;text-transform:uppercase;color:#c0392b;}
+.wc-title{font-family:'Playfair Display',serif;font-size:26px;font-weight:700;color:#1a1612;line-height:1.2;letter-spacing:-0.5px;}
+.wc-body{font-size:14px;line-height:1.7;color:#6b6258;display:flex;flex-direction:column;gap:10px;}
+.wc-quote{border-left:2px solid #c0392b;padding:8px 14px;background:#f5f0e8;font-family:'Playfair Display',serif;font-style:italic;font-size:13px;color:#1a1612;line-height:1.5;margin:4px 0;}
+.wc-quote em{display:block;margin-top:4px;font-size:11px;color:#a89f94;font-style:normal;}
+.wc-mockup{background:#f0ebe0;border:1px solid #d4cdc4;border-radius:3px;padding:14px;flex-shrink:0;}
+.mk-topbar{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #c8c0b4;}
+.mk-logo{font-family:'Playfair Display',serif;font-style:italic;font-size:13px;color:#2a2420;}
+.mk-nav{display:flex;gap:6px;margin-left:auto;}
+.mk-navitem{width:36px;height:6px;background:#c8c0b4;border-radius:2px;}
+.mk-navitem.active{background:#c0392b;}
+.mk-editor-area{background:white;border:1px solid #c8c0b4;border-radius:2px;padding:10px;min-height:80px;}
+.mk-cursor-line{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+.mk-cursor{width:1.5px;height:14px;background:#c0392b;animation:blink 1s infinite;}
+.mk-placeholder{font-size:10px;color:#c8c0b4;}
+.mk-text-lines{display:flex;flex-direction:column;gap:4px;margin-top:6px;}
+.mk-line{height:5px;background:#c8c0b4;border-radius:2px;}
+.mk-line.s{width:60%}.mk-line.xs{width:35%}
+.mk-stats{display:flex;gap:8px;margin-bottom:10px;}
+.mk-stat{flex:1;background:white;border:1px solid #c8c0b4;border-radius:2px;padding:7px 8px;text-align:center;}
+.mk-stat-val{font-size:16px;font-weight:700;color:#2a2420;font-family:monospace;}
+.mk-stat-lbl{font-size:8px;color:#8a7f74;text-transform:uppercase;letter-spacing:1px;margin-top:2px;}
+.mk-stat.hl .mk-stat-val{color:#c0392b;}
+.mk-reto-list{display:flex;flex-direction:column;gap:5px;}
+.mk-reto{display:flex;align-items:center;gap:8px;background:white;border:1px solid #c8c0b4;border-radius:2px;padding:6px 8px;}
+.mk-reto-dot{width:7px;height:7px;border-radius:50%;background:#c8c0b4;flex-shrink:0;}
+.mk-reto-dot.done{background:#c0392b;}
+.mk-reto-text{flex:1;}
+.mk-reto-title{height:5px;background:#c8c0b4;border-radius:2px;width:80%;}
+.mk-reto-sub{height:4px;background:#c8c0b4;border-radius:2px;width:50%;margin-top:3px;opacity:0.5;}
+.mk-badge{font-size:8px;font-weight:500;background:#e8d5d3;color:#c0392b;border-radius:2px;padding:2px 5px;flex-shrink:0;}
+.mk-modes{display:flex;gap:7px;}
+.mk-mode{flex:1;background:white;border:1px solid #c8c0b4;border-radius:2px;padding:8px;}
+.mk-mode-tag{font-size:8px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:#8a7f74;margin-bottom:5px;}
+.mk-mode.rio .mk-mode-tag{color:#2196f3}.mk-mode.limite .mk-mode-tag{color:#ff9800}.mk-mode.presion .mk-mode-tag{color:#c0392b;}
+.mk-mode-lines{display:flex;flex-direction:column;gap:3px;}
+.mk-mode-line{height:4px;background:#c8c0b4;border-radius:2px;}
+.mk-mode-line.s{width:70%}.mk-mode-line.xs{width:45%}
+.mk-mode-icon{width:18px;height:18px;border-radius:50%;margin-bottom:5px;display:flex;align-items:center;justify-content:center;font-size:9px;}
+.mk-mode.rio .mk-mode-icon{background:#e3f2fd;color:#2196f3}.mk-mode.limite .mk-mode-icon{background:#fff3e0;color:#ff9800}.mk-mode.presion .mk-mode-icon{background:#fdecea;color:#c0392b;}
+.mk-team-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.mk-team-avatar{width:26px;height:26px;border-radius:50%;background:#ede7da;border:1px solid #c8c0b4;display:flex;align-items:center;justify-content:center;font-size:10px;color:#8a7f74;}
+.mk-team-name{font-size:11px;font-weight:600;color:#2a2420;}
+.mk-team-sub{font-size:9px;color:#8a7f74;}
+.mk-team-badge{margin-left:auto;font-size:8px;background:#ede7da;color:#8a7f74;border-radius:2px;padding:2px 6px;}
+.mk-team-members{display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap;}
+.mk-member{display:flex;align-items:center;gap:5px;background:white;border:1px solid #c8c0b4;border-radius:2px;padding:4px 7px;}
+.mk-member-av{width:18px;height:18px;border-radius:50%;background:#ede7da;}
+.mk-member-name{width:28px;height:4px;background:#c8c0b4;border-radius:2px;}
+.mk-member-dot{width:6px;height:6px;border-radius:50%;background:#4caf50;margin-left:auto;}
+.mk-reto-proposal{background:white;border:1px solid #c8c0b4;border-radius:2px;padding:7px 8px;display:flex;align-items:center;gap:7px;margin-bottom:5px;}
+.mk-proposal-av{width:16px;height:16px;border-radius:50%;background:#ede7da;flex-shrink:0;}
+.mk-proposal-body{flex:1;}
+.mk-proposal-line{height:4px;background:#c8c0b4;border-radius:2px;margin-bottom:3px;}
+.mk-proposal-line.s{width:60%;opacity:0.6;}
+.mk-vote{font-size:8px;color:#c0392b;margin-left:auto;border:1px solid #e8d5d3;border-radius:2px;padding:2px 5px;flex-shrink:0;}
+.mk-lib-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.mk-lib-card{background:white;border:1px solid #c8c0b4;border-radius:2px;padding:8px;}
+.mk-lib-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.mk-lib-title{width:55%;height:5px;background:#c8c0b4;border-radius:2px;}
+.mk-lib-privacy{font-size:7px;border-radius:2px;padding:2px 4px;}
+.mk-lib-privacy.pub{background:#e8d5d3;color:#c0392b}.mk-lib-privacy.prv{background:#ede7da;color:#8a7f74;}
+.mk-lib-lines{display:flex;flex-direction:column;gap:3px;}
+.mk-lib-line{height:4px;background:#c8c0b4;border-radius:2px;}
+.mk-lib-line.s{width:75%}.mk-lib-line.xs{width:50%}
+.mk-lib-footer{display:flex;align-items:center;gap:4px;margin-top:6px;}
+.mk-feedback-bubble{background:#f5f0e8;border:1px solid #c8c0b4;border-radius:2px;padding:3px 6px;font-size:8px;color:#8a7f74;margin-top:4px;display:flex;gap:4px;align-items:center;}
+.mk-feedback-av{width:10px;height:10px;border-radius:50%;background:#c8c0b4;}
+.mk-api-row{display:flex;align-items:center;gap:7px;background:white;border:1px solid #c8c0b4;border-radius:2px;padding:7px 10px;margin-bottom:7px;}
+.mk-api-icon{width:22px;height:22px;border-radius:3px;background:#ede7da;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;}
+.mk-api-body{flex:1;}
+.mk-api-label{height:5px;background:#c8c0b4;border-radius:2px;width:70%;margin-bottom:4px;}
+.mk-api-sub{height:4px;background:#c8c0b4;border-radius:2px;width:45%;opacity:0.5;}
+.mk-api-status{font-size:8px;border-radius:10px;padding:2px 7px;flex-shrink:0;}
+.mk-api-status.conn{background:#e8f5e9;color:#388e3c;}
+.mk-review-box{background:#f5f0e8;border:1px solid #c8c0b4;border-radius:2px;padding:10px;}
+.mk-review-header{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+.mk-review-icon{width:16px;height:16px;border-radius:50%;background:#c0392b;display:flex;align-items:center;justify-content:center;font-size:9px;color:white;}
+.mk-review-title{height:5px;width:60px;background:#c8c0b4;border-radius:2px;}
+.mk-review-lines{display:flex;flex-direction:column;gap:4px;}
+.mk-review-line{height:4px;background:#c8c0b4;border-radius:2px;}
+.mk-review-line.s{width:80%}.mk-review-line.xs{width:55%}
+.mk-review-hl{height:4px;background:#e8d5d3;border-radius:2px;width:70%;}
+.wc-nav{display:flex;align-items:center;justify-content:space-between;padding:14px 24px 16px;border-top:1px solid #e8e2d9;flex-shrink:0;gap:12px;}
+.wc-dots{display:flex;gap:6px;align-items:center;}
+.wc-dot{width:6px;height:6px;border-radius:50%;background:#d4cdc4;cursor:pointer;transition:all 0.2s;}
+.wc-dot.active{background:#1a1612;width:18px;border-radius:3px;}
+.wc-btn{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;padding:8px 18px;border-radius:2px;cursor:pointer;transition:all 0.15s;border:1px solid #e8e2d9;background:transparent;color:#6b6258;}
+.wc-btn:hover{background:#f5f0e8;color:#1a1612;}
+.wc-btn.primary{background:#1a1612;color:white;border-color:#1a1612;}
+.wc-btn.primary:hover{background:#2a2420;}
+.wc-noshow{display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 24px 0;cursor:pointer;user-select:none;}
+.wc-noshow-check{width:14px;height:14px;border:1.5px solid #c8c0b4;border-radius:2px;display:flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0;}
+.wc-noshow-check.checked{background:#1a1612;border-color:#1a1612;}
+.wc-noshow-label{font-size:11px;color:#a89f94;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 </style>
 <!-- Google Analytics (consent mode — only fires after user accepts) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-XYZY2N39EM"></script>
@@ -4721,6 +4828,190 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
   );
 };
 
+
+/* ─── WELCOME CAROUSEL ──────────────────────────────────────── */
+const WelcomeCarousel=({onClose})=>{
+  const TOTAL=6;
+  const [cur,setCur]=useState(0);
+  const [noShow,setNoShow]=useState(false);
+
+  const go=n=>setCur(n);
+
+  const handleNext=()=>{
+    if(cur<TOTAL-1){setCur(c=>c+1);}
+    else{
+      if(noShow)localStorage.setItem('pretexto_welcome_seen','true');
+      onClose();
+    }
+  };
+
+  const slides=[
+    /* SLIDE 1 */
+    <div key="s1" className="wc-slide">
+      <div><div className="wc-eyebrow">Bienvenida</div>
+        <div className="wc-title">Escribir duele.<br/>Pero cada día duele menos.</div></div>
+      <div className="wc-body">
+        <p>Hay algo raro en sentarse a escribir cuando nadie te lo pide. No hay nota que sacar, ni jefe que espere el informe, ni excusa para justificarlo. Solo tú, el cursor y el silencio. Al principio duele. Duele el blanco, la primera frase torpe, la sensación de que todo lo que escribes ya lo dijo alguien mejor. Pero también pasa algo: con cada día que vuelves, duele un poco menos.</p>
+        <p>Pretexto existe para darte compañía en ese proceso. Aquí encontrarás textos de otros que también se sientan a escribir sin excusa, lecciones que abren grietas en la forma en que ves el lenguaje, y desafíos que te sacan del sitio donde siempre te quedas atascado.</p>
+        <div className="wc-quote">«Un escritor que espera condiciones ideales para trabajar no produce nada.» <em>— E.B. White</em></div>
+        <div className="wc-quote">«La escritura es fácil. Solo tienes que cruzar una palabra equivocada y escribir la correcta.» <em>— Mark Twain</em></div>
+      </div>
+      <div className="wc-mockup">
+        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem active"/><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem"/></div></div>
+        <div className="mk-editor-area">
+          <div className="mk-cursor-line"><div className="mk-cursor"/><div className="mk-placeholder">Empieza a escribir…</div></div>
+          <div className="mk-text-lines"><div className="mk-line"/><div className="mk-line s"/><div className="mk-line"/><div className="mk-line xs"/></div>
+        </div>
+      </div>
+    </div>,
+    /* SLIDE 2 */
+    <div key="s2" className="wc-slide">
+      <div><div className="wc-eyebrow">Retos</div>
+        <div className="wc-title">Lo importante es no fallar.<br/>Y si fallas, hay red.</div></div>
+      <div className="wc-body">
+        <p>La consistencia vence al talento. Escribe cada día durante una semana y ya habrás demostrado lo más difícil. Además del reto diario, habrá retos semanales para ir más lejos, y retos que puedes lanzar a tus compañeros. Y si lo que quieres es avanzar en tu proyecto personal, puedes sustituir cualquiera de ellos por tiempo dedicado a lo tuyo.</p>
+      </div>
+      <div className="wc-mockup">
+        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/><div className="mk-navitem"/></div></div>
+        <div className="mk-stats">
+          <div className="mk-stat hl"><div className="mk-stat-val">7</div><div className="mk-stat-lbl">Racha actual</div></div>
+          <div className="mk-stat"><div className="mk-stat-val">2</div><div className="mk-stat-lbl">Comodines</div></div>
+          <div className="mk-stat"><div className="mk-stat-val">3</div><div className="mk-stat-lbl">Retos pendientes</div></div>
+        </div>
+        <div className="mk-reto-list">
+          <div className="mk-reto"><div className="mk-reto-dot done"/><div className="mk-reto-text"><div className="mk-reto-title"/><div className="mk-reto-sub"/></div><div className="mk-badge">Diario ✓</div></div>
+          <div className="mk-reto"><div className="mk-reto-dot"/><div className="mk-reto-text"><div className="mk-reto-title"/><div className="mk-reto-sub"/></div><div className="mk-badge">Semanal</div></div>
+          <div className="mk-reto"><div className="mk-reto-dot"/><div className="mk-reto-text"><div className="mk-reto-title"/><div className="mk-reto-sub"/></div><div className="mk-badge">De María</div></div>
+        </div>
+      </div>
+    </div>,
+    /* SLIDE 3 */
+    <div key="s3" className="wc-slide">
+      <div><div className="wc-eyebrow">Editores</div>
+        <div className="wc-title">Un editor normal<br/>y tres muy especiales.</div></div>
+      <div className="wc-body">
+        <p>El editor estándar te da control total. Pero si quieres que algo fluya de verdad, tienes tres modos diseñados para sacarte de tu propia cabeza:</p>
+        <p><strong>Río</strong> — No puedes editar nada de lo que escribes. Solo hacia adelante.</p>
+        <p><strong>Límite</strong> — Como el Río, pero con un número máximo de correcciones por párrafo.</p>
+        <p><strong>Presión</strong> — No pares. Si dejas de escribir, el texto se borra. Ideal para maratones.</p>
+        <p>Puedes cambiar entre modos en cualquier momento.</p>
+      </div>
+      <div className="wc-mockup">
+        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/></div></div>
+        <div className="mk-modes">
+          <div className="mk-mode rio"><div className="mk-mode-icon">〜</div><div className="mk-mode-tag">Río</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+          <div className="mk-mode limite"><div className="mk-mode-icon">∂</div><div className="mk-mode-tag">Límite</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{width:'90%',position:'relative'}}><span style={{position:'absolute',inset:0,background:'#ff9800',borderRadius:2,top:'50%',height:1}}/></div><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+          <div className="mk-mode presion"><div className="mk-mode-icon">⏱</div><div className="mk-mode-tag">Presión</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+        </div>
+      </div>
+    </div>,
+    /* SLIDE 4 */
+    <div key="s4" className="wc-slide">
+      <div><div className="wc-eyebrow">Equipos</div>
+        <div className="wc-title">Crea tu equipo.<br/>Propón. Vota. Escribe.</div></div>
+      <div className="wc-body">
+        <p>Puedes crear tu propio equipo e invitar a quien quieras. Dentro del equipo, cada miembro puede proponer un reto semanal para el resto. La comunidad vota cuál hacer, y todos se ponen a escribir juntos.</p>
+        <p>Es la versión social de Pretexto: el empujón que necesitas cuando escribir solo no es suficiente.</p>
+      </div>
+      <div className="wc-mockup">
+        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/></div></div>
+        <div className="mk-team-header">
+          <div className="mk-team-avatar">✦</div>
+          <div><div className="mk-team-name">Escribidores Nocturnos</div><div className="mk-team-sub">Reto semanal activo</div></div>
+          <div className="mk-team-badge">5 miembros</div>
+        </div>
+        <div className="mk-team-members">
+          <div className="mk-member"><div className="mk-member-av"/><div className="mk-member-name"/><div className="mk-member-dot"/></div>
+          <div className="mk-member"><div className="mk-member-av" style={{background:'#e8d5d3'}}/><div className="mk-member-name"/><div className="mk-member-dot" style={{background:'#bbb'}}/></div>
+          <div className="mk-member"><div className="mk-member-av" style={{background:'#d5e8da'}}/><div className="mk-member-name"/><div className="mk-member-dot"/></div>
+        </div>
+        <div style={{fontSize:9,color:'#8a7f74',textTransform:'uppercase',letterSpacing:1,marginBottom:5}}>Propuestas de reto</div>
+        <div className="mk-reto-proposal"><div className="mk-proposal-av"/><div className="mk-proposal-body"><div className="mk-proposal-line"/><div className="mk-proposal-line s"/></div><div className="mk-vote">▲ 3</div></div>
+        <div className="mk-reto-proposal"><div className="mk-proposal-av" style={{background:'#e8d5d3'}}/><div className="mk-proposal-body"><div className="mk-proposal-line" style={{width:'65%'}}/><div className="mk-proposal-line s"/></div><div className="mk-vote">▲ 1</div></div>
+      </div>
+    </div>,
+    /* SLIDE 5 */
+    <div key="s5" className="wc-slide">
+      <div><div className="wc-eyebrow">Biblioteca</div>
+        <div className="wc-title">Tus textos, privados<br/>o para la comunidad.</div></div>
+      <div className="wc-body">
+        <p>Todo lo que escribes queda guardado en tu biblioteca. Puedes mantenerlo privado —solo para ti— o publicarlo para que la comunidad lo lea. Si publicas, tus compañeros pueden dejarte comentarios y reacciones.</p>
+        <p>Leer lo que escriben otros es, en sí mismo, una lección.</p>
+      </div>
+      <div className="wc-mockup">
+        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/></div></div>
+        <div className="mk-lib-grid">
+          <div className="mk-lib-card">
+            <div className="mk-lib-card-header"><div className="mk-lib-title"/><div className="mk-lib-privacy pub">Público</div></div>
+            <div className="mk-lib-lines"><div className="mk-lib-line"/><div className="mk-lib-line s"/><div className="mk-lib-line xs"/></div>
+            <div className="mk-feedback-bubble"><div className="mk-feedback-av"/><div style={{height:4,width:60,background:'#c8c0b4',borderRadius:2}}/></div>
+            <div className="mk-lib-footer"><span style={{fontSize:9,color:'#8a7f74'}}>♥ 4 &nbsp;💬 2</span></div>
+          </div>
+          <div className="mk-lib-card">
+            <div className="mk-lib-card-header"><div className="mk-lib-title"/><div className="mk-lib-privacy prv">Privado</div></div>
+            <div className="mk-lib-lines"><div className="mk-lib-line"/><div className="mk-lib-line s"/><div className="mk-lib-line xs"/></div>
+            <div className="mk-lib-footer" style={{marginTop:22}}><span style={{fontSize:9,color:'#c8c0b4'}}>Solo tú</span></div>
+          </div>
+        </div>
+      </div>
+    </div>,
+    /* SLIDE 6 */
+    <div key="s6" className="wc-slide">
+      <div><div className="wc-eyebrow">Revisión con IA</div>
+        <div className="wc-title">Tu primer lector<br/>que nunca juzga.</div></div>
+      <div className="wc-body">
+        <p>Si conectas tu API key de Claude, podrás pedirle que revise y comente los textos que subas a tu biblioteca. No para corregirte como un profesor, sino para señalar lo que funciona y lo que podría ir más lejos.</p>
+        <p>Es opcional, completamente privado, y solo actúa cuando tú se lo pides. Piénsalo como un primer lector disponible a las tres de la mañana.</p>
+        <div className="wc-quote">«El primer borrador de todo es una mierda.» <em>— Ernest Hemingway</em></div>
+        <p>Y ahora ya no tienes excusa para no empezar. Nos vemos dentro.</p>
+      </div>
+      <div className="wc-mockup">
+        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/></div></div>
+        <div className="mk-api-row"><div className="mk-api-icon">🔑</div><div className="mk-api-body"><div className="mk-api-label"/><div className="mk-api-sub"/></div><div className="mk-api-status conn">Conectado</div></div>
+        <div className="mk-review-box">
+          <div className="mk-review-header"><div className="mk-review-icon">✦</div><div className="mk-review-title"/></div>
+          <div className="mk-review-lines"><div className="mk-review-line"/><div className="mk-review-hl"/><div className="mk-review-line s"/><div className="mk-review-line"/><div className="mk-review-line xs"/></div>
+        </div>
+      </div>
+    </div>,
+  ];
+
+  return(
+    <div className="wc-overlay">
+      <div className="wc-modal">
+        <div className="wc-header">
+          <span className="wc-logo">pretexto</span>
+          <span className="wc-counter">{cur+1} / {TOTAL}</span>
+        </div>
+        <div className="wc-slides-wrap">
+          <div className="wc-slides" style={{transform:`translateX(-${cur*100}%)`}}>
+            {slides}
+          </div>
+        </div>
+        <div style={{flexShrink:0}}>
+          <div className="wc-nav">
+            <button className="wc-btn" onClick={()=>cur>0&&go(cur-1)} disabled={cur===0}>← Anterior</button>
+            <div className="wc-dots">
+              {Array.from({length:TOTAL},(_,i)=>(
+                <div key={i} className={'wc-dot'+(i===cur?' active':'')} onClick={()=>go(i)}/>
+              ))}
+            </div>
+            <button className="wc-btn primary" onClick={handleNext}>{cur===TOTAL-1?'¡Empezar! →':'Siguiente →'}</button>
+          </div>
+          <div className="wc-noshow" onClick={()=>setNoShow(v=>!v)}>
+            <div className={'wc-noshow-check'+(noShow?' checked':'')}>
+              {noShow&&<svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            </div>
+            <span className="wc-noshow-label">No volver a mostrar esto</span>
+          </div>
+          <div style={{height:14}}/>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 /* ─── COOKIE BANNER ─────────────────────────────── */
 const CookieBanner=({onAccept,onDecline})=>(
   <div className="fi" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:500,background:'#1A1916',color:'#fff',padding:'16px 20px',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'0 -4px 24px rgba(0,0,0,0.3)'}}>
@@ -4826,6 +5117,7 @@ const App=()=>{
   const [receivedChallenges,setReceivedChallenges]=useState([]);
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
   const [editingEntry,setEditingEntry]=useState(null);
+  const [showWelcome,setShowWelcome]=useState(false);
 
   const loadUserData=async(uid)=>{
     if(!uid)return;
@@ -4911,6 +5203,7 @@ const App=()=>{
   },[]);
 
   const handleAuth=async(profile)=>{
+    if(localStorage.getItem('pretexto_welcome_seen')!=='true')setShowWelcome(true);
     const session=await DB.getSession();
     if(session?.user){
       setUser({...session.user,...profile});
@@ -5020,6 +5313,7 @@ const App=()=>{
   if(view==='briefing')return<SessionBriefing user={user} energy={energy} library={library} projects={projects} saveProject={saveProject} onStart={startSession} onBack={()=>setView('dashboard')}/>;
 
   return<>
+    {showWelcome&&<WelcomeCarousel onClose={()=>setShowWelcome(false)}/>}
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} setReadingEntry={undefined}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
