@@ -1538,6 +1538,15 @@ const DB = {
     const { error } = await getSB().from('direct_challenges').update({ seen: true }).eq('id', id);
     if (error) throw error;
   },
+  resetPassword: async (email) => {
+    const redirectTo = window.location.origin + window.location.pathname;
+    const { error } = await getSB().auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) throw error;
+  },
+  updatePassword: async (newPassword) => {
+    const { error } = await getSB().auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  },
   // Comments
   getComments: async (entryId) => {
     const { data, error } = await getSB().from('text_comments').select('*').eq('entry_id', entryId).order('created_at', { ascending: true });
@@ -2186,7 +2195,8 @@ const LeccionModal=({reto,onClose})=>{
 
 /* ─── USER SELECT ────────────────────────────────── */
 const AuthScreen=({onAuth})=>{
-  const [mode,setMode]=useState('login'); // 'login' | 'signup'
+  const [mode,setMode]=useState('login');
+  const [recoverSent,setRecoverSent]=useState(false); // 'login' | 'signup'
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
@@ -2198,6 +2208,13 @@ const AuthScreen=({onAuth})=>{
   const [showTerms,setShowTerms]=useState(false);
 
   const submit=async()=>{
+    if(mode==='recover'){
+      if(!email.trim()){setError('Introduce tu email');return;}
+      setLoading(true);setError('');
+      try{await DB.resetPassword(email.trim());setRecoverSent(true);}
+      catch(e){setError('No pudimos enviar el email. Comprueba que sea correcto.');}
+      setLoading(false);return;
+    }
     if(!email.trim()||!password.trim())return;
     if(mode==='signup'&&!name.trim()){setError('Añade tu nombre');return;}
     if(mode==='signup'&&password.length<6){setError('La contraseña debe tener al menos 6 caracteres');return;}
@@ -2253,7 +2270,7 @@ const AuthScreen=({onAuth})=>{
           <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="tu@email.com" style={{marginBottom:12,width:'100%'}}/>
 
           <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:4}}>Contraseña{mode==='signup'&&' (mín. 6 caracteres)'}</div>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="••••••" style={{marginBottom:error?8:16,width:'100%'}}/>
+          {mode!=='recover'&&<input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="••••••" style={{marginBottom:error?8:16,width:'100%'}}/>}
 
           {error&&<div style={{fontSize:12,color:'#C5221F',marginBottom:12,padding:'7px 10px',background:'rgba(197,34,31,0.06)',borderRadius:7,border:'0.5px solid rgba(197,34,31,0.2)'}}>{error}</div>}
 
@@ -2272,12 +2289,21 @@ const AuthScreen=({onAuth})=>{
             }
             submit();
           }} disabled={loading} style={{width:'100%',background:TXT,border:'none',borderRadius:8,padding:'11px',fontSize:14,fontWeight:500,color:'#fff',cursor:'pointer',opacity:loading?0.6:1}}>
-            {loading?'…':mode==='login'?'Entrar':'Crear cuenta y entrar'}
+            {loading?'…':mode==='login'?'Entrar':mode==='recover'?'Enviar enlace de recuperación':'Crear cuenta y entrar'}
           </button>
         </div>
 
-        {mode==='login'&&<div style={{marginTop:14,fontSize:12,color:MUTED,textAlign:'center'}}>
+        {recoverSent&&<div style={{background:'rgba(10,122,88,0.07)',border:'0.5px solid rgba(10,122,88,0.3)',borderRadius:8,padding:'12px 14px',marginTop:12,fontSize:13,color:'#0A7A58',lineHeight:1.5,textAlign:'center'}}>
+          ✓ Te hemos enviado un email con el enlace para cambiar tu contraseña. Revisa también el spam.
+        </div>}
+        {mode==='recover'&&<div style={{textAlign:'center',marginTop:12,fontSize:12}}>
+          <button onClick={()=>{setMode('login');setRecoverSent(false);setError('');}} style={{background:'transparent',border:'none',color:'#5550B8',cursor:'pointer',fontSize:12}}>← Volver al inicio de sesión</button>
+        </div>}
+{mode==='login'&&<div style={{marginTop:14,fontSize:12,color:MUTED,textAlign:'center'}}>
           ¿Primera vez? <button onClick={()=>setMode('signup')} style={{background:'transparent',border:'none',color:'#5550B8',cursor:'pointer',fontSize:12,fontWeight:500}}>Crea tu cuenta</button>
+        </div>}
+        {mode==='login'&&<div style={{textAlign:'center',marginTop:4,fontSize:12}}>
+          <button onClick={()=>{setMode('recover');setError('');setRecoverSent(false);}} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,textDecoration:'underline'}}>¿Olvidaste tu contraseña?</button>
         </div>}
       </div>
     </div>
@@ -5440,6 +5466,69 @@ const WelcomeCarousel=({onClose})=>{
 };
 
 
+
+/* ─── PASSWORD RESET MODAL ─────────────────────────────────── */
+const PasswordResetModal=({onClose})=>{
+  const [password,setPassword]=useState('');
+  const [confirm,setConfirm]=useState('');
+  const [loading,setLoading]=useState(false);
+  const [done,setDone]=useState(false);
+  const [error,setError]=useState('');
+
+  const handleSubmit=async()=>{
+    if(password.length<6){setError('La contraseña debe tener al menos 6 caracteres');return;}
+    if(password!==confirm){setError('Las contraseñas no coinciden');return;}
+    setLoading(true);setError('');
+    try{
+      await DB.updatePassword(password);
+      setDone(true);
+    }catch(e){
+      setError('Error al actualizar la contraseña. Vuelve a intentarlo.');
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',padding:'24px 16px'}}>
+      <div style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:380,padding:'28px 24px'}}>
+        <div style={{fontSize:18,fontWeight:700,color:'#1A1916',marginBottom:6,letterSpacing:'-0.02em'}}>Nueva contraseña</div>
+        <div style={{fontSize:13,color:'#6B6963',marginBottom:20}}>Elige una contraseña nueva para tu cuenta.</div>
+        {done?(
+          <div style={{textAlign:'center'}}>
+            <div style={{fontSize:36,marginBottom:12}}>✅</div>
+            <div style={{fontSize:15,fontWeight:600,color:'#1A1916',marginBottom:8}}>¡Contraseña actualizada!</div>
+            <div style={{fontSize:13,color:'#6B6963',marginBottom:20}}>Ya puedes entrar con tu nueva contraseña.</div>
+            <button onClick={onClose} style={{width:'100%',background:'#1A1916',color:'#fff',border:'none',borderRadius:8,padding:'12px',fontSize:14,fontWeight:600,cursor:'pointer'}}>
+              Ir al inicio
+            </button>
+          </div>
+        ):(
+          <>
+            {error&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13,color:'rgba(197,34,31,0.9)'}}>{error}</div>}
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:12,fontWeight:500,color:'#1A1916',display:'block',marginBottom:6}}>Nueva contraseña</label>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                style={{width:'100%',border:'0.5px solid rgba(0,0,0,0.15)',borderRadius:8,padding:'10px 12px',fontSize:14,outline:'none',fontFamily:'inherit'}}/>
+            </div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:12,fontWeight:500,color:'#1A1916',display:'block',marginBottom:6}}>Confirmar contraseña</label>
+              <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&handleSubmit()}
+                placeholder="Repite la contraseña"
+                style={{width:'100%',border:'0.5px solid rgba(0,0,0,0.15)',borderRadius:8,padding:'10px 12px',fontSize:14,outline:'none',fontFamily:'inherit'}}/>
+            </div>
+            <button onClick={handleSubmit} disabled={loading||!password||!confirm}
+              style={{width:'100%',background:'#1A1916',color:'#fff',border:'none',borderRadius:8,padding:'12px',fontSize:14,fontWeight:600,cursor:loading||!password||!confirm?'default':'pointer',opacity:loading||!password||!confirm?0.6:1}}>
+              {loading?'Actualizando…':'Guardar nueva contraseña'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ─── COOKIE BANNER ─────────────────────────────── */
 const CookieBanner=({onAccept,onDecline})=>(
   <div className="fi" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:500,background:'#1A1916',color:'#fff',padding:'16px 20px',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'0 -4px 24px rgba(0,0,0,0.3)'}}>
@@ -5546,6 +5635,7 @@ const App=()=>{
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
   const [editingEntry,setEditingEntry]=useState(null);
   const [showWelcome,setShowWelcome]=useState(false);
+  const [showPasswordReset,setShowPasswordReset]=useState(false);
   const [followers,setFollowers]=useState([]);
   const [following,setFollowing]=useState([]);
 
@@ -5635,6 +5725,7 @@ const App=()=>{
     });
     const {data:{subscription}}=DB.onAuthChange(async(event,session)=>{
       if(event==='SIGNED_OUT'){setUser(null);setLibrary([]);setReflections([]);setProjects([]);setView('dashboard');}
+      if(event==='PASSWORD_RECOVERY'){setShowPasswordReset(true);}
     });
     return()=>subscription.unsubscribe();
   },[]);
@@ -5720,6 +5811,7 @@ const App=()=>{
   const driveData=user?S.get('flujo:drive:'+user.id)||{}:{};
   const driveConnected=!!(driveData.token&&driveData.expires_at>Date.now()+30000);
 
+  if(showPasswordReset)return<PasswordResetModal onClose={()=>setShowPasswordReset(false)}/>;
   if(loading)return<div style={{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:MUTED}}>Cargando Pretexto…</div>;
 
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
