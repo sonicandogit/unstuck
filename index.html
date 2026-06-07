@@ -1276,6 +1276,24 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  getPublicEntries: async (uid) => {
+    const { data, error } = await getSB().from('entries')
+      .select('id, word_count, visibility, date')
+      .eq('user_id', uid)
+      .neq('visibility', 'privado')
+      .order('ts', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  getUserRatings: async (uid) => {
+    // Get avg rating across all public entries of a user
+    const { data: entries } = await getSB().from('entries').select('id').eq('user_id', uid).neq('visibility','privado');
+    if (!entries?.length) return null;
+    const ids = entries.map(e => e.id);
+    const { data: ratings, error } = await getSB().from('text_ratings').select('rating').in('entry_id', ids);
+    if (error || !ratings?.length) return null;
+    return Math.round(ratings.reduce((s,r) => s + r.rating, 0) / ratings.length * 10) / 10;
+  },
   upsertEntry: async (entry) => {
     const { error } = await getSB().from('entries').upsert(entry);
     if (error) throw error;
@@ -2735,42 +2753,48 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
         </div>
 
         {/* PROYECTO */}
-        <SectionCard accent="#5550B8" tag="Mi proyecto" title={lastProject&&!creatingProject?lastProject.title:'Empieza un proyecto'}>
+        <SectionCard accent="#5550B8" tag="Mis proyectos" title="¿En qué quieres trabajar hoy?">
           <div style={{padding:'0 18px 18px'}}>
-            {lastProject&&!creatingProject?(
+            {/* 4 genre folders */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+              {[
+                {emoji:'📝',label:'Poesía',   types:['Poemario']},
+                {emoji:'📖',label:'Relato',   types:['Relato corto','Microrrelatos']},
+                {emoji:'📚',label:'Novela',   types:['Novela','Guión']},
+                {emoji:'🖊',label:'Ensayo',   types:['Ensayo','Diario creativo']},
+              ].map(({emoji,label,types})=>{
+                const count=library.filter(e=>e.sk==='proyecto'&&projects.find(p=>p.id===(e.project_id||e.projectId)&&types.includes(p.type))).length;
+                const projOfType=projects.filter(p=>types.includes(p.type));
+                return(
+                  <button key={label} onClick={()=>{
+                    const last=projOfType[0];
+                    if(last)selectProject(last);
+                    else{setCreatingProject(true);}
+                  }} style={{background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.15)',borderRadius:10,padding:'12px 10px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:4}}>
+                    <span style={{fontSize:20}}>{emoji}</span>
+                    <span style={{fontSize:12,fontWeight:600,color:TXT}}>{label}</span>
+                    <span style={{fontSize:10,color:MUTED}}>{count} texto{count!==1?'s':''}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Último proyecto */}
+            {lastProject&&!creatingProject&&(
               <>
-                <div style={{display:'flex',gap:6,marginBottom:10}}>
+                <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>Último proyecto</div>
+                <div style={{display:'flex',gap:6,marginBottom:8}}>
                   <span style={{fontSize:11,background:'rgba(85,80,184,0.09)',border:'0.5px solid rgba(85,80,184,0.22)',borderRadius:5,padding:'2px 8px',color:'#5550B8'}}>{lastProject.type}</span>
                   <span style={{fontSize:11,color:MUTED,padding:'2px 0'}}>{lastProject.wordCount||0} palabras</span>
                 </div>
-                <Btn onClick={()=>selectProject(lastProject)} style={{width:'100%',height:40,background:TXT,border:'0.5px solid '+TXT,color:'#fff',marginBottom:10}}>Continuar donde lo dejaste →</Btn>
+                <Btn onClick={()=>selectProject(lastProject)} style={{width:'100%',height:40,background:TXT,border:'0.5px solid '+TXT,color:'#fff',marginBottom:8}}>Continuar «{lastProject.title}» →</Btn>
                 <div style={{display:'flex',gap:8}}>
                   {projects.length>1&&<button onClick={()=>setShowOtherProjects(v=>!v)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>{showOtherProjects?'Ocultar':'Ver otros'} ({projects.length-1})</button>}
-                  <button onClick={()=>setCreatingProject(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>+ Nuevo proyecto</button>
+                  <button onClick={()=>setCreatingProject(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>+ Nuevo</button>
                 </div>
-                {showOtherProjects&&<div style={{marginTop:10,display:'flex',flexDirection:'column',gap:6}}>
-                  {projects.filter(p=>p.id!==lastProject.id).map(p=>(
-                    <button key={p.id} onClick={()=>selectProject(p)} style={{background:'#F9F8F5',border:'0.5px solid '+BDR,borderRadius:9,padding:'10px 12px',cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:10}}>
-                      <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.title}</div><div style={{fontSize:11,color:MUTED}}>{p.type} · {p.wordCount||0} palabras</div></div>
-                      <span style={{fontSize:11,color:MUTED}}>→</span>
-                    </button>
-                  ))}
-                </div>}
               </>
-            ):(
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {creatingProject&&<button onClick={()=>setCreatingProject(false)} style={{background:'transparent',border:'none',fontSize:11,color:MUTED,cursor:'pointer',textAlign:'left',marginBottom:4}}>← Cancelar</button>}
-                <div><div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:4}}>Título del proyecto</div><input type="text" value={newProj.title} onChange={e=>setNewProj(v=>({...v,title:e.target.value}))} placeholder="El nombre de tu obra…" style={{width:'100%'}}/></div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                  <div><div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:4}}>Tipo</div>
-                    <select value={newProj.type} onChange={e=>setNewProj(v=>({...v,type:e.target.value}))} style={{width:'100%',border:'0.5px solid rgba(0,0,0,0.12)',borderRadius:8,padding:'8px 11px',fontSize:13,color:TXT,background:'#fff',cursor:'pointer'}}>
-                      {PROJECT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div><div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:4}}>Objetivo (palabras)</div><input type="number" value={newProj.goal} onChange={e=>setNewProj(v=>({...v,goal:+e.target.value}))} style={{width:'100%'}}/></div>
-                </div>
-                <Btn variant="primary" onClick={createProject} disabled={!newProj.title.trim()} full style={{height:40,marginTop:4}}>Crear proyecto y empezar →</Btn>
-              </div>
+            )}
+            {(!lastProject||creatingProject)&&(
+              <button onClick={()=>setCreatingProject(true)} style={{width:'100%',background:'transparent',border:'0.5px solid rgba(85,80,184,0.3)',borderRadius:8,padding:'10px',fontSize:12,color:'#5550B8',cursor:'pointer'}}>+ Crear nuevo proyecto</button>
             )}
           </div>
         </SectionCard>
@@ -2783,6 +2807,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
 const PostSession=({sessionData,onComplete,onBack,user})=>{
   const [rating,setRating]=useState(7);
   const [notes,setNotes]=useState('');
+  const [saveToLib,setSaveToLib]=useState(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento');
   const [fbState,setFbState]=useState(getApiKey(user.id)?'ready':'no_key');
   const [fbError,setFbError]=useState('');
   const [feedback,setFeedback]=useState('');
@@ -2806,7 +2831,8 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   // feedback is manual — no auto-trigger
 
   const save=()=>{
-    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'?feedback:''};
+    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'?feedback:'',
+      saveToLibrary:saveToLib,visibility:saveToLib?'privado':'ejercicio'};
     onComplete(r);
   };
 
@@ -2874,7 +2900,16 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
               <div style={{fontSize:12,color:MUTED,marginBottom:9,lineHeight:1.6}}>Aprendizajes, patrones, lo que mejor te ha funcionado…</div>
               <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder={'"Escribo mejor con música de fondo"\n"El modo Río me ayuda a soltar el texto"\n"Me cuesta arrancar, pero luego fluye"'} rows={4} style={{width:'100%',resize:'vertical',fontSize:13,lineHeight:1.7,color:TXT}}/>
             </div>
-            <div style={{display:'flex',gap:10}}><Btn variant="ghost" onClick={()=>onComplete(null)} small>Saltar</Btn><Btn variant="primary" onClick={save} full style={{height:42,fontSize:14}}>Guardar reflexión →</Btn></div>
+            <div style={{display:'flex',gap:10}}><Btn variant="ghost" onClick={()=>onComplete(null)} small>Saltar</Btn><div onClick={()=>setSaveToLib(v=>!v)} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",marginBottom:10,border:"0.5px solid "+BDR}}>
+              <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveToLib?"#5550B8":BDR),background:saveToLib?"#5550B8":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                {saveToLib&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:500,color:TXT}}>Guardar en mi biblioteca</div>
+                <div style={{fontSize:11,color:MUTED}}>{saveToLib?"Visible en Mis textos":"Solo cuenta para las estadísticas"}</div>
+              </div>
+            </div>
+            <Btn variant="primary" onClick={save} full style={{height:42,fontSize:14}}>Guardar reflexión →</Btn></div>
           </div>
         </div>
       </div>
@@ -4469,39 +4504,83 @@ const ChallengesHistory=({user,onClose})=>{
 };
 
 /* ─── PUBLIC PROFILE ─────────────────────────────── */
-const PublicProfile=({user,library,reflections,onClose})=>{
-  const totalWords=library.reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
-  const dates=[...new Set(library.map(e=>e.date))].filter(Boolean).sort().reverse();
-  let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
-  for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/864e5);if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
-  const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
-  const profileUrl=window.location.origin+window.location.pathname+'?user='+user.username;
+const PublicProfile=({user,onClose})=>{
+  const [stats,setStats]=useState(null);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    if(!user?.id){setLoading(false);return;}
+    const load=async()=>{
+      try{
+        const [fwers,fwing,entries,avgRating]=await Promise.all([
+          DB.getFollowers(user.id),
+          DB.getFollowing(user.id),
+          DB.getPublicEntries(user.id),
+          DB.getUserRatings(user.id),
+        ]);
+        setStats({
+          followers: fwers.length,
+          following: fwing.length,
+          publicTexts: entries.length,
+          totalWords: entries.reduce((s,e)=>s+(e.word_count||0),0),
+          avgRating,
+        });
+      }catch(e){console.error('profile load:',e);}
+      setLoading(false);
+    };
+    load();
+  },[user?.id]);
+
+  if(!user)return null;
+  const profileUrl=window.location.origin+window.location.pathname+'?user='+(user.username||user.id);
 
   return(
-    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.4)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-      <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:380,boxShadow:'0 8px 50px rgba(0,0,0,0.15)',overflow:'hidden'}}>
-        {/* Header */}
-        <div style={{background:'linear-gradient(135deg,'+user.accent+'22,'+user.bg+')',padding:'28px 24px 20px',textAlign:'center',borderBottom:'0.5px solid '+BDR}}>
-          <div style={{width:64,height:64,borderRadius:'50%',background:user.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,fontWeight:700,color:user.accent,margin:'0 auto 12px',border:'3px solid '+user.accent+'33'}}>{user.initials}</div>
-          <div style={{fontSize:20,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>{user.name}</div>
-          <div style={{fontSize:13,color:MUTED,marginTop:2}}>@{user.username||'sin_username'}</div>
-        </div>
-        {/* Stats */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:1,background:BDR}}>
-          {[
-            {l:'Palabras',v:totalWords>=1000?(totalWords/1000).toFixed(1)+'k':totalWords},
-            {l:'Racha',v:streak+'d'},
-            {l:'Valoración',v:avgRating?avgRating+'/10':'—'},
-          ].map(s=>(
-            <div key={s.l} style={{background:'#fff',padding:'16px 12px',textAlign:'center'}}>
-              <div style={{fontSize:22,fontWeight:700,color:TXT,letterSpacing:'-0.02em'}}>{s.v}</div>
-              <div style={{fontSize:10,color:FAINT,marginTop:2}}>{s.l}</div>
+    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:400,boxShadow:'0 12px 60px rgba(0,0,0,0.2)',overflow:'hidden'}}>
+
+        {/* Header with gradient + avatar */}
+        <div style={{background:'linear-gradient(135deg,'+(user.accent||'#5550B8')+'22,'+(user.bg||'#EEEDFE')+')',padding:'28px 24px 24px',textAlign:'center',borderBottom:'0.5px solid '+BDR}}>
+          {/* Avatar — photo if available, initials fallback */}
+          {user.avatar?(
+            <img src={user.avatar} alt={user.name}
+              style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',margin:'0 auto 14px',display:'block',border:'3px solid #fff',boxShadow:'0 2px 12px rgba(0,0,0,0.15)'}}/>
+          ):(
+            <div style={{width:72,height:72,borderRadius:'50%',background:user.bg||'#EEEDFE',display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,fontWeight:700,color:user.accent||'#5550B8',margin:'0 auto 14px',border:'3px solid #fff',boxShadow:'0 2px 12px rgba(0,0,0,0.12)'}}>
+              {(user.initials||(user.name||'?')[0]).toUpperCase()}
             </div>
-          ))}
+          )}
+          <div style={{fontSize:21,fontWeight:700,color:TXT,fontFamily:'Lora,Georgia,serif',letterSpacing:'-0.02em'}}>{user.name}</div>
+          <div style={{fontSize:13,color:MUTED,marginTop:3}}>@{user.username||'sin_username'}</div>
         </div>
-        {/* Share */}
+
+        {/* Stats grid */}
+        {loading?(
+          <div style={{padding:'24px',textAlign:'center',color:FAINT,fontSize:13}}>Cargando estadísticas…</div>
+        ):(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'0.5px',background:BDR}}>
+            {[
+              {l:'Seguidores', v: stats?.followers??0},
+              {l:'Siguiendo',  v: stats?.following??0},
+              {l:'Textos',     v: stats?.publicTexts??0},
+              {l:'Valoración', v: stats?.avgRating ? stats.avgRating+'★' : '—'},
+            ].map(s=>(
+              <div key={s.l} style={{background:'#fff',padding:'16px 8px',textAlign:'center'}}>
+                <div style={{fontSize:20,fontWeight:700,color:TXT,letterSpacing:'-0.02em',lineHeight:1.1}}>{s.v}</div>
+                <div style={{fontSize:9,color:FAINT,marginTop:3,textTransform:'uppercase',letterSpacing:'.06em'}}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Words total */}
+        {!loading&&stats&&stats.totalWords>0&&(
+          <div style={{padding:'10px 20px',borderBottom:'0.5px solid '+BDR,textAlign:'center'}}>
+            <span style={{fontSize:12,color:MUTED}}>{(stats.totalWords).toLocaleString()} palabras publicadas</span>
+          </div>
+        )}
+
+        {/* Share + close */}
         <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
-          <div style={{fontSize:12,color:MUTED,textAlign:'center',lineHeight:1.5}}>Comparte tu perfil público con otros escritores</div>
           <div style={{display:'flex',gap:8}}>
             <div style={{flex:1,background:'rgba(0,0,0,0.04)',borderRadius:7,padding:'8px 10px',fontSize:11,color:MUTED,fontFamily:"'Courier New',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{profileUrl}</div>
             <button onClick={()=>navigator.clipboard?.writeText(profileUrl).then(()=>alert('¡Copiado!'))} style={{background:TXT,border:'none',borderRadius:7,padding:'8px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer',flexShrink:0}}>Copiar</button>
@@ -4514,7 +4593,6 @@ const PublicProfile=({user,library,reflections,onClose})=>{
 };
 
 
-/* ─── USER AVATAR ────────────────────────────────── */
 const UserAvatar=({user,size=36,onClick})=>{
   const s={width:size,height:size,borderRadius:'50%',flexShrink:0,cursor:onClick?'pointer':'default'};
   if(user?.avatar)return<img src={user.avatar} alt={user.name||''} onClick={onClick} style={{...s,objectFit:'cover',border:'0.5px solid '+BDR}}/>;
@@ -4762,7 +4840,8 @@ const MisTextos=({user,library,onVisibilityChange})=>{
   const [updating,setUpdating]=useState(null);
   const [readEntry,setReadEntry]=useState(null);
 
-  const filtered=library.filter(e=>filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado'));
+  const myTexts=library.filter(e=>e.visibility!=='ejercicio');
+  const filtered=myTexts.filter(e=>filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado'));
 
   const changeVis=async(entry,vis)=>{
     setUpdating(entry.id);
@@ -4779,7 +4858,7 @@ const MisTextos=({user,library,onVisibilityChange})=>{
       {/* Filter tabs */}
       <div style={{display:'flex',gap:2,padding:'12px 16px 0',flexShrink:0}}>
         {[['all','Todos'],['privado','Privados'],['amigos','Amigos'],['abierto','Abiertos']].map(([v,l])=>(
-          <button key={v} onClick={()=>setFilter(v)} style={{background:filter===v?'rgba(0,0,0,0.07)':'transparent',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:filter===v?500:400,color:filter===v?TXT:MUTED,cursor:'pointer'}}>{l} {filter===v&&library.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length>0&&<span style={{fontSize:10,color:FAINT}}>({library.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length})</span>}</button>
+          <button key={v} onClick={()=>setFilter(v)} style={{background:filter===v?'rgba(0,0,0,0.07)':'transparent',border:'none',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:filter===v?500:400,color:filter===v?TXT:MUTED,cursor:'pointer'}}>{l} {filter===v&&myTexts.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length>0&&<span style={{fontSize:10,color:FAINT}}>({myTexts.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length})</span>}</button>
         ))}
       </div>
       {/* Entries */}
@@ -4801,10 +4880,18 @@ const MisTextos=({user,library,onVisibilityChange})=>{
                 </div>
                 <button onClick={()=>setReadEntry(e)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 9px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>Leer</button>
               </div>
-              {/* Visibility picker */}
-              <div style={{padding:'0 16px 14px'}}>
-                <div style={{fontSize:10,color:FAINT,marginBottom:6}}>Visibilidad{isUpdating&&<span style={{marginLeft:6,color:'#5550B8'}}>Guardando…</span>}</div>
-                <VisibilityPicker value={vis} onChange={v=>changeVis(e,v)}/>
+              {/* Visibility cycling button */}
+              <div style={{padding:'0 16px 14px',display:'flex',alignItems:'center',gap:8}}>
+                <button onClick={()=>{
+                  const cycle={privado:'amigos',amigos:'abierto',abierto:'privado'};
+                  changeVis(e,cycle[vis]||'privado');
+                }} disabled={isUpdating}
+                  style={{display:'flex',alignItems:'center',gap:6,border:'0.5px solid '+BDR,borderRadius:20,padding:'4px 12px',background:'rgba(0,0,0,0.03)',cursor:'pointer',fontSize:11,fontWeight:500,color:TXT}}>
+                  <span>{vis==='privado'?'🔒':vis==='amigos'?'👥':'🌐'}</span>
+                  <span style={{color:vis==='abierto'?'#0A7A58':vis==='amigos'?'#5550B8':MUTED}}>{vis==='privado'?'Privado':vis==='amigos'?'Amigos':'Público'}</span>
+                  <span style={{color:FAINT,fontSize:10}}>→ {vis==='privado'?'Amigos':vis==='amigos'?'Público':'Privado'}</span>
+                  {isUpdating&&<span style={{color:'#5550B8'}}>…</span>}
+                </button>
               </div>
             </div>
           );
@@ -5162,7 +5249,7 @@ const AmigosScreen=({user,onClose})=>{
       </div>
 
       {/* Profile modal */}
-      {viewingProfile&&<PublicProfile user={viewingProfile} reflections={[]} onClose={()=>setViewingProfile(null)}/>}
+      {viewingProfile&&<PublicProfile user={viewingProfile} onClose={()=>setViewingProfile(null)}/>}
     </div>
   );
 };
