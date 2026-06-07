@@ -1391,18 +1391,22 @@ const DB = {
   },
   // Follows
   getFollowing: async (uid) => {
-    const { data, error } = await getSB().from('follows')
-      .select('following_id, profiles!follows_following_id_fkey(name, username, initials, accent, bg)')
-      .eq('follower_id', uid);
-    if (error) throw error;
-    return data || [];
+    const { data: fids, error: e1 } = await getSB().from('follows').select('following_id').eq('follower_id', uid);
+    if (e1) throw e1;
+    if (!fids?.length) return [];
+    const ids = fids.map(f => f.following_id);
+    const { data: profiles, error: e2 } = await getSB().from('profiles').select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
+    if (e2) throw e2;
+    return (profiles || []).map(p => ({ following_id: p.id, profiles: p }));
   },
   getFollowers: async (uid) => {
-    const { data, error } = await getSB().from('follows')
-      .select('follower_id, profiles!follows_follower_id_fkey(name, username, initials, accent, bg)')
-      .eq('following_id', uid);
-    if (error) throw error;
-    return data || [];
+    const { data: fids, error: e1 } = await getSB().from('follows').select('follower_id').eq('following_id', uid);
+    if (e1) throw e1;
+    if (!fids?.length) return [];
+    const ids = fids.map(f => f.follower_id);
+    const { data: profiles, error: e2 } = await getSB().from('profiles').select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
+    if (e2) throw e2;
+    return (profiles || []).map(p => ({ follower_id: p.id, profiles: p }));
   },
   follow: async (followerId, followingId) => {
     const { error } = await getSB().from('follows')
@@ -1485,9 +1489,9 @@ const DB = {
     if (error) throw error;
   },
   getTotalUsers: async () => {
-    const { count, error } = await getSB().from('profiles').select('*', { count: 'exact', head: true });
+    const { data, error } = await getSB().from('profiles').select('id');
     if (error) throw error;
-    return count || 0;
+    return data?.length || 0;
   },
   followUser: async (followerId, followingId) => {
     const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
@@ -2280,7 +2284,7 @@ const AuthScreen=({onAuth})=>{
     </>
   );
 };
-const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry})=>{
+const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [showUserMenu,setShowUserMenu]=useState(false);
   const [showTeams,setShowTeams]=useState(false);
@@ -2464,6 +2468,68 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
             </div>
           </div>
         </div>
+
+        {/* Followers widget */}
+        {(()=>{
+          const seenKey='pretexto:seen_followers:'+user.id;
+          const seenIds=new Set(S.get(seenKey)||[]);
+          const newFollowers=followers.filter(f=>!seenIds.has(f.id));
+          const markSeen=()=>{S.set(seenKey,followers.map(f=>f.id));};
+          return(
+            <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
+              {/* Header row */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:newFollowers.length>0?14:0}}>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <div>
+                    <span style={{fontSize:24,fontWeight:800,color:TXT,letterSpacing:'-0.03em'}}>{followers.length}</span>
+                    <span style={{fontSize:12,color:MUTED,marginLeft:6}}>{followers.length===1?'seguidor':'seguidores'}</span>
+                  </div>
+                  {newFollowers.length>0&&(
+                    <div style={{background:'rgba(85,80,184,0.1)',border:'0.5px solid rgba(85,80,184,0.25)',borderRadius:20,padding:'2px 10px',fontSize:11,fontWeight:600,color:'#5550B8'}}>
+                      +{newFollowers.length} nuevo{newFollowers.length>1?'s':''}
+                    </div>
+                  )}
+                </div>
+                {newFollowers.length>0&&(
+                  <button onClick={markSeen} style={{background:'transparent',border:'none',fontSize:11,color:FAINT,cursor:'pointer',padding:0}}>
+                    Marcar como visto
+                  </button>
+                )}
+              </div>
+              {/* New followers cards */}
+              {newFollowers.length>0&&(
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {newFollowers.map(f=>{
+                    const isFollowing=following.includes(f.id);
+                    return(
+                      <div key={f.id} style={{display:'flex',alignItems:'center',gap:10,background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.12)',borderRadius:10,padding:'10px 14px'}}>
+                        <UserAvatar user={f} size={36}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name||'Usuario'}</div>
+                          <div style={{fontSize:11,color:MUTED}}>@{f.username||'sin_usuario'} ha empezado a seguirte</div>
+                        </div>
+                        <div style={{display:'flex',gap:6,flexShrink:0}}>
+                          {!isFollowing&&(
+                            <button onClick={async()=>{if(onFollow)await onFollow(f.id,false);}}
+                              style={{background:'rgba(85,80,184,0.08)',border:'0.5px solid rgba(85,80,184,0.25)',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:500,color:'#5550B8',cursor:'pointer'}}>
+                              Seguir
+                            </button>
+                          )}
+                          {isFollowing&&(
+                            <span style={{fontSize:11,color:'#0A7A58',fontWeight:500}}>✓ Siguiendo</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {followers.length===0&&(
+                <div style={{fontSize:12,color:FAINT,marginTop:2}}>Aún no te sigue nadie. ¡Comparte tu perfil!</div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Stats chart */}
         {library.length>=3&&<StatsChart library={library}/>}
@@ -4936,7 +5002,7 @@ const AmigosScreen=({user,onClose})=>{
     return()=>clearTimeout(t);
   },[query]);
 
-  const handleFollow=async(targetId,isFollowing)=>{
+  const handleFollow=async(targetId,isFollowing,targetUser)=>{
     try{
       if(isFollowing){
         await DB.unfollowUser(user.id,targetId);
@@ -4945,11 +5011,15 @@ const AmigosScreen=({user,onClose})=>{
       }else{
         await DB.followUser(user.id,targetId);
         setFollowingIds(prev=>[...prev,targetId]);
-        // Refresh friends to get the new friend's profile
-        const following=await DB.getFollowing(user.id);
-        setFriends(following.map(f=>({id:f.following_id,...(f.profiles||{})})).filter(f=>f.name));
+        // Add friend directly from the user object we already have
+        if(targetUser){
+          setFriends(prev=>{
+            if(prev.find(f=>f.id===targetId))return prev;
+            return [...prev,{...targetUser,id:targetId}];
+          });
+        }
       }
-    }catch(e){console.error(e);}
+    }catch(e){console.error('follow error:',e);}
   };
 
   const FriendCard=({u,showUnfollow=false})=>(
@@ -5047,7 +5117,7 @@ const AmigosScreen=({user,onClose})=>{
                         <div style={{fontSize:10,color:MUTED}}>@{u.username||'sin_usuario'}</div>
                       </div>
                       <div style={{display:'flex',flexDirection:'column',gap:4,flexShrink:0}}>
-                        <button onClick={()=>handleFollow(u.id,isFollowing)}
+                        <button onClick={()=>handleFollow(u.id,isFollowing,u)}
                           style={{background:isFollowing?'rgba(0,0,0,0.04)':'rgba(85,80,184,0.08)',border:'0.5px solid '+(isFollowing?BDR:'rgba(85,80,184,0.25)'),borderRadius:5,padding:'4px 8px',fontSize:10,fontWeight:500,color:isFollowing?MUTED:'#5550B8',cursor:'pointer'}}>
                           {isFollowing?'✓ Siguiendo':'Seguir'}
                         </button>
@@ -5476,6 +5546,8 @@ const App=()=>{
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
   const [editingEntry,setEditingEntry]=useState(null);
   const [showWelcome,setShowWelcome]=useState(false);
+  const [followers,setFollowers]=useState([]);
+  const [following,setFollowing]=useState([]);
 
   const loadUserData=async(uid)=>{
     if(!uid)return;
@@ -5506,6 +5578,13 @@ const App=()=>{
       setProjects(projs);
       S.set('flujo:lessons:'+uid,lessons);
       try{const chs=await DB.getReceivedChallenges(uid);setReceivedChallenges(chs);}catch(e){}
+      try{
+        const [fwers,fwing]=await Promise.all([DB.getFollowers(uid),DB.getFollowing(uid)]);
+        const fwersList=fwers.map(f=>({id:f.follower_id,...(f.profiles||{})})).filter(f=>f.name||f.id);
+        const fwingIds=fwing.map(f=>f.following_id);
+        setFollowers(fwersList);
+        setFollowing(fwingIds);
+      }catch(e){console.error('followers error:',e);}
       setSyncStatus('ok');
       setTimeout(()=>setSyncStatus(s=>s==='ok'?null:s),2000);
     }catch(e){
@@ -5682,7 +5761,13 @@ const App=()=>{
       receivedChallenges={receivedChallenges}
       onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
       onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
-      onEditEntry={e=>setEditingEntry(e)}/>
+      onEditEntry={e=>setEditingEntry(e)}
+      followers={followers}
+      following={following}
+      onFollow={async(targetId,isFollowing)=>{
+        if(isFollowing){await DB.unfollowUser(user.id,targetId);setFollowing(prev=>prev.filter(id=>id!==targetId));}
+        else{await DB.followUser(user.id,targetId);setFollowing(prev=>[...prev,targetId]);}
+      }}/>
   </>;
 };
 
