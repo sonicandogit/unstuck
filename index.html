@@ -1521,6 +1521,30 @@ const DB = {
     const { error } = await getSB().from('direct_challenges').update({ seen: true }).eq('id', id);
     if (error) throw error;
   },
+  // Comments
+  getComments: async (entryId) => {
+    const { data, error } = await getSB().from('text_comments').select('*').eq('entry_id', entryId).order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+  addComment: async (entryId, userId, authorName, comment) => {
+    const { error } = await getSB().from('text_comments').insert({ entry_id: entryId, user_id: userId, author_name: authorName, comment });
+    if (error) throw error;
+  },
+  deleteComment: async (id) => {
+    const { error } = await getSB().from('text_comments').delete().eq('id', id);
+    if (error) throw error;
+  },
+  // Ratings
+  getRatings: async (entryId) => {
+    const { data, error } = await getSB().from('text_ratings').select('rating, user_id').eq('entry_id', entryId);
+    if (error) throw error;
+    return data || [];
+  },
+  upsertRating: async (entryId, userId, rating) => {
+    const { error } = await getSB().from('text_ratings').upsert({ entry_id: entryId, user_id: userId, rating }, { onConflict: 'entry_id,user_id' });
+    if (error) throw error;
+  },
 };
 </script>
 
@@ -2279,7 +2303,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         onVisibilityChange={(entryId,vis)=>setLibrary(prev=>prev.map(e=>e.id===entryId?{...e,visibility:vis}:e))}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
-      {readingEntry&&<ReadingModal entry={readingEntry} reflection={reflections.find(r=>(r.session_title||r.sessionTitle)===readingEntry.title&&r.date===readingEntry.date)} onClose={()=>setReadingEntry(null)} onExport={()=>{const ref=reflections.find(r=>(r.session_title||r.sessionTitle)===readingEntry.title&&r.date===readingEntry.date);exportDocx(readingEntry,FONTS[readingEntry.font_idx||readingEntry.fontIdx||0]?.docx||'Georgia',readingEntry.editor_size||readingEntry.editorSize||17,ref?.feedback||'');}}/>}
+      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)}/>}
@@ -2370,44 +2394,59 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <Btn variant="primary" onClick={()=>onContinue(energy)} full style={{height:42,fontSize:14}}>Ver sesión de hoy →</Btn>
         </div>
 
-        {/* Streak / calendar */}
-        <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'18px 22px',marginBottom:16}}>
-          {showCalendar?(
-            <>
-              <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>Primeros 7 días</div>
-              <div style={{fontSize:11,color:MUTED,marginBottom:14}}>Escribe los 7 primeros días para desbloquear la racha.</div>
-              <div style={{display:'flex',gap:8,justifyContent:'space-between'}}>
-                {stats.last7status.map((d,i)=>{
-                  const isToday=d.date===today();
+        {/* Current week + Streak */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+          {/* Esta semana */}
+          <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 16px'}}>
+            <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:2}}>Esta semana</div>
+            <div style={{fontSize:10,color:MUTED,marginBottom:12}}>{new Date().toLocaleDateString('es-ES',{month:'long',year:'numeric'})}</div>
+            <div style={{display:'flex',gap:5,justifyContent:'space-between'}}>
+              {(()=>{
+                const now=new Date();const dow=now.getDay();
+                const monday=new Date(now);monday.setDate(now.getDate()-(dow===0?6:dow-1));
+                const activeDates=new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean));
+                const DAY_LABELS=['L','M','X','J','V','S','D'];
+                return Array.from({length:7},(_,i)=>{
+                  const d=new Date(monday);d.setDate(monday.getDate()+i);
+                  const ds=d.toISOString().slice(0,10);
+                  const done=activeDates.has(ds);
+                  const isToday=ds===today();
+                  const isFuture=d>now&&!isToday;
                   return <div key={i} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
-                    <div style={{width:36,height:36,borderRadius:'50%',background:d.done?'#0A7A58':isToday?'rgba(0,0,0,0.06)':'transparent',border:isToday&&!d.done?'1.5px solid rgba(0,0,0,0.18)':'0.5px solid '+(d.done?'#0A7A58':'rgba(0,0,0,0.08)'),display:'flex',alignItems:'center',justifyContent:'center',fontSize:d.done?16:13,color:d.done?'#fff':isToday?TXT:FAINT}}>
-                      {d.done?'✓':isToday?'●':new Date(d.date).getDate()}
+                    <div style={{width:32,height:32,borderRadius:'50%',
+                      background:done?'#0A7A58':isToday?'rgba(0,0,0,0.05)':'transparent',
+                      border:isToday&&!done?'1.5px solid rgba(0,0,0,0.2)':'0.5px solid '+(done?'#0A7A58':isFuture?'rgba(0,0,0,0.04)':'rgba(0,0,0,0.10)'),
+                      display:'flex',alignItems:'center',justifyContent:'center',
+                      fontSize:done?14:11,
+                      color:done?'#fff':isFuture?FAINT:isToday?TXT:MUTED,
+                      opacity:isFuture?0.4:1}}>
+                      {done?'✓':isToday?'●':d.getDate()}
                     </div>
-                    <div style={{fontSize:9,color:isToday?user.accent||'#5550B8':FAINT}}>{isToday?'Hoy':['D','L','M','X','J','V','S'][new Date(d.date).getDay()]}</div>
+                    <div style={{fontSize:8,color:isToday?user.accent||'#5550B8':FAINT,fontWeight:isToday?600:400}}>{DAY_LABELS[i]}</div>
                   </div>;
-                })}
-              </div>
-            </>
-          ):(
-            <div style={{display:'flex',alignItems:'center',gap:16}}>
-              <div style={{textAlign:'center'}}>
-                <div style={{fontSize:36,fontWeight:700,color:'#956010',letterSpacing:'-0.02em'}}>{stats.streak}</div>
-                <div style={{fontSize:11,color:MUTED}}>días seguidos</div>
-                {stats.streak>=7&&<div style={{fontSize:10,color:'#956010',marginTop:2}}>🔥 ¡semana completa!</div>}
-                {stats.streak>=30&&<div style={{fontSize:10,color:'#A82020',marginTop:2}}>⚡ ¡un mes seguido!</div>}
-              </div>
-              <div style={{flex:1}}>
-                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                  {stats.last7status.map((d,i)=>(
-                    <div key={i} title={d.date} style={{width:28,height:28,borderRadius:'50%',background:d.done?'#0A7A58':d.date===today()?'rgba(0,0,0,0.08)':'rgba(0,0,0,0.04)',border:'0.5px solid '+(d.done?'#0A7A58':d.date===today()?'rgba(0,0,0,0.2)':'rgba(0,0,0,0.08)'),display:'flex',alignItems:'center',justifyContent:'center',fontSize:d.done?12:10,color:d.done?'#fff':FAINT}}>
-                      {d.done?'✓':d.date===today()?'●':new Date(d.date).getDate()}
-                    </div>
-                  ))}
-                </div>
-                <div style={{fontSize:11,color:MUTED,marginTop:6}}>Últimos 7 días</div>
+                });
+              })()}
+            </div>
+          </div>
+          {/* Racha */}
+          <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 16px',display:'flex',flexDirection:'column',justifyContent:'space-between'}}>
+            <div style={{display:'flex',alignItems:'flex-start',gap:8}}>
+              <span style={{fontSize:28}}>🔥</span>
+              <div>
+                <div style={{fontSize:28,fontWeight:700,color:stats.streak>0?'#956010':MUTED,letterSpacing:'-0.03em',lineHeight:1}}>{stats.streak}</div>
+                <div style={{fontSize:10,color:MUTED}}>días seguidos</div>
               </div>
             </div>
-          )}
+            <div style={{fontSize:11,color:MUTED,lineHeight:1.4,marginTop:8}}>
+              {stats.streak===0?'Hoy es un buen día para empezar.':
+               stats.streak===1?'¡Primer día! El más difícil ya pasó.':
+               stats.streak<7?'Llevas '+stats.streak+' días. ¡Sigue así! Completa 7 para ganar un comodín.':
+               stats.streak===7?'🎉 ¡Semana completa! Has ganado un comodín.':
+               stats.streak<14?'¡'+stats.streak+' días! Vas a por las dos semanas.':
+               stats.streak<30?'⚡ ¡'+stats.streak+' días! Increíble constancia.':
+               '🏆 ¡'+stats.streak+' días seguidos! Eres imparable.'}
+            </div>
+          </div>
         </div>
 
         {/* Stats chart */}
@@ -2968,18 +3007,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       return;
     }
     if(!blocks.length)return;
-    // Find which block has the cursor
-    let curIdx=blocks.length-1;
-    try{
-      const sel=window.getSelection();
-      if(sel&&sel.rangeCount>0){
-        const range=sel.getRangeAt(0);
-        const anchor=range.startContainer;
-        blocks.forEach((b,i)=>{
-          if(b===anchor||b.contains(anchor)||anchor===b.parentNode)curIdx=i;
-        });
-      }
-    }catch(e){}
+    // Always show only the last paragraph
+    const curIdx=blocks.length-1;
     blocks.forEach((b,i)=>{
       const isCur=i===curIdx;
       b.style.filter=isCur?'none':'blur(3px)';
@@ -3909,7 +3938,7 @@ const TeamDetail=({user,team,onBack,onInvite})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:'#F4F2ED',zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readingModal&&<ReadingModal entry={readingModal} onClose={()=>setReadingModal(null)} onExport={()=>exportDocx(readingModal,'Georgia',17,'')}/>}
+      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)}/>}
       {/* Share modal */}
       {sharing&&<div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)setSharing(null)}}>
         <div className="fi" style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:440,maxHeight:'80vh',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 8px 40px rgba(0,0,0,0.15)'}}>
@@ -4105,48 +4134,175 @@ const StatsChart=({library})=>{
   );
 };
 
-/* ─── READING MODAL ──────────────────────────────── */
-const ReadingModal=({entry,reflection,onClose,onExport})=>{
-  if(!entry)return null;
+
+/* ─── READING MODAL (with comments + ratings) ───────────────── */
+const ReadingModal=({entry,user,onClose})=>{
+  const [comments,setComments]=useState([]);
+  const [ratings,setRatings]=useState([]);
+  const [myRating,setMyRating]=useState(0);
+  const [hoverRating,setHoverRating]=useState(0);
+  const [commentText,setCommentText]=useState('');
+  const [submitting,setSubmitting]=useState(false);
+  const [loadingData,setLoadingData]=useState(true);
+
+  // Can the user interact? (not their own text, and user is logged in)
+  const isOwn=entry.user_id===user?.id;
+  const canInteract=user&&!isOwn&&entry.visibility!=='privado';
+
+  useEffect(()=>{
+    const load=async()=>{
+      setLoadingData(true);
+      try{
+        const [c,r]=await Promise.all([
+          DB.getComments(entry.id),
+          DB.getRatings(entry.id),
+        ]);
+        setComments(c);
+        setRatings(r);
+        if(user){
+          const mine=r.find(x=>x.user_id===user.id);
+          if(mine)setMyRating(mine.rating);
+        }
+      }catch(e){console.error(e);}
+      setLoadingData(false);
+    };
+    load();
+  },[entry.id]);
+
+  const avgRating=ratings.length?Math.round(ratings.reduce((s,r)=>s+r.rating,0)/ratings.length*10)/10:null;
+
+  const handleRating=async(r)=>{
+    if(!canInteract)return;
+    setMyRating(r);
+    try{await DB.upsertRating(entry.id,user.id,r);}
+    catch(e){console.error(e);}
+    // Refresh ratings
+    try{const rs=await DB.getRatings(entry.id);setRatings(rs);}catch(e){}
+  };
+
+  const handleComment=async()=>{
+    if(!commentText.trim()||!canInteract)return;
+    setSubmitting(true);
+    try{
+      await DB.addComment(entry.id,user.id,user.name||'Usuario',commentText.trim());
+      setCommentText('');
+      const c=await DB.getComments(entry.id);setComments(c);
+    }catch(e){console.error(e);}
+    setSubmitting(false);
+  };
+
+  const handleDeleteComment=async(id)=>{
+    try{
+      await DB.deleteComment(id);
+      setComments(prev=>prev.filter(c=>c.id!==id));
+    }catch(e){console.error(e);}
+  };
+
+  const Stars=({value,hover,onHover,onLeave,onClick,readonly})=>(
+    <div style={{display:'flex',gap:3}}>
+      {[1,2,3,4,5].map(i=>(
+        <span key={i}
+          style={{fontSize:readonly?14:18,cursor:readonly?'default':'pointer',color:i<=(hover||value)?'#956010':'rgba(0,0,0,0.15)',transition:'color 0.1s'}}
+          onMouseEnter={!readonly?()=>onHover(i):undefined}
+          onMouseLeave={!readonly?onLeave:undefined}
+          onClick={!readonly?()=>onClick(i):undefined}>★</span>
+      ))}
+    </div>
+  );
+
   return(
-    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-      <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:680,maxHeight:'90vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 50px rgba(0,0,0,0.2)'}}>
-        {/* Header */}
-        <div style={{padding:'16px 24px',borderBottom:'0.5px solid '+BDR,flexShrink:0,display:'flex',alignItems:'flex-start',gap:12}}>
-          <div style={{flex:1}}>
-            <div style={{fontSize:10,fontWeight:500,color:{check:'#0A7A58',reto:'#956010',proyecto:'#5550B8'}[entry.sk]||MUTED,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:3}}>{entry.session_label||entry.sessionLabel||entry.sk}</div>
-            <div style={{fontSize:18,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>{entry.title||'Sin título'}</div>
-            <div style={{fontSize:11,color:MUTED,marginTop:3}}>{fmtDate(entry.date)} · {entry.word_count||entry.wordCount||0} palabras</div>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'24px 16px',overflowY:'auto'}}>
+      <div style={{background:'#fff',borderRadius:14,width:'100%',maxWidth:640,padding:'28px 28px 24px',position:'relative'}}>
+        <button onClick={onClose} style={{position:'absolute',top:16,right:16,background:'transparent',border:'none',fontSize:18,cursor:'pointer',color:MUTED}}>✕</button>
+
+        {/* Entry header */}
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,fontWeight:500,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>
+            {entry.session_label||entry.sessionLabel||entry.sk||'Texto'} · {fmtDate(entry.date)}
           </div>
-          <div style={{display:'flex',gap:6,flexShrink:0}}>
-            <button onClick={onExport} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
-            <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer',lineHeight:1}}>×</button>
-          </div>
-        </div>
-        {/* Text */}
-        <div style={{flex:1,overflowY:'auto',padding:'24px 32px'}}>
-          {entry.html
-            ?<div style={{fontFamily:'Lora,Georgia,serif',fontSize:17,lineHeight:1.85,color:TXT}} dangerouslySetInnerHTML={{__html:entry.html}}/>
-            :<div style={{fontFamily:'Lora,Georgia,serif',fontSize:17,lineHeight:1.85,color:TXT,whiteSpace:'pre-wrap'}}>{entry.plain||'(sin texto)'}</div>
-          }
-          {/* Reflection if exists */}
-          {reflection&&(reflection.notes||reflection.feedback)&&(
-            <div style={{marginTop:32,paddingTop:20,borderTop:'0.5px solid '+BDR}}>
-              {reflection.notes&&<>
-                <div style={{fontSize:11,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8}}>Lo que me llevé</div>
-                <p style={{fontSize:13,color:MUTED,lineHeight:1.75,fontStyle:'italic',marginBottom:16}}>"{reflection.notes}"</p>
-              </>}
-              {reflection.feedback&&<>
-                <div style={{fontSize:11,fontWeight:500,color:'#5550B8',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8}}>Revisión de Claude</div>
-                <div style={{fontSize:13,color:TXT,lineHeight:1.75,background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.15)',borderRadius:9,padding:'12px 16px',whiteSpace:'pre-wrap'}}>{reflection.feedback}</div>
-              </>}
+          <div style={{fontSize:20,fontWeight:700,color:TXT,letterSpacing:'-0.02em',marginBottom:6}}>{entry.title||'Sin título'}</div>
+          {!loadingData&&(
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:2}}>
+              {avgRating&&<div style={{display:'flex',alignItems:'center',gap:5}}>
+                <Stars value={Math.round(avgRating)} readonly/>
+                <span style={{fontSize:11,color:MUTED}}>{avgRating}/5 ({ratings.length} valoración{ratings.length!==1?'es':''})</span>
+              </div>}
+              <span style={{fontSize:11,color:FAINT}}>{entry.word_count||entry.wordCount||0} palabras</span>
             </div>
           )}
         </div>
+
+        {/* Text content */}
+        <div style={{fontSize:15,lineHeight:1.75,color:TXT,fontFamily:`${FONTS[entry.font_idx||entry.fontIdx||0]?.value||'inherit'}`,marginBottom:24,borderTop:'0.5px solid '+BDR,paddingTop:20}}
+          dangerouslySetInnerHTML={{__html:entry.html||entry.plain?.replace(/\n/g,'<br>')||''}}/> 
+
+        {/* Rating section */}
+        {canInteract&&(
+          <div style={{borderTop:'0.5px solid '+BDR,paddingTop:16,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:8}}>Tu valoración (anónima)</div>
+            <Stars value={myRating} hover={hoverRating}
+              onHover={setHoverRating} onLeave={()=>setHoverRating(0)}
+              onClick={handleRating}/>
+            {myRating>0&&<div style={{fontSize:11,color:MUTED,marginTop:4}}>Has valorado con {myRating} estrella{myRating!==1?'s':''}</div>}
+          </div>
+        )}
+
+        {/* Comments section */}
+        {(canInteract||(entry.visibility!=='privado'&&comments.length>0))&&(
+          <div style={{borderTop:'0.5px solid '+BDR,paddingTop:16}}>
+            <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:12}}>
+              Comentarios {comments.length>0&&<span style={{color:MUTED,fontWeight:400}}>({comments.length})</span>}
+            </div>
+
+            {loadingData?(
+              <div style={{fontSize:12,color:FAINT}}>Cargando…</div>
+            ):(
+              <>
+                {comments.map(c=>(
+                  <div key={c.id} style={{display:'flex',gap:10,marginBottom:12}}>
+                    <div style={{width:28,height:28,borderRadius:'50%',background:'#EEEDFE',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:600,color:'#5550B8',flexShrink:0}}>
+                      {(c.author_name||'?')[0].toUpperCase()}
+                    </div>
+                    <div style={{flex:1,background:'#F8F7F4',borderRadius:10,padding:'8px 12px'}}>
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:3}}>
+                        <span style={{fontSize:11,fontWeight:600,color:TXT}}>{c.author_name}</span>
+                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                          <span style={{fontSize:10,color:FAINT}}>{fmtDate(c.created_at?.slice(0,10))}</span>
+                          {user&&c.user_id===user.id&&(
+                            <button onClick={()=>handleDeleteComment(c.id)} style={{background:'transparent',border:'none',cursor:'pointer',fontSize:10,color:FAINT,padding:0}}>✕</button>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{fontSize:13,color:TXT,lineHeight:1.5}}>{c.comment}</div>
+                    </div>
+                  </div>
+                ))}
+
+                {canInteract&&(
+                  <div style={{display:'flex',gap:8,marginTop:4}}>
+                    <input
+                      value={commentText}
+                      onChange={e=>setCommentText(e.target.value)}
+                      onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleComment();}}}
+                      placeholder="Añade un comentario…"
+                      style={{flex:1,border:'0.5px solid '+BDR,borderRadius:8,padding:'8px 12px',fontSize:13,outline:'none',fontFamily:'inherit'}}
+                      maxLength={500}
+                    />
+                    <button onClick={handleComment} disabled={!commentText.trim()||submitting}
+                      style={{background:'#5550B8',color:'#fff',border:'none',borderRadius:8,padding:'8px 14px',fontSize:12,fontWeight:500,cursor:commentText.trim()&&!submitting?'pointer':'default',opacity:commentText.trim()&&!submitting?1:0.5}}>
+                      {submitting?'…':'Enviar'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
 
 /* ─── SENT CHALLENGES HISTORY ─────────────────────── */
 const ChallengesHistory=({user,onClose})=>{
@@ -4511,7 +4667,7 @@ const MisTextos=({user,library,onVisibilityChange})=>{
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      {readEntry&&<ReadingModal entry={readEntry} onClose={()=>setReadEntry(null)} onExport={()=>exportDocx(readEntry,'Georgia',17,'')}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
       {/* Filter tabs */}
       <div style={{display:'flex',gap:2,padding:'12px 16px 0',flexShrink:0}}>
         {[['all','Todos'],['privado','Privados'],['amigos','Amigos'],['abierto','Abiertos']].map(([v,l])=>(
@@ -4653,7 +4809,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:'#F4F2ED',zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readEntry&&<ReadingModal entry={readEntry} onClose={()=>setReadEntry(null)} onExport={()=>exportDocx(readEntry,'Georgia',17,'')}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
 
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
