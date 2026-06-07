@@ -1484,6 +1484,19 @@ const DB = {
     const { error } = await getSB().from('profiles').update({ avatar }).eq('id', uid);
     if (error) throw error;
   },
+  getTotalUsers: async () => {
+    const { count, error } = await getSB().from('profiles').select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return count || 0;
+  },
+  followUser: async (followerId, followingId) => {
+    const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
+    if (error && !error.message?.includes('duplicate')) throw error;
+  },
+  unfollowUser: async (followerId, followingId) => {
+    const { error } = await getSB().from('follows').delete().eq('follower_id', followerId).eq('following_id', followingId);
+    if (error) throw error;
+  },
   searchUsers: async (query) => {
     const q = query.startsWith('@') ? query.slice(1) : query;
     const { data, error } = await getSB().from('profiles')
@@ -2276,6 +2289,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
   const [showBiblioteca,setShowBiblioteca]=useState(false);
   const [showStats,setShowStats]=useState(false);
+  const [showAmigos,setShowAmigos]=useState(false);
   const [showPrivacyModal,setShowPrivacyModal]=useState(false);
   const [showTermsModal,setShowTermsModal]=useState(false);
   const [showProfileSettings,setShowProfileSettings]=useState(false);
@@ -2298,6 +2312,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showProfileSettings&&<ProfileSettings user={user} onClose={()=>setShowProfileSettings(false)} onSave={updated=>{Object.assign(user,updated);setShowProfileSettings(false);}}/>}
       {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
       {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
+      {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={(entryId,vis)=>setLibrary(prev=>prev.map(e=>e.id===entryId?{...e,visibility:vis}:e))}/>}
@@ -2314,6 +2329,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Lecciones</button>
           <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📖 Biblioteca</button>
+          <button onClick={()=>setShowAmigos(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Amigos</button>
           <button onClick={()=>setShowStats(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📊 Estadísticas</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Equipos</button>
           <button onClick={()=>setShowSendChallenge(true)} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#A82020',cursor:'pointer',fontWeight:500}}>⏱ Retar</button>
@@ -4865,6 +4881,192 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
         {/* MIS TEXTOS */}
         {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange}/>}
       </div>
+    </div>
+  );
+};
+
+
+
+/* ─── AMIGOS SCREEN ─────────────────────────────────────────── */
+const AmigosScreen=({user,onClose})=>{
+  const [friends,setFriends]=useState([]);       // users I follow
+  const [followingIds,setFollowingIds]=useState([]); // set of ids
+  const [totalUsers,setTotalUsers]=useState(null);
+  const [query,setQuery]=useState('');
+  const [searchResults,setSearchResults]=useState([]);
+  const [searching,setSearching]=useState(false);
+  const [viewingProfile,setViewingProfile]=useState(null);
+  const [loading,setLoading]=useState(true);
+
+  // Load friends + total count on mount
+  useEffect(()=>{
+    const init=async()=>{
+      setLoading(true);
+      try{
+        const [following,total]=await Promise.all([
+          DB.getFollowing(user.id),
+          DB.getTotalUsers(),
+        ]);
+        const fids=following.map(f=>f.following_id);
+        setFollowingIds(fids);
+        // Build friend objects from the embedded profile data
+        const friendList=following.map(f=>({
+          id:f.following_id,
+          ...(f.profiles||{}),
+        })).filter(f=>f.name);
+        setFriends(friendList);
+        setTotalUsers(total);
+      }catch(e){console.error(e);}
+      setLoading(false);
+    };
+    init();
+  },[user.id]);
+
+  // Search with debounce
+  useEffect(()=>{
+    if(query.length<2){setSearchResults([]);return;}
+    const t=setTimeout(async()=>{
+      setSearching(true);
+      try{
+        const r=await DB.searchUsers(query);
+        setSearchResults(r.filter(u=>u.id!==user.id));
+      }catch(e){console.error(e);}
+      setSearching(false);
+    },300);
+    return()=>clearTimeout(t);
+  },[query]);
+
+  const handleFollow=async(targetId,isFollowing)=>{
+    try{
+      if(isFollowing){
+        await DB.unfollowUser(user.id,targetId);
+        setFollowingIds(prev=>prev.filter(id=>id!==targetId));
+        setFriends(prev=>prev.filter(f=>f.id!==targetId));
+      }else{
+        await DB.followUser(user.id,targetId);
+        setFollowingIds(prev=>[...prev,targetId]);
+        // Refresh friends to get the new friend's profile
+        const following=await DB.getFollowing(user.id);
+        setFriends(following.map(f=>({id:f.following_id,...(f.profiles||{})})).filter(f=>f.name));
+      }
+    }catch(e){console.error(e);}
+  };
+
+  const FriendCard=({u,showUnfollow=false})=>(
+    <div style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,padding:'14px 16px',display:'flex',alignItems:'center',gap:12}}>
+      <UserAvatar user={u} size={44}/>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.name}</div>
+        <div style={{fontSize:11,color:MUTED}}>@{u.username||'sin_usuario'}</div>
+      </div>
+      <div style={{display:'flex',gap:6,flexShrink:0}}>
+        <button onClick={()=>setViewingProfile(u)}
+          style={{background:'rgba(85,80,184,0.07)',border:'0.5px solid rgba(85,80,184,0.2)',borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:500,color:'#5550B8',cursor:'pointer'}}>
+          Ver perfil
+        </button>
+        {showUnfollow&&(
+          <button onClick={()=>handleFollow(u.id,true)}
+            style={{background:'rgba(0,0,0,0.04)',border:'0.5px solid '+BDR,borderRadius:6,padding:'5px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:200,display:'flex',alignItems:'stretch',justifyContent:'center',padding:'0'}}>
+      <div style={{background:'#F4F2ED',width:'100%',maxWidth:860,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        {/* Header */}
+        <div style={{background:'#fff',borderBottom:'0.5px solid '+BDR,padding:'16px 24px',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,cursor:'pointer',color:MUTED,padding:'0 4px',lineHeight:1}}>←</button>
+          <div style={{fontSize:16,fontWeight:700,color:TXT,letterSpacing:'-0.02em'}}>Amigos</div>
+          {!loading&&<div style={{fontSize:12,color:MUTED,marginLeft:4}}>{friends.length} {friends.length===1?'persona':'personas'} seguidas</div>}
+        </div>
+
+        {/* Body: two columns */}
+        <div style={{flex:1,display:'flex',overflow:'hidden'}}>
+
+          {/* LEFT: friends list */}
+          <div style={{flex:1,overflowY:'auto',padding:'20px 16px 20px 20px'}}>
+            {loading?(
+              <div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando…</div>
+            ):friends.length===0?(
+              <div style={{textAlign:'center',padding:'48px 24px'}}>
+                <div style={{fontSize:36,marginBottom:12}}>👋</div>
+                <div style={{fontSize:15,fontWeight:600,color:TXT,marginBottom:8}}>Aún no sigues a nadie</div>
+                <div style={{fontSize:13,color:MUTED,lineHeight:1.6}}>Busca escritores en el panel de la derecha para empezar a seguirles y ver sus textos compartidos.</div>
+              </div>
+            ):(
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                <div style={{fontSize:11,fontWeight:600,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>A quién sigues</div>
+                {friends.map(f=><FriendCard key={f.id} u={f} showUnfollow/>)}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT: sidebar */}
+          <div style={{width:280,flexShrink:0,background:'#fff',borderLeft:'0.5px solid '+BDR,display:'flex',flexDirection:'column',overflowY:'auto'}}>
+
+            {/* Total users */}
+            <div style={{padding:'24px 20px 16px',borderBottom:'0.5px solid '+BDR,textAlign:'center'}}>
+              <div style={{fontSize:48,fontWeight:800,color:TXT,letterSpacing:'-0.04em',lineHeight:1}}>
+                {totalUsers===null?'…':totalUsers.toLocaleString()}
+              </div>
+              <div style={{fontSize:12,color:MUTED,marginTop:4}}>escritores en Pretexto</div>
+            </div>
+
+            {/* Search */}
+            <div style={{padding:'16px 16px 12px'}}>
+              <div style={{fontSize:11,fontWeight:600,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>Buscar escritores</div>
+              <div style={{position:'relative',marginBottom:10}}>
+                <input type="text" value={query} onChange={e=>setQuery(e.target.value)}
+                  placeholder="Nombre o @usuario…"
+                  style={{width:'100%',border:'0.5px solid '+BDR,borderRadius:8,padding:'8px 10px 8px 30px',fontSize:12,outline:'none',fontFamily:'inherit',background:'#F8F7F4'}}/>
+                <span style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)',fontSize:13,color:FAINT,pointerEvents:'none'}}>🔍</span>
+                {searching&&<span style={{position:'absolute',right:9,top:'50%',transform:'translateY(-50%)',fontSize:11,color:MUTED}}>…</span>}
+              </div>
+
+              {/* Search results */}
+              {query.length>=2&&!searching&&searchResults.length===0&&(
+                <div style={{fontSize:12,color:MUTED,textAlign:'center',padding:'12px 0'}}>Sin resultados</div>
+              )}
+              {query.length>0&&query.length<2&&(
+                <div style={{fontSize:11,color:FAINT,textAlign:'center'}}>Escribe al menos 2 caracteres</div>
+              )}
+
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {searchResults.map(u=>{
+                  const isFollowing=followingIds.includes(u.id);
+                  return(
+                    <div key={u.id} style={{background:'#F8F7F4',border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 12px',display:'flex',alignItems:'center',gap:10}}>
+                      <UserAvatar user={u} size={34}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.name}</div>
+                        <div style={{fontSize:10,color:MUTED}}>@{u.username||'sin_usuario'}</div>
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',gap:4,flexShrink:0}}>
+                        <button onClick={()=>handleFollow(u.id,isFollowing)}
+                          style={{background:isFollowing?'rgba(0,0,0,0.04)':'rgba(85,80,184,0.08)',border:'0.5px solid '+(isFollowing?BDR:'rgba(85,80,184,0.25)'),borderRadius:5,padding:'4px 8px',fontSize:10,fontWeight:500,color:isFollowing?MUTED:'#5550B8',cursor:'pointer'}}>
+                          {isFollowing?'✓ Siguiendo':'Seguir'}
+                        </button>
+                        <button onClick={()=>setViewingProfile(u)}
+                          style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'4px 8px',fontSize:10,color:MUTED,cursor:'pointer'}}>
+                          Ver perfil
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Profile modal */}
+      {viewingProfile&&<PublicProfile user={viewingProfile} reflections={[]} onClose={()=>setViewingProfile(null)}/>}
     </div>
   );
 };
