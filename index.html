@@ -1512,39 +1512,29 @@ const DB = {
     return data?.length || 0;
   },
   getProfileStats: async (uid) => {
-    // Load each piece independently so one RLS failure doesn't kill all stats
     const result = { followers:0, following:0, publicTexts:0, totalWords:0, totalElapsed:0, avgRating:null };
     try {
-      const { data: fwers } = await getSB().from('follows').select('follower_id', { count:'exact' }).eq('following_id', uid);
+      const { data: fwers } = await getSB().from('follows').select('follower_id').eq('following_id', uid);
       result.followers = fwers?.length || 0;
     } catch(e) {}
     try {
-      const { data: fwing } = await getSB().from('follows').select('following_id', { count:'exact' }).eq('follower_id', uid);
+      const { data: fwing } = await getSB().from('follows').select('following_id').eq('follower_id', uid);
       result.following = fwing?.length || 0;
     } catch(e) {}
     try {
-      // Public texts count (for profile display)
-      const { data: pubEntries } = await getSB().from('entries')
-        .select('id')
-        .eq('user_id', uid)
-        .in('visibility', ['abierto','amigos']);
-      result.publicTexts = pubEntries?.length || 0;
+      const { data: pub } = await getSB().from('entries').select('id').eq('user_id', uid).in('visibility', ['abierto','amigos']);
+      result.publicTexts = pub?.length || 0;
     } catch(e) {}
     try {
-      // Words + time: all readable entries (RLS returns own entries in full, others only public)
-      const { data: allEntries } = await getSB().from('entries')
-        .select('word_count, elapsed')
-        .eq('user_id', uid);
-      if (allEntries?.length) {
-        result.totalWords   = allEntries.reduce((s,e) => s + (e.word_count||0), 0);
-        result.totalElapsed = allEntries.reduce((s,e) => s + (e.elapsed||0), 0);
-      }
+      // Pre-computed totals on profiles table — publicly readable, no RLS problem
+      const { data: prof } = await getSB().from('profiles').select('total_words, total_elapsed').eq('id', uid).single();
+      result.totalWords   = prof?.total_words   || 0;
+      result.totalElapsed = prof?.total_elapsed || 0;
     } catch(e) {}
     try {
-      const { data: entIds } = await getSB().from('entries').select('id').eq('user_id', uid).neq('visibility','privado');
+      const { data: entIds } = await getSB().from('entries').select('id').eq('user_id', uid).in('visibility', ['abierto','amigos']);
       if (entIds?.length) {
-        const ids = entIds.map(e => e.id);
-        const { data: ratings } = await getSB().from('text_ratings').select('rating').in('entry_id', ids);
+        const { data: ratings } = await getSB().from('text_ratings').select('rating').in('entry_id', entIds.map(e=>e.id));
         if (ratings?.length) result.avgRating = Math.round(ratings.reduce((s,r)=>s+r.rating,0)/ratings.length*10)/10;
       }
     } catch(e) {}
