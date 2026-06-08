@@ -2657,6 +2657,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
   const [showOtherProjects,setShowOtherProjects]=useState(false);
   const [creatingProject,setCreatingProject]=useState(false);
   const [newProj,setNewProj]=useState({title:'',type:'Novela',goal:50000});
+  const [selectedGenre,setSelectedGenre]=useState(null); // null=grid, 'Poesía'/'Relato'/'Novela'/'Ensayo'
 
   const createProject=async()=>{
     if(!newProj.title.trim())return;
@@ -2753,49 +2754,106 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
         </div>
 
         {/* PROYECTO */}
-        <SectionCard accent="#5550B8" tag="Mis proyectos" title="¿En qué quieres trabajar hoy?">
+        <SectionCard accent="#5550B8" tag="Mis proyectos" title={selectedGenre||"¿En qué quieres trabajar?"}>
           <div style={{padding:'0 18px 18px'}}>
-            {/* 4 genre folders */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
-              {[
-                {emoji:'📝',label:'Poesía',   types:['Poemario']},
-                {emoji:'📖',label:'Relato',   types:['Relato corto','Microrrelatos']},
-                {emoji:'📚',label:'Novela',   types:['Novela','Guión']},
-                {emoji:'🖊',label:'Ensayo',   types:['Ensayo','Diario creativo']},
-              ].map(({emoji,label,types})=>{
-                const count=library.filter(e=>e.sk==='proyecto'&&projects.find(p=>p.id===(e.project_id||e.projectId)&&types.includes(p.type))).length;
-                const projOfType=projects.filter(p=>types.includes(p.type));
-                return(
-                  <button key={label} onClick={()=>{
-                    const last=projOfType[0];
-                    if(last)selectProject(last);
-                    else{setCreatingProject(true);}
-                  }} style={{background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.15)',borderRadius:10,padding:'12px 10px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:4}}>
-                    <span style={{fontSize:20}}>{emoji}</span>
-                    <span style={{fontSize:12,fontWeight:600,color:TXT}}>{label}</span>
-                    <span style={{fontSize:10,color:MUTED}}>{count} texto{count!==1?'s':''}</span>
+
+            {/* ── VIEW 1: Genre grid ───────────────────── */}
+            {!selectedGenre&&!creatingProject&&(<>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+                {[
+                  {emoji:'📝',label:'Poesía', types:['Poemario']},
+                  {emoji:'📖',label:'Relato', types:['Relato corto','Microrrelatos']},
+                  {emoji:'📚',label:'Novela', types:['Novela','Guión']},
+                  {emoji:'🖊', label:'Ensayo', types:['Ensayo','Diario creativo']},
+                ].map(({emoji,label,types})=>{
+                  const projs=projects.filter(p=>types.includes(p.type));
+                  return(
+                    <button key={label} onClick={()=>{
+                      if(projs.length===0){
+                        const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo'}[label]||'Novela';
+                        setNewProj({title:'',type:defType,goal:50000});
+                        setCreatingProject(true);
+                      } else {
+                        setSelectedGenre(label);
+                      }
+                    }}
+                    style={{background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.15)',borderRadius:10,padding:'12px 10px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:4}}>
+                      <span style={{fontSize:20}}>{emoji}</span>
+                      <span style={{fontSize:12,fontWeight:600,color:TXT}}>{label}</span>
+                      <span style={{fontSize:10,color:MUTED}}>{projs.length} proyecto{projs.length!==1?'s':''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Último proyecto shortcut */}
+              {lastProject&&(
+                <div style={{borderTop:'0.5px solid '+BDR,paddingTop:12}}>
+                  <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>Último proyecto</div>
+                  <Btn onClick={()=>selectProject(lastProject)} style={{width:'100%',height:38,background:TXT,color:'#fff'}}>
+                    Continuar «{lastProject.title}» →
+                  </Btn>
+                </div>
+              )}
+            </>)}
+
+            {/* ── VIEW 2: Projects list for selected genre ─ */}
+            {selectedGenre&&!creatingProject&&(()=>{
+              const genreTypes={Poesía:['Poemario'],Relato:['Relato corto','Microrrelatos'],Novela:['Novela','Guión'],Ensayo:['Ensayo','Diario creativo']}[selectedGenre]||[];
+              const genreProjs=projects.filter(p=>genreTypes.includes(p.type));
+              const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo'}[selectedGenre]||'Novela';
+              return(
+                <>
+                  <button onClick={()=>setSelectedGenre(null)} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,marginBottom:12,padding:0,display:'flex',alignItems:'center',gap:4}}>
+                    ← Volver a géneros
                   </button>
-                );
-              })}
-            </div>
-            {/* Último proyecto */}
-            {lastProject&&!creatingProject&&(
-              <>
-                <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>Último proyecto</div>
-                <div style={{display:'flex',gap:6,marginBottom:8}}>
-                  <span style={{fontSize:11,background:'rgba(85,80,184,0.09)',border:'0.5px solid rgba(85,80,184,0.22)',borderRadius:5,padding:'2px 8px',color:'#5550B8'}}>{lastProject.type}</span>
-                  <span style={{fontSize:11,color:MUTED,padding:'2px 0'}}>{lastProject.wordCount||0} palabras</span>
+                  <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
+                    {genreProjs.map(p=>{
+                      const wc=library.filter(e=>(e.project_id||e.projectId)===p.id).reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+                      return(
+                        <div key={p.id} style={{background:'#F8F7F4',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.title}</div>
+                            <div style={{fontSize:11,color:MUTED}}>{wc.toLocaleString()} palabras · {p.type}</div>
+                          </div>
+                          <button onClick={()=>selectProject(p)}
+                            style={{background:TXT,border:'none',borderRadius:7,padding:'6px 12px',fontSize:11,fontWeight:500,color:'#fff',cursor:'pointer',flexShrink:0}}>
+                            Abrir →
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={()=>{setNewProj({title:'',type:defType,goal:50000});setCreatingProject(true);}}
+                    style={{width:'100%',background:'transparent',border:'0.5px solid rgba(85,80,184,0.3)',borderRadius:8,padding:'9px',fontSize:12,color:'#5550B8',cursor:'pointer'}}>
+                    + Nuevo proyecto de {selectedGenre.toLowerCase()}
+                  </button>
+                </>
+              );
+            })()}
+
+            {/* ── VIEW 3: Create new project form ─────── */}
+            {creatingProject&&(
+              <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                <button onClick={()=>{setCreatingProject(false);}} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,padding:0,display:'flex',alignItems:'center',gap:4}}>
+                  ← {selectedGenre?'Volver a '+selectedGenre:'Volver a géneros'}
+                </button>
+                <div>
+                  <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Título del proyecto</div>
+                  <input value={newProj.title} onChange={e=>setNewProj(p=>({...p,title:e.target.value}))} placeholder="Ej: Los días de verano" autoFocus style={{width:"100%",border:"0.5px solid "+BDR,borderRadius:8,padding:"8px 10px",fontSize:13,outline:"none",fontFamily:"inherit"}}/>
                 </div>
-                <Btn onClick={()=>selectProject(lastProject)} style={{width:'100%',height:40,background:TXT,border:'0.5px solid '+TXT,color:'#fff',marginBottom:8}}>Continuar «{lastProject.title}» →</Btn>
-                <div style={{display:'flex',gap:8}}>
-                  {projects.length>1&&<button onClick={()=>setShowOtherProjects(v=>!v)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>{showOtherProjects?'Ocultar':'Ver otros'} ({projects.length-1})</button>}
-                  <button onClick={()=>setCreatingProject(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:7,padding:'5px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>+ Nuevo</button>
+                <div>
+                  <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Tipo</div>
+                  <select value={newProj.type} onChange={e=>setNewProj(p=>({...p,type:e.target.value}))}
+                    style={{width:'100%',border:'0.5px solid '+BDR,borderRadius:8,padding:'8px 10px',fontSize:13,background:'#fff',outline:'none',fontFamily:'inherit'}}>
+                    {['Novela','Relato corto','Poemario','Ensayo','Microrrelatos','Guión','Diario creativo'].map(t=><option key={t}>{t}</option>)}
+                  </select>
                 </div>
-              </>
+                <Btn onClick={createProject} disabled={!newProj.title.trim()} variant="primary" full style={{height:40}}>
+                  Crear y empezar →
+                </Btn>
+              </div>
             )}
-            {(!lastProject||creatingProject)&&(
-              <button onClick={()=>setCreatingProject(true)} style={{width:'100%',background:'transparent',border:'0.5px solid rgba(85,80,184,0.3)',borderRadius:8,padding:'10px',fontSize:12,color:'#5550B8',cursor:'pointer'}}>+ Crear nuevo proyecto</button>
-            )}
+
           </div>
         </SectionCard>
       </div>
