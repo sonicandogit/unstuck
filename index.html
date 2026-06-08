@@ -1287,7 +1287,7 @@ const DB = {
   },
   getUserRatings: async (uid) => {
     // Get avg rating across all public entries of a user
-    const { data: entries } = await getSB().from('entries').select('id').eq('user_id', uid).neq('visibility','privado');
+    const { data: entries } = await getSB().from('entries').select('id').eq('user_id', uid);
     if (!entries?.length) return null;
     const ids = entries.map(e => e.id);
     const { data: ratings, error } = await getSB().from('text_ratings').select('rating').in('entry_id', ids);
@@ -1523,14 +1523,21 @@ const DB = {
       result.following = fwing?.length || 0;
     } catch(e) {}
     try {
-      const { data: entries } = await getSB().from('entries')
-        .select('word_count, elapsed')
+      // Public texts count (for profile display)
+      const { data: pubEntries } = await getSB().from('entries')
+        .select('id')
         .eq('user_id', uid)
-        .neq('visibility', 'privado');
-      if (entries?.length) {
-        result.publicTexts = entries.length;
-        result.totalWords  = entries.reduce((s,e) => s + (e.word_count||0), 0);
-        result.totalElapsed = entries.reduce((s,e) => s + (e.elapsed||0), 0);
+        .in('visibility', ['abierto','amigos']);
+      result.publicTexts = pubEntries?.length || 0;
+    } catch(e) {}
+    try {
+      // Words + time: all readable entries (RLS returns own entries in full, others only public)
+      const { data: allEntries } = await getSB().from('entries')
+        .select('word_count, elapsed')
+        .eq('user_id', uid);
+      if (allEntries?.length) {
+        result.totalWords   = allEntries.reduce((s,e) => s + (e.word_count||0), 0);
+        result.totalElapsed = allEntries.reduce((s,e) => s + (e.elapsed||0), 0);
       }
     } catch(e) {}
     try {
@@ -2026,7 +2033,12 @@ const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes',
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
 const ratingMsg=v=>{if(v<=2)return'fue duro';if(v<=4)return'costó arrancar';if(v<=6)return'razonable';if(v<=8)return'bien';return'en el flujo ✦'};
 const computeStats=(library,reflections)=>{
-  const totalWords=library.reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+  // For projects: only count words from latest entry per project
+  const _seenProj=new Set();
+  const totalWords=library.slice().sort((a,b)=>b.ts-a.ts).reduce((s,e)=>{
+    if(e.sk==='proyecto'&&e.project_id){if(_seenProj.has(e.project_id))return s;_seenProj.add(e.project_id);return s+(e.words_added||e.word_count||e.wordCount||0);}
+    return s+(e.words_added||e.word_count||e.wordCount||0);
+  },0);
   const dates=[...new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
   let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
   for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/(864e5));if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
@@ -2840,7 +2852,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
                   </button>
                   <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
                     {genreProjs.map(p=>{
-                      const wc=library.filter(e=>(e.project_id||e.projectId)===p.id).reduce((s,e)=>s+(e.word_count||e.wordCount||0),0);
+                      const _projEntries=library.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
                       return(
                         <div key={p.id} style={{background:'#F8F7F4',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
                           <div style={{flex:1,minWidth:0}}>
@@ -3166,7 +3178,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const [delsLeft,setDelsLeft]=useState(5);const [charsInDel,setCharsInDel]=useState(0);
   const [showLib,setShowLib]=useState(false);const [showDrive,setShowDrive]=useState(false);const [showUserMenu,setShowUserMenu]=useState(false);
 
-  const edRef=useRef(null);const prevLen=useRef(0);const isDel=useRef(false);const lastSaved=useRef('');
+  const edRef=useRef(null);const prevLen=useRef(0);const isDel=useRef(false);const lastSaved=useRef('');const initialWcRef=useRef(0);
   const entryIdRef=useRef(sessionConfig.entryId||(sk+'_'+user.id.slice(-6)+'_'+Date.now()));
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
 
@@ -3192,6 +3204,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const id=entryIdRef.current;
     return {
       id,ts:Date.now(),sk,date:today(),
+      words_added:sk==='proyecto'?Math.max(0,wc-initialWcRef.current):wc,
       session_label:headerFamily,sessionLabel:headerFamily,
       title:headerTitle,
       html:edRef.current?.innerHTML||'',
@@ -3256,7 +3269,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     });
   };
 
-  useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p');const init=sessionConfig.initialHtml||'';if(init&&edRef.current){edRef.current.innerHTML=init;const txt=edRef.current.innerText||'';setPlainTxt(txt);setWc(txt.trim().split(/\s+/).filter(Boolean).length);}},[]);
+  useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p');const init=sessionConfig.initialHtml||'';if(init&&edRef.current){edRef.current.innerHTML=init;const txt=edRef.current.innerText||'';setPlainTxt(txt);const iwc=txt.trim().split(/\s+/).filter(Boolean).length;setWc(iwc);initialWcRef.current=iwc;}},[]);
   // Keyboard shortcuts
   useEffect(()=>{
     const handler=e=>{
@@ -3301,7 +3314,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const siL=()=>{if(!autoSave)return{l:'off',dot:'rgba(0,0,0,0.12)',c:FAINT};if(saveStatus==='saving')return{l:'Guardando…',dot:'#956010',c:MUTED};if(saveStatus==='saved')return{l:'✓',dot:'#0A7A58',c:'#0A7A58'};if(!started||!plainTxt.trim())return{l:'Auto',dot:'rgba(10,122,88,0.35)',c:FAINT};return{l:asCd+'s',dot:'rgba(10,122,88,0.5)',c:FAINT}};
   const si=siL();
   const TBTN=on=>({background:on?'rgba(0,0,0,0.08)':'transparent',border:'none',borderRadius:5,cursor:'pointer',color:on?TXT:MUTED,display:'flex',alignItems:'center',justifyContent:'center',width:26,height:26,flexShrink:0});
-  const handleFinishDay=()=>{if(started)saveNow(false);onFinishDay({sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null})};
+  const handleFinishDay=()=>{if(started)saveNow(false);onFinishDay({sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',wordsAdded:sk==='proyecto'?Math.max(0,wc-initialWcRef.current):wc,exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null})};
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100vh',background:'transparent',position:'relative'}}>
@@ -3405,7 +3418,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           </div>
           {/* BOTTOM BAR */}
           <div style={{height:36,borderTop:'0.5px solid '+BDR,background:'#F9F8F5',display:'flex',alignItems:'center',padding:'0 10px',gap:6,flexShrink:0}}>
-            <span style={{fontSize:16,fontWeight:600,color:wc>0?headerAccent:FAINT,letterSpacing:'-0.02em'}}>{wc}</span><span style={{fontSize:11,color:FAINT,marginLeft:3}}>palabras</span>
+            <span style={{fontSize:16,fontWeight:600,color:wc>0?headerAccent:FAINT,letterSpacing:'-0.02em'}}>{wc}</span><span style={{fontSize:11,color:FAINT,marginLeft:3}}>palabras</span>{sk==='proyecto'&&initialWcRef.current>0&&(<><div style={{width:1,height:9,background:BDR}}/><span style={{fontSize:11,color:'#5550B8',fontWeight:500}}>+{Math.max(0,wc-initialWcRef.current)}</span><span style={{fontSize:11,color:FAINT}}>añadidas hoy</span></>)}
             <div style={{width:1,height:9,background:BDR}}/>
             {wpm>0&&<><span style={{fontSize:11,color:FAINT}}>{wpm}/min</span><div style={{width:1,height:9,background:BDR}}/></>}
             <span style={{fontSize:11,color:started?headerAccent:FAINT}}>{started?fmt(elapsed):'—'}</span>
@@ -5930,6 +5943,7 @@ const App=()=>{
       session_label:e.session_label||e.sessionLabel||null,
       html:e.html||null,plain:e.plain||null,
       word_count:e.word_count||e.wordCount||0,
+      words_added:e.words_added||null,
       elapsed:e.elapsed||0,font_idx:e.font_idx||e.fontIdx||0,
       editor_size:e.editor_size||e.editorSize||17,
       align_dir:e.align_dir||e.alignDir||'left',
