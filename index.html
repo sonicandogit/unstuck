@@ -1278,7 +1278,7 @@ const DB = {
   },
   getPublicEntries: async (uid) => {
     const { data, error } = await getSB().from('entries')
-      .select('id, word_count, visibility, date')
+      .select('id, word_count, visibility, date, elapsed, sk')
       .eq('user_id', uid)
       .neq('visibility', 'privado')
       .order('ts', { ascending: false });
@@ -1510,6 +1510,38 @@ const DB = {
     const { data, error } = await getSB().from('profiles').select('id');
     if (error) throw error;
     return data?.length || 0;
+  },
+  getProfileStats: async (uid) => {
+    // Load each piece independently so one RLS failure doesn't kill all stats
+    const result = { followers:0, following:0, publicTexts:0, totalWords:0, totalElapsed:0, avgRating:null };
+    try {
+      const { data: fwers } = await getSB().from('follows').select('follower_id', { count:'exact' }).eq('following_id', uid);
+      result.followers = fwers?.length || 0;
+    } catch(e) {}
+    try {
+      const { data: fwing } = await getSB().from('follows').select('following_id', { count:'exact' }).eq('follower_id', uid);
+      result.following = fwing?.length || 0;
+    } catch(e) {}
+    try {
+      const { data: entries } = await getSB().from('entries')
+        .select('word_count, elapsed')
+        .eq('user_id', uid)
+        .neq('visibility', 'privado');
+      if (entries?.length) {
+        result.publicTexts = entries.length;
+        result.totalWords  = entries.reduce((s,e) => s + (e.word_count||0), 0);
+        result.totalElapsed = entries.reduce((s,e) => s + (e.elapsed||0), 0);
+      }
+    } catch(e) {}
+    try {
+      const { data: entIds } = await getSB().from('entries').select('id').eq('user_id', uid).neq('visibility','privado');
+      if (entIds?.length) {
+        const ids = entIds.map(e => e.id);
+        const { data: ratings } = await getSB().from('text_ratings').select('rating').in('entry_id', ids);
+        if (ratings?.length) result.avgRating = Math.round(ratings.reduce((s,r)=>s+r.rating,0)/ratings.length*10)/10;
+      }
+    } catch(e) {}
+    return result;
   },
   followUser: async (followerId, followingId) => {
     const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
@@ -4568,40 +4600,33 @@ const PublicProfile=({user,onClose})=>{
 
   useEffect(()=>{
     if(!user?.id){setLoading(false);return;}
-    const load=async()=>{
-      try{
-        const [fwers,fwing,entries,avgRating]=await Promise.all([
-          DB.getFollowers(user.id),
-          DB.getFollowing(user.id),
-          DB.getPublicEntries(user.id),
-          DB.getUserRatings(user.id),
-        ]);
-        setStats({
-          followers: fwers.length,
-          following: fwing.length,
-          publicTexts: entries.length,
-          totalWords: entries.reduce((s,e)=>s+(e.word_count||0),0),
-          avgRating,
-        });
-      }catch(e){console.error('profile load:',e);}
-      setLoading(false);
-    };
-    load();
+    DB.getProfileStats(user.id)
+      .then(s=>setStats(s))
+      .catch(e=>console.error('profile stats:',e))
+      .finally(()=>setLoading(false));
   },[user?.id]);
 
   if(!user)return null;
   const profileUrl=window.location.origin+window.location.pathname+'?user='+(user.username||user.id);
+  const fmtMin=secs=>secs<60?secs+'s':secs<3600?Math.round(secs/60)+'min':Math.floor(secs/3600)+'h '+(Math.round((secs%3600)/60))+'min';
+
+  const statCards=[
+    {l:'Seguidores',  v: stats?.followers??'…'},
+    {l:'Siguiendo',   v: stats?.following??'…'},
+    {l:'Textos',      v: stats?.publicTexts??'…'},
+    {l:'Valoración',  v: stats?.avgRating?stats.avgRating+'★':'—'},
+    {l:'Palabras',    v: stats?.totalWords?(stats.totalWords).toLocaleString():'…'},
+    {l:'Tiempo',      v: stats?.totalElapsed?fmtMin(stats.totalElapsed):'…'},
+  ];
 
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:400,boxShadow:'0 12px 60px rgba(0,0,0,0.2)',overflow:'hidden'}}>
+      <div style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:420,boxShadow:'0 12px 60px rgba(0,0,0,0.2)',overflow:'hidden'}}>
 
-        {/* Header with gradient + avatar */}
+        {/* Header */}
         <div style={{background:'linear-gradient(135deg,'+(user.accent||'#5550B8')+'22,'+(user.bg||'#EEEDFE')+')',padding:'28px 24px 24px',textAlign:'center',borderBottom:'0.5px solid '+BDR}}>
-          {/* Avatar — photo if available, initials fallback */}
           {user.avatar?(
-            <img src={user.avatar} alt={user.name}
-              style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',margin:'0 auto 14px',display:'block',border:'3px solid #fff',boxShadow:'0 2px 12px rgba(0,0,0,0.15)'}}/>
+            <img src={user.avatar} alt={user.name} style={{width:72,height:72,borderRadius:'50%',objectFit:'cover',margin:'0 auto 14px',display:'block',border:'3px solid #fff',boxShadow:'0 2px 12px rgba(0,0,0,0.15)'}}/>
           ):(
             <div style={{width:72,height:72,borderRadius:'50%',background:user.bg||'#EEEDFE',display:'flex',alignItems:'center',justifyContent:'center',fontSize:26,fontWeight:700,color:user.accent||'#5550B8',margin:'0 auto 14px',border:'3px solid #fff',boxShadow:'0 2px 12px rgba(0,0,0,0.12)'}}>
               {(user.initials||(user.name||'?')[0]).toUpperCase()}
@@ -4609,33 +4634,18 @@ const PublicProfile=({user,onClose})=>{
           )}
           <div style={{fontSize:21,fontWeight:700,color:TXT,fontFamily:'Lora,Georgia,serif',letterSpacing:'-0.02em'}}>{user.name}</div>
           <div style={{fontSize:13,color:MUTED,marginTop:3}}>@{user.username||'sin_username'}</div>
+          {loading&&<div style={{fontSize:11,color:FAINT,marginTop:6}}>Cargando estadísticas…</div>}
         </div>
 
-        {/* Stats grid */}
-        {loading?(
-          <div style={{padding:'24px',textAlign:'center',color:FAINT,fontSize:13}}>Cargando estadísticas…</div>
-        ):(
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'0.5px',background:BDR}}>
-            {[
-              {l:'Seguidores', v: stats?.followers??0},
-              {l:'Siguiendo',  v: stats?.following??0},
-              {l:'Textos',     v: stats?.publicTexts??0},
-              {l:'Valoración', v: stats?.avgRating ? stats.avgRating+'★' : '—'},
-            ].map(s=>(
-              <div key={s.l} style={{background:'#fff',padding:'16px 8px',textAlign:'center'}}>
-                <div style={{fontSize:20,fontWeight:700,color:TXT,letterSpacing:'-0.02em',lineHeight:1.1}}>{s.v}</div>
-                <div style={{fontSize:9,color:FAINT,marginTop:3,textTransform:'uppercase',letterSpacing:'.06em'}}>{s.l}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Words total */}
-        {!loading&&stats&&stats.totalWords>0&&(
-          <div style={{padding:'10px 20px',borderBottom:'0.5px solid '+BDR,textAlign:'center'}}>
-            <span style={{fontSize:12,color:MUTED}}>{(stats.totalWords).toLocaleString()} palabras publicadas</span>
-          </div>
-        )}
+        {/* Stats 3×2 grid */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'0.5px',background:BDR}}>
+          {statCards.map(s=>(
+            <div key={s.l} style={{background:'#fff',padding:'14px 6px',textAlign:'center'}}>
+              <div style={{fontSize:18,fontWeight:700,color:TXT,letterSpacing:'-0.02em',lineHeight:1.1}}>{s.v}</div>
+              <div style={{fontSize:9,color:FAINT,marginTop:3,textTransform:'uppercase',letterSpacing:'.06em'}}>{s.l}</div>
+            </div>
+          ))}
+        </div>
 
         {/* Share + close */}
         <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
@@ -4649,7 +4659,6 @@ const PublicProfile=({user,onClose})=>{
     </div>
   );
 };
-
 
 const UserAvatar=({user,size=36,onClick})=>{
   const s={width:size,height:size,borderRadius:'50%',flexShrink:0,cursor:onClick?'pointer':'default'};
