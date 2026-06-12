@@ -1618,6 +1618,34 @@ const DB = {
     const { error } = await getSB().from('text_ratings').upsert({ entry_id: entryId, user_id: userId, rating }, { onConflict: 'entry_id,user_id' });
     if (error) throw error;
   },
+  // ── Duets (relato a dos manos) ──
+  createDuet: async (d) => {
+    const { data, error } = await getSB().from('duets').insert(d).select().single();
+    if (error) throw error;
+    return data;
+  },
+  getMyDuets: async (uid) => {
+    const { data, error } = await getSB().from('duets')
+      .select('*')
+      .or('user_a.eq.' + uid + ',user_b.eq.' + uid)
+      .neq('status', 'declined')
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  updateDuet: async (id, patch) => {
+    const { error } = await getSB().from('duets').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+  },
+  getDuetTurns: async (duetId) => {
+    const { data, error } = await getSB().from('duet_turns').select('*').eq('duet_id', duetId).order('turn_number', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+  addDuetTurn: async (turn) => {
+    const { error } = await getSB().from('duet_turns').insert(turn);
+    if (error) throw error;
+  },
 };
 </script>
 
@@ -2372,6 +2400,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showBiblioteca,setShowBiblioteca]=useState(false);
   const [showStats,setShowStats]=useState(false);
   const [showAmigos,setShowAmigos]=useState(false);
+  const [showSendDuet,setShowSendDuet]=useState(false);
   const [showPrivacyModal,setShowPrivacyModal]=useState(false);
   const [showTermsModal,setShowTermsModal]=useState(false);
   const [showProfileSettings,setShowProfileSettings]=useState(false);
@@ -2403,6 +2432,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
+      {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}/>}
       {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
@@ -2415,6 +2445,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <button onClick={()=>setShowStats(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📊 Estadísticas</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Equipos</button>
           <button onClick={()=>setShowSendChallenge(true)} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#A82020',cursor:'pointer',fontWeight:500}}>⏱ Retar</button>
+          <button onClick={()=>setShowSendDuet(true)} style={{background:'rgba(85,80,184,0.07)',border:'0.5px solid rgba(85,80,184,0.25)',borderRadius:6,padding:'4px 10px',fontSize:11,color:'#5550B8',cursor:'pointer',fontWeight:500}}>✍️ A dos manos</button>
           {/* User menu button */}
           <div style={{position:'relative'}}>
             <button onClick={()=>setShowUserMenu(v=>!v)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:20,padding:'3px 10px 3px 4px',cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
@@ -2465,6 +2496,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onDismiss={onDismissChallenge}/>
+        <DuetsHub user={user}/>
         {syncStatus==='syncing'&&<div style={{background:'rgba(85,80,184,0.06)',border:'0.5px solid rgba(85,80,184,0.2)',borderRadius:10,padding:'10px 14px',marginBottom:12,display:'flex',alignItems:'center',gap:8,fontSize:12,color:'#5550B8'}}>
           <span style={{animation:'spin 1s linear infinite',display:'inline-block'}}>⟳</span>
           Cargando tus textos…
@@ -5439,6 +5471,397 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
   );
 };
 
+
+
+/* ─── SEND DUET MODAL ───────────────────────────────────────── */
+const SendDuetModal=({user,onClose,onCreated})=>{
+  const [query,setQuery]=useState('');
+  const [results,setResults]=useState([]);
+  const [recipient,setRecipient]=useState(null);
+  const [title,setTitle]=useState('');
+  const [premise,setPremise]=useState('');
+  const [minWords,setMinWords]=useState(100);
+  const [sending,setSending]=useState(false);
+  const [status,setStatus]=useState('');
+
+  useEffect(()=>{
+    if(query.length<2){setResults([]);return;}
+    const t=setTimeout(async()=>{
+      try{const r=await DB.searchUsers(query);setResults(r.filter(u=>u.id!==user.id));}catch(e){}
+    },300);
+    return()=>clearTimeout(t);
+  },[query]);
+
+  const send=async()=>{
+    if(!recipient||sending)return;
+    setSending(true);setStatus('');
+    try{
+      const duet=await DB.createDuet({
+        title:title.trim()||'Relato a dos manos',
+        premise:premise.trim()||null,
+        min_words:minWords,
+        user_a:user.id,user_b:recipient.id,
+        name_a:user.name,username_a:user.username||user.name,
+        name_b:recipient.name,username_b:recipient.username||recipient.name,
+        current_turn:'a',status:'pending',
+      });
+      setStatus('¡Invitación enviada a @'+(recipient.username||recipient.name)+'!');
+      setTimeout(()=>{onCreated&&onCreated(duet);onClose();},1500);
+    }catch(e){setStatus('Error: '+e.message);setSending(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(26,25,22,0.5)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="fi" style={{background:'#fff',borderRadius:16,width:'100%',maxWidth:440,maxHeight:'90vh',overflow:'auto',boxShadow:'0 8px 50px rgba(0,0,0,0.18)'}}>
+        <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>✍️ Relato a dos manos</div>
+            <div style={{fontSize:11,color:MUTED,marginTop:2}}>Escribid por turnos. Tú empiezas.</div>
+          </div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+        </div>
+
+        <div style={{padding:'18px 20px',display:'flex',flexDirection:'column',gap:16}}>
+          {/* Recipient */}
+          <div>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:8}}>¿Con quién escribes?</div>
+            {recipient?(
+              <div style={{display:'flex',alignItems:'center',gap:10,background:'rgba(85,80,184,0.06)',border:'0.5px solid rgba(85,80,184,0.25)',borderRadius:9,padding:'9px 12px'}}>
+                <UserAvatar user={recipient} size={32}/>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT}}>{recipient.name}</div><div style={{fontSize:11,color:MUTED}}>@{recipient.username||'?'}</div></div>
+                <button onClick={()=>{setRecipient(null);setQuery('');}} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:16}}>×</button>
+              </div>
+            ):(
+              <div style={{position:'relative'}}>
+                <input type="text" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nombre o @usuario…" style={{width:'100%'}}/>
+                {results.length>0&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:'#fff',border:'0.5px solid '+BDR,borderRadius:9,boxShadow:'0 4px 20px rgba(0,0,0,0.1)',overflow:'hidden',zIndex:10}}>
+                  {results.map(r=>(
+                    <button key={r.id} onClick={()=>{setRecipient(r);setQuery('');setResults([]);}}
+                      style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'9px 12px',cursor:'pointer',borderBottom:'0.5px solid '+BDR}}>
+                      <UserAvatar user={r} size={28}/>
+                      <div style={{textAlign:'left'}}><div style={{fontSize:12,fontWeight:500,color:TXT}}>{r.name}</div><div style={{fontSize:11,color:MUTED}}>@{r.username||'?'}</div></div>
+                    </button>
+                  ))}
+                </div>}
+              </div>
+            )}
+          </div>
+
+          {/* Title + premise */}
+          <div>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Título (opcional)</div>
+            <input type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="Relato a dos manos" style={{width:'100%'}}/>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Premisa inicial (opcional)</div>
+            <textarea value={premise} onChange={e=>setPremise(e.target.value)} placeholder="Un faro abandonado. Alguien enciende la luz por primera vez en 30 años…" rows={2} style={{width:'100%',resize:'none'}}/>
+          </div>
+
+          {/* Min words */}
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+              <span style={{fontSize:12,fontWeight:500,color:TXT}}>Mínimo de palabras por turno</span>
+              <strong style={{fontSize:13,color:'#5550B8'}}>{minWords}</strong>
+            </div>
+            <input type="range" min={25} max={500} step={25} value={minWords} onChange={e=>setMinWords(+e.target.value)} style={{accentColor:'#5550B8'}}/>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:FAINT}}><span>25</span><span>500</span></div>
+          </div>
+
+          {status&&<div style={{fontSize:12,color:status.startsWith('Error')?'#C5221F':'#0A7A58',padding:'8px 12px',background:status.startsWith('Error')?'rgba(197,34,31,0.06)':'rgba(10,122,88,0.07)',borderRadius:8}}>{status}</div>}
+
+          <button onClick={send} disabled={!recipient||sending}
+            style={{background:recipient&&!sending?TXT:'rgba(0,0,0,0.1)',border:'none',borderRadius:9,padding:'11px',fontSize:14,fontWeight:500,color:recipient&&!sending?'#fff':FAINT,cursor:recipient&&!sending?'pointer':'default'}}>
+            {sending?'Enviando…':'Enviar invitación ✍️'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── DUET EDITOR ───────────────────────────────────────────── */
+const DuetEditor=({user,duet,onClose,onUpdate})=>{
+  const isA=duet.user_a===user.id;
+  const myLetter=isA?'a':'b';
+  const otherName=isA?(duet.name_b||'?'):(duet.name_a||'?');
+  const myTurn=duet.current_turn===myLetter&&duet.status==='active';
+  const finishProposedByMe=duet.finish_proposed_by===user.id;
+  const finishProposedByOther=duet.status==='finish_proposed'&&!finishProposedByMe;
+
+  const [turns,setTurns]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [plainTxt,setPlainTxt]=useState('');
+  const [wc,setWc]=useState(0);
+  const [saving,setSaving]=useState(false);
+  const edRef=useRef(null);
+
+  useEffect(()=>{
+    DB.getDuetTurns(duet.id).then(t=>{setTurns(t);setLoading(false);}).catch(e=>{console.error(e);setLoading(false);});
+  },[duet.id]);
+
+  const handleInput=()=>{
+    const txt=edRef.current?.innerText||'';
+    setPlainTxt(txt);
+    setWc(txt.trim()?txt.trim().split(/\s+/).filter(Boolean).length:0);
+  };
+
+  const canPass=myTurn&&wc>=duet.min_words;
+
+  const passTurn=async(propose=false)=>{
+    if(!canPass||saving)return;
+    setSaving(true);
+    try{
+      const html=edRef.current?.innerHTML||'';
+      await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
+      const newFullHtml=(duet.full_html||'')+html;
+      const newFullPlain=(duet.full_plain||'')+(duet.full_plain?'\n\n':'')+plainTxt;
+      const patch={
+        full_html:newFullHtml,full_plain:newFullPlain,
+        turn_count:duet.turn_count+1,
+        current_turn:isA?'b':'a',
+      };
+      if(propose){patch.status='finish_proposed';patch.finish_proposed_by=user.id;}
+      await DB.updateDuet(duet.id,patch);
+      onUpdate();onClose();
+    }catch(e){alert('Error: '+e.message);setSaving(false);}
+  };
+
+  const confirmFinish=async()=>{
+    setSaving(true);
+    try{
+      // Save my last fragment too if I wrote something
+      if(plainTxt.trim()&&wc>=duet.min_words){
+        const html=edRef.current?.innerHTML||'';
+        await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
+        await DB.updateDuet(duet.id,{
+          full_html:(duet.full_html||'')+html,
+          full_plain:(duet.full_plain||'')+'\n\n'+plainTxt,
+          turn_count:duet.turn_count+1,
+          status:'finished',
+        });
+      }else{
+        await DB.updateDuet(duet.id,{status:'finished'});
+      }
+      onUpdate();onClose();
+    }catch(e){alert('Error: '+e.message);setSaving(false);}
+  };
+
+  const keepWriting=async()=>{
+    setSaving(true);
+    try{
+      await DB.updateDuet(duet.id,{status:'active',finish_proposed_by:null});
+      onUpdate();onClose();
+    }catch(e){alert('Error: '+e.message);setSaving(false);}
+  };
+
+  const approvePublish=async()=>{
+    setSaving(true);
+    try{
+      const patch={};patch['publish_'+myLetter]=true;
+      const otherApproved=isA?duet.publish_b:duet.publish_a;
+      await DB.updateDuet(duet.id,patch);
+      if(otherApproved){
+        // Both approved — create the public entry
+        const entryId='duet_'+duet.id.slice(0,8);
+        await DB.upsertEntry({
+          id:entryId,user_id:user.id,sk:'cuento',
+          title:duet.title+' — con '+otherName,
+          session_label:'Relato a dos manos · '+(duet.name_a||'?')+' & '+(duet.name_b||'?'),
+          html:duet.full_html,plain:duet.full_plain,
+          word_count:duet.full_plain.trim().split(/\s+/).filter(Boolean).length,
+          elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
+          date:new Date().toISOString().slice(0,10),ts:Date.now(),
+          visibility:'abierto',
+        });
+        await DB.updateDuet(duet.id,{published:true});
+      }
+      onUpdate();onClose();
+    }catch(e){alert('Error: '+e.message);setSaving(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'#fff',zIndex:300,display:'flex',flexDirection:'column'}}>
+      {/* Header */}
+      <div style={{background:'#1A1916',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>← Salir</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:600,fontFamily:'Lora,Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>✍️ {duet.title}</div>
+          <div style={{fontSize:11,color:'rgba(255,255,255,0.5)'}}>con {otherName} · mín. {duet.min_words} pal./turno</div>
+        </div>
+        {duet.status==='active'&&(
+          <div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:myTurn?'rgba(10,122,88,0.3)':'rgba(255,255,255,0.1)',color:myTurn?'#4CAF82':'rgba(255,255,255,0.5)',flexShrink:0}}>
+            {myTurn?'Tu turno':'Turno de '+otherName}
+          </div>
+        )}
+        {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(85,80,184,0.3)',color:'#A5A0E8'}}>Terminado</div>}
+      </div>
+
+      {duet.premise&&<div style={{padding:'10px 18px',background:'rgba(85,80,184,0.05)',borderBottom:'0.5px solid '+BDR,fontSize:12,color:'#5550B8',fontStyle:'italic',flexShrink:0}}>
+        Premisa: {duet.premise}
+      </div>}
+
+      {/* Finish proposed banner */}
+      {finishProposedByOther&&(
+        <div style={{padding:'12px 18px',background:'rgba(149,96,16,0.08)',borderBottom:'0.5px solid rgba(149,96,16,0.2)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+          <span style={{fontSize:13,color:'#956010',flex:1}}>{otherName} propone terminar el relato aquí.</span>
+          <button onClick={confirmFinish} disabled={saving} style={{background:'#956010',border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>Aceptar y terminar</button>
+          <button onClick={keepWriting} disabled={saving} style={{background:'transparent',border:'0.5px solid rgba(149,96,16,0.3)',borderRadius:7,padding:'6px 14px',fontSize:12,color:'#956010',cursor:'pointer'}}>Seguir escribiendo</button>
+        </div>
+      )}
+
+      {/* Publish approval banner (finished) */}
+      {duet.status==='finished'&&!duet.published&&(
+        <div style={{padding:'12px 18px',background:'rgba(85,80,184,0.06)',borderBottom:'0.5px solid rgba(85,80,184,0.2)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+          {(isA?duet['publish_'+'a']:duet['publish_'+'b'])
+            ?<span style={{fontSize:13,color:'#5550B8',flex:1}}>Has aprobado la publicación. Esperando a {otherName}…</span>
+            :<>
+              <span style={{fontSize:13,color:'#5550B8',flex:1}}>¿Publicar este relato en la Biblioteca con ambos autores?</span>
+              <button onClick={approvePublish} disabled={saving} style={{background:'#5550B8',border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>Aprobar publicación</button>
+            </>}
+        </div>
+      )}
+      {duet.published&&<div style={{padding:'10px 18px',background:'rgba(10,122,88,0.07)',borderBottom:'0.5px solid rgba(10,122,88,0.2)',fontSize:13,color:'#0A7A58',flexShrink:0}}>✓ Publicado en la Biblioteca</div>}
+
+      {/* Body */}
+      <div style={{flex:1,overflowY:'auto',padding:'24px 24px 120px',maxWidth:680,width:'100%',margin:'0 auto'}}>
+        {loading?<div style={{textAlign:'center',color:MUTED,fontSize:13,padding:40}}>Cargando…</div>:(
+          <>
+            {/* Previous text (read-only) */}
+            {duet.full_html
+              ?<div style={{fontSize:16,lineHeight:1.85,color:'rgba(26,25,22,0.75)',fontFamily:'Lora,Georgia,serif',marginBottom:20,paddingBottom:20,borderBottom:myTurn?'1px dashed rgba(85,80,184,0.3)':'none'}}
+                dangerouslySetInnerHTML={{__html:duet.full_html}}/>
+              :<div style={{fontSize:13,color:FAINT,marginBottom:20,fontStyle:'italic'}}>El relato está en blanco. {myTurn?'Tú lo empiezas.':''}</div>}
+
+            {/* My writing area (only if my turn) */}
+            {myTurn&&(
+              <div>
+                <div style={{fontSize:11,fontWeight:500,color:'#5550B8',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8}}>Tu turno — continúa el relato</div>
+                <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+                  style={{minHeight:160,outline:'none',fontSize:16,lineHeight:1.85,fontFamily:'Lora,Georgia,serif',color:'#1A1916',caretColor:'#5550B8',padding:'4px 0'}}/>
+              </div>
+            )}
+            {!myTurn&&duet.status==='active'&&(
+              <div style={{textAlign:'center',padding:'20px',background:'rgba(0,0,0,0.025)',borderRadius:12,fontSize:13,color:MUTED}}>
+                ⏳ Es el turno de {otherName}. Te avisaremos cuando te toque.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Bottom bar (my turn) */}
+      {myTurn&&(
+        <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'12px 20px',background:canPass?'rgba(10,122,88,0.97)':'rgba(26,25,22,0.95)',display:'flex',alignItems:'center',gap:12,transition:'background 0.4s'}}>
+          <div style={{flex:1,fontSize:13,color:'#fff'}}>
+            <strong>{wc}</strong> / {duet.min_words} palabras
+            {!canPass&&<span style={{color:'rgba(255,255,255,0.5)',marginLeft:8}}>Faltan {duet.min_words-wc} para poder pasar el turno</span>}
+            {canPass&&<span style={{marginLeft:8}}>✓ ¡Mínimo alcanzado!</span>}
+          </div>
+          <button onClick={()=>passTurn(true)} disabled={!canPass||saving}
+            style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.3)',borderRadius:8,padding:'9px 14px',fontSize:12,color:canPass?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
+            Proponer fin
+          </button>
+          <button onClick={()=>passTurn(false)} disabled={!canPass||saving}
+            style={{background:canPass?'#fff':'rgba(255,255,255,0.15)',border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:600,color:canPass?'#0A7A58':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
+            {saving?'Guardando…':'Pasar el turno →'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ─── DUETS HUB (dashboard widget) ──────────────────────────── */
+const DuetsHub=({user})=>{
+  const [duets,setDuets]=useState([]);
+  const [openDuet,setOpenDuet]=useState(null);
+  const [loaded,setLoaded]=useState(false);
+
+  const load=async()=>{
+    try{const d=await DB.getMyDuets(user.id);setDuets(d);}catch(e){console.error(e);}
+    setLoaded(true);
+  };
+  useEffect(()=>{load();},[user.id]);
+
+  const isA=d=>d.user_a===user.id;
+  const invitations=duets.filter(d=>d.status==='pending'&&!isA(d));
+  const pendingSent=duets.filter(d=>d.status==='pending'&&isA(d));
+  const active=duets.filter(d=>['active','finish_proposed'].includes(d.status));
+  const finished=duets.filter(d=>d.status==='finished'&&!d.published);
+  const myTurnDuets=active.filter(d=>(d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d)));
+
+  const accept=async(d)=>{
+    try{await DB.updateDuet(d.id,{status:'active'});load();}
+    catch(e){alert('Error: '+e.message);}
+  };
+  const decline=async(d)=>{
+    try{await DB.updateDuet(d.id,{status:'declined'});load();}
+    catch(e){alert('Error: '+e.message);}
+  };
+
+  if(!loaded||(invitations.length===0&&active.length===0&&finished.length===0&&pendingSent.length===0))return null;
+
+  return(
+    <>
+      {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={load}/>}
+      <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:12}}>✍️ Relatos a dos manos</div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+
+          {invitations.map(d=>(
+            <div key={d.id} style={{background:'rgba(85,80,184,0.05)',border:'0.5px solid rgba(85,80,184,0.2)',borderRadius:10,padding:'12px 14px'}}>
+              <div style={{fontSize:13,color:TXT,marginBottom:8}}><strong>{d.name_a}</strong> te invita a escribir «{d.title}» (mín. {d.min_words} pal./turno)</div>
+              {d.premise&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"{d.premise}"</div>}
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>accept(d)} style={{background:'#5550B8',border:'none',borderRadius:6,padding:'5px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>Aceptar ✍️</button>
+                <button onClick={()=>decline(d)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'5px 14px',fontSize:12,color:MUTED,cursor:'pointer'}}>Rechazar</button>
+              </div>
+            </div>
+          ))}
+
+          {active.map(d=>{
+            const myTurn=(d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d));
+            const other=isA(d)?d.name_b:d.name_a;
+            return(
+              <div key={d.id} style={{display:'flex',alignItems:'center',gap:10,background:myTurn?'rgba(10,122,88,0.05)':'rgba(0,0,0,0.02)',border:'0.5px solid '+(myTurn?'rgba(10,122,88,0.25)':BDR),borderRadius:10,padding:'10px 14px'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.title}</div>
+                  <div style={{fontSize:11,color:myTurn?'#0A7A58':MUTED}}>
+                    con {other} · {d.status==='finish_proposed'?'propuesta de fin pendiente':myTurn?'✍️ ¡Es tu turno!':'turno de '+other}
+                  </div>
+                </div>
+                <button onClick={()=>setOpenDuet(d)}
+                  style={{background:myTurn?'#0A7A58':'transparent',border:myTurn?'none':'0.5px solid '+BDR,borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:myTurn?'#fff':MUTED,cursor:'pointer',flexShrink:0}}>
+                  {myTurn?'Escribir →':'Ver'}
+                </button>
+              </div>
+            );
+          })}
+
+          {finished.map(d=>{
+            const other=isA(d)?d.name_b:d.name_a;
+            const iApproved=isA(d)?d.publish_a:d.publish_b;
+            return(
+              <div key={d.id} style={{display:'flex',alignItems:'center',gap:10,background:'rgba(85,80,184,0.04)',border:'0.5px solid rgba(85,80,184,0.15)',borderRadius:10,padding:'10px 14px'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:500,color:TXT}}>{d.title} <span style={{fontSize:11,color:MUTED}}>· terminado</span></div>
+                  <div style={{fontSize:11,color:MUTED}}>{iApproved?'Esperando aprobación de '+other:'¿Publicar en la Biblioteca?'}</div>
+                </div>
+                <button onClick={()=>setOpenDuet(d)} style={{background:'transparent',border:'0.5px solid rgba(85,80,184,0.3)',borderRadius:7,padding:'6px 14px',fontSize:12,color:'#5550B8',cursor:'pointer',flexShrink:0}}>Abrir</button>
+              </div>
+            );
+          })}
+
+          {pendingSent.map(d=>(
+            <div key={d.id} style={{fontSize:12,color:FAINT,padding:'4px 2px'}}>
+              ⏳ Invitación enviada a {d.name_b} para «{d.title}» — esperando respuesta
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+};
 
 /* ─── WELCOME CAROUSEL ──────────────────────────────────────── */
 const WelcomeCarousel=({onClose})=>{
