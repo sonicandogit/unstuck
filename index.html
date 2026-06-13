@@ -148,6 +148,55 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:rgba
 .wc-noshow-check.checked{background:#1a1612;border-color:#1a1612;}
 .wc-noshow-label{font-size:11px;color:#a89f94;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* ══ RESPONSIVE / MOBILE ══════════════════════════════════ */
+@media(max-width:680px){
+  /* Topbar: horizontal scroll instead of overflow */
+  .topbar{padding:0 12px!important;gap:6px;}
+  .topbar-nav{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;max-width:75vw;padding:6px 0;}
+  .topbar-nav::-webkit-scrollbar{display:none}
+  .topbar-nav>button{flex-shrink:0;white-space:nowrap;}
+
+  /* Grids collapse */
+  .resp-2col{grid-template-columns:1fr!important;}
+  .resp-3col{grid-template-columns:repeat(2,1fr)!important;}
+
+  /* Amigos: stack sidebar below */
+  .amigos-body{flex-direction:column!important;overflow-y:auto!important;}
+  .amigos-body>div:first-child{overflow-y:visible!important;flex:none!important;}
+  .amigos-side{width:100%!important;border-left:none!important;border-top:0.5px solid rgba(0,0,0,0.1);overflow-y:visible!important;}
+
+  /* Welcome carousel */
+  .wc-overlay{padding:10px;}
+  .wc-modal{max-height:96vh;}
+  .wc-slide{padding:18px 16px 14px;gap:14px;}
+  .wc-title{font-size:21px;}
+  .wc-body{font-size:13px;}
+  .wc-nav{padding:10px 14px 12px;}
+  .wc-btn{padding:7px 12px;font-size:12px;}
+  .mk-modes{flex-direction:column;}
+
+  /* Duet bottom bar */
+  .duet-bar{padding:10px 12px!important;gap:8px!important;}
+  .duet-bar>div:first-child{flex-basis:100%;font-size:12px!important;}
+
+  /* Modals: full-bleed on small screens */
+  .mob-modal{border-radius:0!important;max-width:100%!important;min-height:100vh;}
+
+  /* Bigger touch targets */
+  button{min-height:30px;}
+  input,select,textarea{font-size:16px!important;} /* prevents iOS zoom on focus */
+}
+
+@media(max-width:400px){
+  .resp-3col{grid-template-columns:1fr 1fr!important;gap:6px!important;}
+  .wc-title{font-size:19px;}
+}
+
+/* PWA: safe areas for notched phones */
+@supports(padding:env(safe-area-inset-top)){
+  body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);}
+}
 </style>
 <!-- Google Analytics (consent mode — only fires after user accepts) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-XYZY2N39EM"></script>
@@ -2067,6 +2116,17 @@ La expansión no debe "resolver" las seis palabras. Debe hacer que el lector sie
   ],
 };
 </script>
+<script>
+// ── PWA: Service Worker registration ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('./sw.js').then(function(reg) {
+      // Check for updates every time the app loads
+      reg.update();
+    }).catch(function(e) { console.warn('SW registration failed:', e); });
+  });
+}
+</script>
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo}=React;
 
@@ -2505,10 +2565,10 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}/>}
       {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
-      <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
-        <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT}}>Pretexto</div>
-        <div style={{flex:1}}/>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
+      <div className="topbar" style={{display:'flex',alignItems:'center',padding:'0 20px',height:50,background:'#fff',borderBottom:'0.5px solid '+BDR,flexShrink:0}}>
+        <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.04em',fontFamily:'Lora,Georgia,serif',color:TXT,flexShrink:0}}>Pretexto</div>
+        <div style={{flex:1,minWidth:10}}/>
+        <div className="topbar-nav" style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={onOpenLibrary} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📚 Lecciones</button>
           <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>📖 Biblioteca</button>
           <button onClick={()=>setShowAmigos(true)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'4px 10px',fontSize:11,color:MUTED,cursor:'pointer'}}>👥 Amigos</button>
@@ -2597,7 +2657,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         </div>
 
         {/* Current week + Streak */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+        <div className="resp-2col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
           {/* Esta semana */}
           <div className="fu" style={{background:'#fff',border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 16px'}}>
             <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:2}}>Esta semana</div>
@@ -2717,12 +2777,12 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         {library.length>=3&&<StatsChart library={library}/>}
 
         {/* Stats */}
-        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:8}}>
+        <div className="fu resp-3col" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:8}}>
           <StatCard label="Palabras" value={stats.totalWords>=1000?(stats.totalWords/1000).toFixed(1)+'k':stats.totalWords||0} sub="escritas"/>
           <StatCard label="Esta semana" value={stats.thisWeek||0} sub="sesiones"/>
           <StatCard label="Valoración" value={stats.avgRating?stats.avgRating+'/10':'—'} sub="media" accent={stats.avgRating>=7?'#0A7A58':TXT}/>
         </div>
-        <div className="fu" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:12}}>
+        <div className="fu resp-3col" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:12}}>
           <StatCard label="Esta semana" value={fmtTime(stats.weekElapsed)||'—'} sub="tiempo escrito"/>
           <StatCard label="Total" value={fmtTime(stats.totalElapsed)||'—'} sub="desde el inicio"/>
           <StatCard label="Lecciones" value={lessonsRead+'/64'} sub={lessonsPct+'% leído'} accent={lessonsRead>0?'#5550B8':TXT}/>
@@ -5465,7 +5525,7 @@ const AmigosScreen=({user,onClose})=>{
         </div>
 
         {/* Body: two columns */}
-        <div style={{flex:1,display:'flex',overflow:'hidden'}}>
+        <div className="amigos-body" style={{flex:1,display:'flex',overflow:'hidden'}}>
 
           {/* LEFT: friends list */}
           <div style={{flex:1,overflowY:'auto',padding:'20px 16px 20px 20px'}}>
@@ -5486,7 +5546,7 @@ const AmigosScreen=({user,onClose})=>{
           </div>
 
           {/* RIGHT: sidebar */}
-          <div style={{width:280,flexShrink:0,background:'#fff',borderLeft:'0.5px solid '+BDR,display:'flex',flexDirection:'column',overflowY:'auto'}}>
+          <div className="amigos-side" style={{width:280,flexShrink:0,background:'#fff',borderLeft:'0.5px solid '+BDR,display:'flex',flexDirection:'column',overflowY:'auto'}}>
 
             {/* Total users */}
             <div style={{padding:'24px 20px 16px',borderBottom:'0.5px solid '+BDR,textAlign:'center'}}>
@@ -5621,7 +5681,7 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
         </div>
 
         {/* Stat cards */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:24}}>
+        <div className="resp-3col" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:24}}>
           <StatCard label="Palabras escritas" value={(totalWords||0).toLocaleString()} accent="#5550B8"/>
           <StatCard label="Sesiones totales" value={totalSessions||0} accent="#5550B8"/>
           <StatCard label="Tiempo escrito" value={totalElapsed>0?Math.round(totalElapsed/60)+'min':'—'} accent="#5550B8"/>
@@ -5649,7 +5709,7 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
 
         {/* Pie charts */}
         {cats.length>0&&(
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+          <div className="resp-2col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
             <div style={{background:'#F8F7F4',borderRadius:12,padding:'16px'}}>
               <div style={{fontSize:12,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:12}}>Palabras por tipo</div>
               <PieChart data={cats.map(k=>[k,catWords[k]])} total={totalW} unit="pal."/>
@@ -5945,7 +6005,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
 
       {/* Bottom bar (my turn) */}
       {myTurn&&(
-        <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'12px 20px',background:canPass?'rgba(10,122,88,0.97)':'rgba(26,25,22,0.95)',display:'flex',alignItems:'center',gap:12,transition:'background 0.4s'}}>
+        <div className="duet-bar" style={{position:'absolute',bottom:0,left:0,right:0,padding:'12px 20px',background:canPass?'rgba(10,122,88,0.97)':'rgba(26,25,22,0.95)',display:'flex',alignItems:'center',gap:12,transition:'background 0.4s',flexWrap:'wrap'}}>
           <div style={{flex:1,fontSize:13,color:'#fff'}}>
             <strong>{wc}</strong> / {duet.min_words} palabras
             {!canPass&&<span style={{color:'rgba(255,255,255,0.5)',marginLeft:8}}>Faltan {duet.min_words-wc} para poder pasar el turno</span>}

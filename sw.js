@@ -1,32 +1,72 @@
-const CACHE = 'unstuck-v4';
+// Pretexto Service Worker v5
+// Strategy: network-first for HTML (always fresh app), cache-first for CDN assets
 
-self.addEventListener('install', e => {
+const CACHE = 'pretexto-v5';
+const CDN_HOSTS = [
+  'unpkg.com',
+  'cdn.jsdelivr.net',
+  'cdnjs.cloudflare.com',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+];
+
+self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
 
-self.addEventListener('activate', e => {
+self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.map(k => caches.delete(k))))
-      .then(() => clients.claim())
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', e => {
-  // Network first — always get fresh HTML
-  if(e.request.url.includes('index.html') || e.request.mode === 'navigate'){
+self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+
+  // Never touch Supabase / API / analytics calls
+  if (url.hostname.includes('supabase.co') || url.hostname.includes('anthropic.com') || url.hostname.includes('google-analytics') || url.hostname.includes('googletagmanager')) {
+    return; // browser default
+  }
+
+  // HTML: network-first (updates arrive immediately), cache fallback for offline
+  if (e.request.mode === 'navigate' || (e.request.headers.get('accept') || '').includes('text/html')) {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
+      fetch(e.request)
+        .then(res => {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+          return res;
+        })
+        .catch(() => caches.match(e.request))
     );
     return;
   }
+
+  // CDN assets (React, Babel, fonts...): cache-first, versioned and immutable
+  if (CDN_HOSTS.some(host => url.hostname.includes(host))) {
+    e.respondWith(
+      caches.match(e.request).then(cached =>
+        cached || fetch(e.request).then(res => {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+          return res;
+        })
+      )
+    );
+    return;
+  }
+
+  // Everything else (icons, manifest): stale-while-revalidate
   e.respondWith(
-    fetch(e.request)
-      .then(r => {
-        const clone = r.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
-        return r;
-      })
-      .catch(() => caches.match(e.request))
+    caches.match(e.request).then(cached => {
+      const fresh = fetch(e.request).then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy));
+        return res;
+      }).catch(() => cached);
+      return cached || fresh;
+    })
   );
 });
