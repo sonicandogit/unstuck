@@ -2187,20 +2187,25 @@ const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes',
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
 const ratingMsg=v=>{if(v<=2)return'fue duro';if(v<=4)return'costó arrancar';if(v<=6)return'razonable';if(v<=8)return'bien';return'en el flujo ✦'};
 const computeStats=(library,reflections)=>{
-  // For projects: only count words from latest entry per project
-  const _seenProj=new Set();
-  const totalWords=library.slice().sort((a,b)=>b.ts-a.ts).reduce((s,e)=>{
-    if(e.sk==='proyecto'&&e.project_id){if(_seenProj.has(e.project_id))return s;_seenProj.add(e.project_id);return s+(e.words_added||e.word_count||e.wordCount||0);}
-    return s+(e.words_added||e.word_count||e.wordCount||0);
+  // totalWords = sum of words_added across all entries
+  // words_added stores the INCREMENT per session (new words only)
+  // For old entries without words_added, fall back to word_count
+  const totalWords=library.reduce((s,e)=>{
+    const wa=e.words_added;
+    return s+(wa!=null?wa:(e.word_count||e.wordCount||0));
   },0);
-  const dates=[...new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
+  // Active day = any entry with ≥100 effective words (words_added for projects, word_count for rest)
+  // effectiveWc = how many NEW words were written in that session
+  const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};
+  const activeDayEntries=library.filter(e=>effectiveWc(e)>=100);
+  const dates=[...new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
   let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
   for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/(864e5));if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
-  const thisWeek=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).length;
+  const thisWeek=new Set(activeDayEntries.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).map(e=>e.date?.slice(0,10))).size;
   const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
   const _firstDay=library.length?library[library.length-1].date?.slice(0,10)||today():today();const last7=Array.from({length:7},(_,i)=>{const d=new Date(_firstDay+'T12:00:00');d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
-  const activeDates=new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean));
+  const activeDates=new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
   const weekElapsed=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
@@ -2672,7 +2677,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               {(()=>{
                 const now=new Date();const dow=now.getDay();
                 const monday=new Date(now);monday.setDate(now.getDate()-(dow===0?6:dow-1));
-                const activeDates=new Set(library.map(e=>e.date?.slice(0,10)).filter(Boolean));
+                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const activeDates=new Set(library.filter(e=>effectiveWc(e)>=100).map(e=>e.date?.slice(0,10)).filter(Boolean));
                 const DAY_LABELS=['L','M','X','J','V','S','D'];
                 return Array.from({length:7},(_,i)=>{
                   const d=new Date(monday);d.setDate(monday.getDate()+i);
@@ -2843,7 +2848,8 @@ const SectionCard=({accent,tag,title,children})=>(
 );
 
 const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack})=>{
-  const todayCheck=S.get('flujo:check:'+user.id+':'+today());
+  const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
+    library.some(e=>e.date?.slice(0,10)===today()&&(e.sk==='proyecto'?(e.words_added||e.word_count||0):(e.word_count||0))>=100);
   const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
   const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds));
   const checkDone=!!todayCheck?.done;
@@ -3123,7 +3129,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
             <div style={{fontSize:18,fontWeight:600,color:TXT,fontFamily:'Lora,Georgia,serif'}}>{sessionData.title}</div>
           </div>
           <div style={{padding:'12px 24px',background:'rgba(0,0,0,0.02)',borderBottom:'0.5px solid '+BDR,display:'flex',gap:22}}>
-            {[{l:'Palabras',v:sessionData.wordCount||0},{l:'Tiempo',v:fmt(sessionData.elapsed||0)},{l:'Modo',v:(MODES.find(m=>m.id===sessionData.mode)||MODES[0]).name},{l:'XP',v:'+'+(sessionData.xp||50)}].map(({l,v})=>(
+            {[{l:'Palabras escritas',v:sessionData.wordsAdded??sessionData.wordCount??0},{l:'Tiempo',v:fmt(sessionData.elapsed||0)},{l:'Modo',v:(MODES.find(m=>m.id===sessionData.mode)||MODES[0]).name},{l:'XP',v:'+'+(sessionData.xp||50)}].map(({l,v})=>(
               <div key={l}><div style={{fontSize:15,fontWeight:600,color:TXT}}>{v}</div><div style={{fontSize:10,color:MUTED}}>{l}</div></div>
             ))}
           </div>
@@ -3388,7 +3394,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const id=entryIdRef.current;
     return {
       id,ts:Date.now(),sk,date:today(),
-      words_added:sk==='proyecto'?Math.max(0,wc-initialWcRef.current):wc,
+      words_added:Math.max(0,wc-initialWcRef.current), // increment only, 0 if didn't add words
       session_label:headerFamily,sessionLabel:headerFamily,
       title:headerTitle,
       html:edRef.current?.innerHTML||'',
@@ -3403,9 +3409,17 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     };
   };
 
+  const saveVersion=async()=>{
+    if(!plainTxt.trim())return;
+    const snap={...buildEntry(),id:sk+'_v_'+Date.now(),title:headerTitle+' (versión '+new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})+')'  };
+    await saveEntry(snap);
+    setToast('✓ Versión guardada');
+    setTimeout(()=>setToast(null),2500);
+  };
+
   const saveNow=async(auto=false)=>{
     if(!plainTxt.trim())return;setSaveStatus('saving');
-    const entry={...buildEntry(),id:auto?sk+'_as':sk+'_'+Date.now()};
+    const entry=buildEntry(); // stable ID from entryIdRef — always upserts the same entry
     await saveEntry(entry);
     lastSaved.current=plainTxt;
     // Update project word count
@@ -3498,7 +3512,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const siL=()=>{if(!autoSave)return{l:'off',dot:'rgba(0,0,0,0.12)',c:FAINT};if(saveStatus==='saving')return{l:'Guardando…',dot:'#956010',c:MUTED};if(saveStatus==='saved')return{l:'✓',dot:'#0A7A58',c:'#0A7A58'};if(!started||!plainTxt.trim())return{l:'Auto',dot:'rgba(10,122,88,0.35)',c:FAINT};return{l:asCd+'s',dot:'rgba(10,122,88,0.5)',c:FAINT}};
   const si=siL();
   const TBTN=on=>({background:on?'rgba(0,0,0,0.08)':'transparent',border:'none',borderRadius:5,cursor:'pointer',color:on?TXT:MUTED,display:'flex',alignItems:'center',justifyContent:'center',width:26,height:26,flexShrink:0});
-  const handleFinishDay=()=>{if(started)saveNow(false);onFinishDay({sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:sk==='proyecto'?Math.max(0,wc-initialWcRef.current):wc,exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null})};
+  const handleFinishDay=()=>{if(started)saveNow(false);onFinishDay({sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null})};
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'var(--app-height,100dvh)',background:'transparent',position:'relative'}}>
@@ -3582,7 +3596,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
               <button onClick={()=>setAutoSave(v=>!v)} style={{position:'relative',width:24,height:14,borderRadius:7,background:autoSave?'#0A7A58':'rgba(0,0,0,0.12)',border:'none',cursor:'pointer',flexShrink:0,padding:0}}>
                 <span style={{position:'absolute',top:2,left:autoSave?12:2,width:10,height:10,borderRadius:'50%',background:'#fff',transition:'left 0.18s',boxShadow:'0 1px 2px rgba(0,0,0,0.18)'}}/>
               </button>
-              {started&&<><Sep/><Btn onClick={()=>saveNow(false)} small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓</Btn></>}
+              {started&&<><Sep/><Btn onClick={()=>saveNow(false)} small>Guardar</Btn><Btn onClick={saveVersion} small style={{opacity:0.6,fontSize:10}}>+versión</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓</Btn></>}
             </div>
           </div>
 
