@@ -2596,7 +2596,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
             </button>
             {showUserMenu&&<>
               <div onClick={()=>setShowUserMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
-              <div className="fi" style={{position:'absolute',right:0,top:'calc(100% + 6px)',width:210,background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,boxShadow:'0 4px 24px rgba(0,0,0,0.1)',overflow:'hidden',zIndex:50}}>
+              <div className="fi" style={{position:'fixed',right:8,top:54,width:210,background:'#fff',border:'0.5px solid '+BDR,borderRadius:12,boxShadow:'0 4px 24px rgba(0,0,0,0.1)',overflow:'hidden',zIndex:50}}>
                 {/* Profile header */}
                 <div style={{padding:'12px 14px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',gap:10}}>
                   <UserAvatar user={user} size={36}/>
@@ -2849,7 +2849,7 @@ const SectionCard=({accent,tag,title,children})=>(
 
 const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack})=>{
   const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
-    library.some(e=>e.date?.slice(0,10)===today()&&(e.sk==='proyecto'?(e.words_added||e.word_count||0):(e.word_count||0))>=100);
+    library.some(e=>e.date?.slice(0,10)===today()&&(e.words_added!=null?e.words_added:(e.word_count||0))>=100);
   const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
   const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds));
   const checkDone=!!todayCheck?.done;
@@ -3532,7 +3532,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         <button onClick={handleFinishDay} style={{background:'#F4F2ED',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,fontWeight:500,color:TXT,cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>Terminar →</button>
         <div style={{position:'relative'}}>
           <button onClick={()=>setShowUserMenu(v=>!v)} style={{width:26,height:26,borderRadius:'50%',background:user.bg,border:'1.5px solid '+user.accent+'44',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:600,color:user.textCol}}>{user.initials}</button>
-          {showUserMenu&&<div className="fi" style={{position:'absolute',right:0,top:'calc(100% + 6px)',width:160,background:'#fff',border:'0.5px solid '+BDR,borderRadius:10,boxShadow:'0 4px 20px rgba(0,0,0,0.08)',overflow:'hidden',zIndex:50}}>
+          {showUserMenu&&<div className="fi" style={{position:'fixed',right:8,top:54,width:160,background:'#fff',border:'0.5px solid '+BDR,borderRadius:10,boxShadow:'0 4px 20px rgba(0,0,0,0.08)',overflow:'hidden',zIndex:50}}>
             <div style={{padding:'9px 12px 8px',borderBottom:'0.5px solid '+BDR}}><div style={{fontSize:12,fontWeight:500,color:TXT}}>{user.name}</div></div>
             {users.filter(u=>u.id!==user.id).map(u=><button key={u.id} onClick={()=>{onSwitchUser(u);setShowUserMenu(false)}} style={{display:'flex',alignItems:'center',gap:7,width:'100%',background:'transparent',border:'none',padding:'8px 12px',cursor:'pointer'}}><div style={{width:20,height:20,borderRadius:'50%',background:u.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:600,color:u.textCol}}>{u.initials}</div><span style={{fontSize:12,color:TXT}}>{u.name}</span></button>)}
             <div style={{borderTop:'0.5px solid '+BDR}}/>
@@ -3743,7 +3743,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
     setRunning(false);
     const entry={
       id:'cuento_'+Date.now(),
-      sk:'check',
+      sk:'cuento',
       title:'Cuento contrareloj · '+new Date().toLocaleDateString('es-ES',{day:'numeric',month:'short'}),
       session_label:'Cuento contrareloj',
       html:edRef.current?.innerHTML||'',
@@ -5653,11 +5653,12 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
   // Pie data: words by category (sk)
   const catWords={};const catMins={};
   library.forEach(e=>{
-    const k={check:'Check diario',reto:'Reto semanal',proyecto:'Proyecto',cuento:'Cuento'}[e.sk]||'Otro';
+    const _sl=e.session_label||e.sessionLabel||'';
+const k=e.sk==='dueto'?'A dos manos':e.sk==='cuento'&&_sl.toLowerCase().includes('dos manos')?'A dos manos':{check:'Check diario',reto:'Reto semanal',proyecto:'Proyecto',cuento:'Cuento contrareloj'}[e.sk]||'Otro';
     catWords[k]=(catWords[k]||0)+(e.word_count||e.wordCount||0);
     catMins[k]=(catMins[k]||0)+Math.round((e.elapsed||0)/60);
   });
-  const catColors={'Check diario':'#0A7A58','Reto semanal':'#956010','Proyecto':'#5550B8','Cuento':'#A82020','Otro':MUTED};
+  const catColors={'Check diario':'#0A7A58','Reto semanal':'#956010','Proyecto':'#5550B8','Cuento contrareloj':'#A82020','A dos manos':'#1A6B8A','Otro':MUTED};
   const totalW=Object.values(catWords).reduce((s,v)=>s+v,0)||1;
   const totalM=Object.values(catMins).reduce((s,v)=>s+v,0)||1;
   const cats=Object.keys(catWords);
@@ -5887,6 +5888,17 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
     try{
       const html=edRef.current?.innerHTML||'';
       await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
+      // Save to entries so it counts for daily check / stats
+      try{await DB.upsertEntry({
+        id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
+        user_id:user.id,sk:'dueto',
+        title:duet.title+' (turno '+(duet.turn_count+1)+')',
+        session_label:'A dos manos con '+(isA?duet.name_b:duet.name_a),
+        html,plain:plainTxt,word_count:wc,words_added:wc,
+        elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
+        date:new Date().toISOString().slice(0,10),ts:Date.now(),
+        visibility:'ejercicio',
+      });}catch(e){console.error('duet entry:',e);}
       const newFullHtml=(duet.full_html||'')+html;
       const newFullPlain=(duet.full_plain||'')+(duet.full_plain?'\n\n':'')+plainTxt;
       const patch={
@@ -5907,6 +5919,16 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
       if(plainTxt.trim()&&wc>=duet.min_words){
         const html=edRef.current?.innerHTML||'';
         await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
+        try{await DB.upsertEntry({
+          id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
+          user_id:user.id,sk:'dueto',
+          title:duet.title+' (turno final)',
+          session_label:'A dos manos con '+(isA?duet.name_b:duet.name_a),
+          html,plain:plainTxt,word_count:wc,words_added:wc,
+          elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
+          date:new Date().toISOString().slice(0,10),ts:Date.now(),
+          visibility:'ejercicio',
+        });}catch(e){}
         await DB.updateDuet(duet.id,{
           full_html:(duet.full_html||'')+html,
           full_plain:(duet.full_plain||'')+'\n\n'+plainTxt,
