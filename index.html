@@ -2805,6 +2805,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showSendDuet,setShowSendDuet]=useState(false);
   const [showStartChain,setShowStartChain]=useState(false);
   const [showRetosMenu,setShowRetosMenu]=useState(false);
+  const [retosPos,setRetosPos]=useState(null);
+  const retosBtnRef=useRef(null);
   const [showPrivacyModal,setShowPrivacyModal]=useState(false);
   const [showTermsModal,setShowTermsModal]=useState(false);
   const [showProfileSettings,setShowProfileSettings]=useState(false);
@@ -2850,12 +2852,18 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <button onClick={()=>setShowStats(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Estadísticas</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Equipos</button>
           <div style={{position:'relative'}}>
-            <button onClick={()=>setShowRetosMenu(v=>!v)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,color:NARANJA,cursor:'pointer',fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:4}}>
+            <button ref={retosBtnRef} onClick={()=>{
+              if(!showRetosMenu&&retosBtnRef.current){
+                const r=retosBtnRef.current.getBoundingClientRect();
+                setRetosPos({top:r.bottom+8,left:Math.min(r.left,window.innerWidth-198)});
+              }
+              setShowRetosMenu(v=>!v);
+            }} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,color:NARANJA,cursor:'pointer',fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:4}}>
               Retos <span style={{fontSize:9,opacity:0.7}}>▾</span>
             </button>
-            {showRetosMenu&&<>
+            {showRetosMenu&&retosPos&&<>
               <div onClick={()=>setShowRetosMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
-              <div className="fi" style={{position:'fixed',top:54,width:190,background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,boxShadow:'0 12px 40px -12px rgba(10,27,61,0.3)',overflow:'hidden',zIndex:50}}>
+              <div className="fi" style={{position:'fixed',top:retosPos.top,left:retosPos.left,width:190,background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,boxShadow:'0 12px 40px -12px rgba(10,27,61,0.3)',overflow:'hidden',zIndex:50}}>
                 <button onClick={()=>{setShowSendChallenge(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:NARANJA}}>Contrarreloj</span>
                   <span style={{fontSize:10.5,color:FAINT}}>5 palabras, 1 hora</span>
@@ -3516,54 +3524,62 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 /* ─── EXERCISE LIBRARY ───────────────────────────── */
 const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntry})=>{
   const [tab,setTab]=useState('checks');
-  const checks=library.filter(e=>e.sk==='check').sort((a,b)=>b.ts-a.ts);
-  const retos=library.filter(e=>e.sk==='reto').sort((a,b)=>b.ts-a.ts);
-  const items=tab==='checks'?checks:retos;
-  const getRef=e=>reflections.find(r=>r.sessionTitle===e.title&&r.date===e.date);
+  const [openLesson,setOpenLesson]=useState(null);
+
+  // Catálogo COMPLETO de lecciones de la app (no el historial del usuario)
+  const dailyCatalog=useMemo(()=>{
+    const all=[...EXERCISE_BANK.low,...EXERCISE_BANK.mid,...EXERCISE_BANK.high];
+    const seen=new Set();
+    return all.filter(e=>{if(seen.has(e.id))return false;seen.add(e.id);return true;})
+      .map(e=>({id:e.id,familia:e.family,titulo:e.title,desc:e.desc,mode:e.mode,goal:e.min,teoria:e.teoria}));
+  },[]);
+  const weeklyCatalog=useMemo(()=>WEEKLY_CHALLENGES_64.map(r=>({...r})),[]);
+
+  const items=tab==='checks'?dailyCatalog:weeklyCatalog;
+  const MODE_LABEL={normal:'Normal',rio:'Río',limite:'Límite',tunel:'Túnel',presion:'Presión'};
+
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.45)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-      <div className="fi" style={{background:PAGE_BG,width:'100%',maxWidth:720,maxHeight:'88vh',borderRadius:'16px 16px 0 0',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 -8px 50px -8px rgba(10,27,61,0.25)'}}>
+      {openLesson&&<LeccionModal reto={openLesson} onClose={()=>setOpenLesson(null)}/>}
+      <div className="fi" style={{background:PAGE_BG,width:'100%',maxWidth:900,maxHeight:'88vh',borderRadius:'16px 16px 0 0',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 -8px 50px -8px rgba(10,27,61,0.25)'}}>
         <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,position:'relative',overflow:'hidden'}}>
           <Signo char="¶" size={80} top={-22} left={150} color="azul"/>
-          <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:15,color:TXT,position:'relative',zIndex:1}}>Biblioteca de escritura</div><div style={{flex:1}}/>
+          <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:15,color:TXT,position:'relative',zIndex:1}}>Lecciones de escritura</div><div style={{flex:1}}/>
           <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
         </div>
         <div style={{display:'flex',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,padding:'0 20px'}}>
-          {[['checks','Checks ('+checks.length+')'],['retos','Retos ('+retos.length+')']].map(([t,label])=>(
+          {[['checks','Checks diarios ('+dailyCatalog.length+')'],['retos','Retos semanales ('+weeklyCatalog.length+')']].map(([t,label])=>(
             <button key={t} onClick={()=>setTab(t)} style={{background:'transparent',border:'none',borderBottom:tab===t?'2px solid '+NAVY:'2px solid transparent',padding:'10px 14px',fontSize:13,fontWeight:tab===t?600:400,color:tab===t?TXT:MUTED,cursor:'pointer',marginBottom:-1,fontFamily:"'Source Sans 3',sans-serif"}}>{label}</button>
           ))}
         </div>
-        <div style={{flex:1,overflowY:'auto',padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
-          {items.length===0&&<div style={{textAlign:'center',marginTop:48,color:MUTED,fontSize:13}}>Aún no hay textos en esta sección.</div>}
-          {items.map(e=>{
-            const ref=getRef(e);
-            return(
-              <div key={e.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,overflow:'hidden'}}>
-                <div style={{padding:'12px 16px',display:'flex',gap:10,alignItems:'flex-start'}}>
-                  <div style={{width:7,height:7,borderRadius:'50%',background:{check:AZUL,reto:NARANJA,proyecto:AZULMED}[e.sk]||MUTED,flexShrink:0,marginTop:5}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:600,color:TXT,marginBottom:2}}>{e.title}</div>
-                    <div style={{fontSize:11,color:MUTED,display:'flex',gap:8,flexWrap:'wrap'}}><span>{fmtDate(e.date)}</span><span>·</span><span>{e.wordCount} palabras</span><span>·</span><span>{(MODES.find(m=>m.id===e.mode)||MODES[0]).name}</span></div>
-                  </div>
-                  <div style={{display:'flex',gap:6,flexShrink:0}}>
-                    {ref&&<span style={{background:ref.rating>=7?'rgba(241,90,36,0.1)':'rgba(10,27,61,0.05)',color:ref.rating>=7?NARANJA:MUTED,borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:600}}>{ref.rating}/10</span>}
-                    <button onClick={()=>setReadingEntry&&setReadingEntry(e)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>Leer</button>
-                    <button onClick={()=>{const ref=getRef(e);exportDocx(e,FONTS[e.font_idx||e.fontIdx||0]?.docx||'Georgia',e.editor_size||e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>↓ .docx</button>
-                    <button onClick={()=>{if(window.confirm('¿Eliminar "'+e.title+'"?'))onDelete&&onDelete(e.id)}} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:6,padding:'3px 8px',fontSize:11,color:'rgba(197,34,31,0.5)',cursor:'pointer'}}>✕</button>
+        <div style={{flex:1,overflowY:'auto',padding:'16px 20px 24px'}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:14}}>
+            {items.map((it,i)=>{
+              const modeColor={normal:MUTED,rio:AZUL,limite:AZULMED,tunel:NAVY,presion:NARANJA}[it.mode]||AZUL;
+              return(
+                <div key={it.id} onClick={()=>setOpenLesson(it)} style={{position:'relative',overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,padding:'16px',cursor:'pointer',display:'flex',flexDirection:'column',minHeight:175}}>
+                  <Signo char={String(i+1)} size={56} top={-12} right={8} color="navy"/>
+                  <div style={{position:'relative',display:'flex',flexDirection:'column',flex:1}}>
+                    <div style={{font:"600 9px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:AZULMED,background:'rgba(27,95,170,0.1)',padding:'4px 7px',borderRadius:5,marginBottom:9,alignSelf:'flex-start'}}>{it.familia}</div>
+                    <div style={{fontFamily:'"Playfair Display",serif',fontWeight:600,fontSize:15.5,lineHeight:1.3,color:TXT,marginBottom:6}}>{it.titulo}</div>
+                    <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10,flex:1,display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{it.desc}</div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{font:"600 10px/1 'Source Sans 3'",color:modeColor}}>{MODE_LABEL[it.mode]||it.mode}</span>
+                      <span style={{color:FAINT,fontSize:10}}>·</span>
+                      <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>{it.goal} pal. mín.</span>
+                    </div>
                   </div>
                 </div>
-                {e.plain&&<div style={{padding:'0 16px 10px 33px',fontSize:12,color:'rgba(10,27,61,0.5)',lineHeight:1.6,fontStyle:'italic',overflow:'hidden',display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical'}}>{e.plain.slice(0,300)}</div>}
-                {ref?.notes&&<div style={{padding:'10px 16px',background:'rgba(0,0,0,0.02)',borderTop:'0.5px solid '+BDR,display:'flex',gap:8,alignItems:'flex-start'}}><span style={{fontSize:11,color:MUTED,flexShrink:0}}>💭</span><span style={{fontSize:12,color:MUTED,fontStyle:'italic',lineHeight:1.5}}>"{ref.notes}"</span></div>}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
   );
 };
 
-/* ─── DRIVE PANEL ────────────────────────────────── */
+
 const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
   const {token,expires_at,driveUser,fileId,lastSync,clientId:sc}=driveState;
   const connected=token&&expires_at>Date.now()+30000;
