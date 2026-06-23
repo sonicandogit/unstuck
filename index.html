@@ -1516,9 +1516,9 @@ const DB = {
       .select('*, profiles(name, username, initials, accent, bg)')
       .eq('visibility', 'abierto')
       .not('plain', 'is', null)
-      .order('created_at', { ascending: false })
+      .order('ts', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (error) throw error;
+    if (error) { console.error('getPublicEntries:', error.message); throw error; }
     return data || [];
   },
   getFriendsEntries: async (uid) => {
@@ -1534,9 +1534,9 @@ const DB = {
       .eq('visibility', 'amigos')
       .in('user_id', followingIds)
       .not('plain', 'is', null)
-      .order('created_at', { ascending: false })
+      .order('ts', { ascending: false })
       .limit(50);
-    if (error) throw error;
+    if (error) { console.error('getFriendsEntries:', error.message); throw error; }
     return data || [];
   },
   updateVisibility: async (entryId, visibility) => {
