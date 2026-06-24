@@ -16,6 +16,7 @@
 <link rel="manifest" href="manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#FBF8F0">
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/light/style.css">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{height:100%;height:var(--app-height,100dvh);}body{height:100%;overflow:hidden}
@@ -6325,11 +6326,11 @@ const getExercises=energy=>{if(energy<=3)return EXERCISE_BANK.low;if(energy<=6)r
 const pickExercise=(energy,usedIds=[])=>{const bank=getExercises(energy);const avail=bank.filter(e=>!usedIds.includes(e.id));return avail.length?avail[Math.floor(Math.random()*avail.length)]:bank[Math.floor(Math.random()*bank.length)]};
 const PROJECT_TYPES=['Novela','Relato corto','Poemario','Ensayo','Microrrelatos','Guión','Diario creativo'];
 const MODES=[
-  {id:'normal',name:'Normal',sym:'○',color:'#44433F',short:'Edición libre',full:'Sin restricciones. Escribe y edita con total libertad.'},
-  {id:'rio',name:'Río',sym:'∿',color:'#1E9BF0',short:'Sin borrar nada',full:'Una vez escritas, las letras no se pueden borrar.'},
-  {id:'limite',name:'Límite',sym:'◁',color:'#1B5FAA',short:'Intentos de borrado',full:'Cursor libre pero borrar tiene coste: cada sesión de borrado gasta un intento.'},
-  {id:'tunel',name:'Túnel',sym:'▣',color:'#0A1B3D',short:'Solo últimas 3 frases',full:'Los párrafos anteriores se desvanecen. Solo ves el párrafo actual con claridad.'},
-  {id:'presion',name:'Presión',sym:'⚡',color:'#F15A24',short:'Para y pierdes párrafo',full:'Si te detienes más de N segundos, el último párrafo desaparece.'},
+  {id:'normal',name:'Normal',sym:'○',icon:'circle',color:'#44433F',short:'Edición libre',full:'Sin restricciones. Escribe y edita con total libertad.'},
+  {id:'rio',name:'Río',sym:'∿',icon:'waves',color:'#1E9BF0',short:'Sin borrar nada',full:'Una vez escritas, las letras no se pueden borrar.'},
+  {id:'limite',name:'Límite',sym:'◁',icon:'pen',color:'#1B5FAA',short:'Intentos de borrado',full:'Cursor libre pero borrar tiene coste: cada sesión de borrado gasta un intento.'},
+  {id:'tunel',name:'Túnel',sym:'▣',icon:'binoculars',color:'#0A1B3D',short:'Solo últimas 3 frases',full:'Los párrafos anteriores se desvanecen. Solo ves el párrafo actual con claridad.'},
+  {id:'presion',name:'Presión',sym:'⚡',icon:'lightning',color:'#F15A24',short:'Para y pierdes párrafo',full:'Si te detienes más de N segundos, el último párrafo desaparece.'},
 ];
 const FONTS=[
   {label:'Lora',value:"Lora,'Georgia',serif",docx:'Georgia'},
@@ -6373,6 +6374,12 @@ const DONE_BG='var(--done-bg)';      // racha semanal: día cumplido (navy claro
 const TODAY_BG='var(--today-bg)';    // racha semanal: relleno de hoy (transparente claro / naranja oscuro)
 const TODAY_TXT='var(--today-text)'; // contraste de texto sobre el círculo de hoy
 const PROSE_TEXT='var(--prose-text)'; // tinta de la prosa larga (editor)
+
+// Icono Phosphor Light — trazo 1.5px, una sola línea, vocación editorial
+// Uso: <Icon name="chart-bar" size={16} color={MUTED}/>
+const Icon=({name,size=16,color='currentColor',style={}})=>(
+  <i className={'ph-light ph-'+name} style={{fontSize:size,color,lineHeight:1,display:'inline-block',...style}} aria-hidden="true"/>
+);
 const HEADER_NAVY_BG='var(--header-navy-bg)'; // cabeceras oscuras (perfil, etc): navy claro / azulmed oscuro
 const SESSION_BTN_BG='var(--session-btn-bg)';   // botones de Check/Reto/Cuento/Proyecto: navy claro / azul oscuro
 const SESSION_BTN_TXT='var(--session-btn-text)';
@@ -6598,7 +6605,7 @@ const Btn=({children,onClick,variant='default',disabled,full,small,style:x={}})=
 const Chip=({children})=><code style={{background:'rgba(0,0,0,0.06)',border:'0.5px solid '+BDR,borderRadius:4,padding:'1px 6px',fontSize:11,fontFamily:"'Courier New',monospace",wordBreak:'break-all'}}>{children}</code>;
 const AlignIcon=({dir,col})=>{const rows={left:[[0,14],[0,9],[0,14],[0,6]],center:[[0,14],[2,12],[0,14],[4,10]],right:[[0,14],[5,14],[0,14],[8,14]]}[dir];return <svg width="14" height="11" viewBox="0 0 14 11" fill="none">{rows.map(([x,x2],i)=><rect key={i} x={x} y={i*3} width={x2-x} height="1.5" rx="0.75" fill={col}/>)}</svg>};
 const Sep=()=><div style={{width:1,height:14,background:BDR,margin:'0 3px',flexShrink:0}}/>;
-const ModeBadge=({modeId,small})=>{const m=MODES.find(x=>x.id===modeId)||MODES[0];return <span style={{display:'inline-flex',alignItems:'center',gap:4,background:m.color+'12',border:'0.5px solid '+m.color+'30',borderRadius:5,padding:small?'2px 7px':'3px 9px',fontSize:small?10:11,color:m.color,fontWeight:500}}>{m.sym} {m.name}</span>};
+const ModeBadge=({modeId,small})=>{const m=MODES.find(x=>x.id===modeId)||MODES[0];return <span style={{display:'inline-flex',alignItems:'center',gap:4,background:m.color+'12',border:'0.5px solid '+m.color+'30',borderRadius:5,padding:small?'2px 7px':'3px 9px',fontSize:small?10:11,color:m.color,fontWeight:500,display:'inline-flex',alignItems:'center',gap:4}}><Icon name={m.icon} size={small?11:12}/>{m.name}</span>};
 const StatCard=({label,value,sub,accent,className})=>(
   <div className={className} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:11,padding:'13px 14px',textAlign:'center'}}>
     <div style={{fontFamily:'"Playfair Display",serif',fontSize:23,fontWeight:700,color:accent||TXT,letterSpacing:'-0.02em'}}>{value}</div>
@@ -6887,10 +6894,10 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:18,letterSpacing:'-0.01em',color:TXT,flexShrink:0}}>Pretexto</div>
         <div style={{flex:1,minWidth:10}}/>
         <div className="topbar-nav" style={{display:'flex',alignItems:'center',gap:18}}>
-          <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Biblioteca</button>
-          <button onClick={()=>setShowAmigos(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Amigos</button>
-          <button onClick={()=>setShowStats(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Estadísticas</button>
-          <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Equipos</button>
+          <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="book-open"/>Biblioteca</button>
+          <button onClick={()=>setShowAmigos(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users"/>Amigos</button>
+          <button onClick={()=>setShowStats(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="chart-bar"/>Estadísticas</button>
+          <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users-three"/>Equipos</button>
           <div style={{position:'relative'}}>
             <button ref={retosBtnRef} onClick={()=>{
               if(!showRetosMenu&&retosBtnRef.current){
@@ -6899,29 +6906,29 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               }
               setShowRetosMenu(v=>!v);
             }} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,color:NARANJA,cursor:'pointer',fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:4}}>
-              Retos <span style={{fontSize:9,opacity:0.7}}>▾</span>
+              <Icon name="lightning"/>Retos <span style={{fontSize:9,opacity:0.7}}>▾</span>
             </button>
             {showRetosMenu&&retosPos&&<>
               <div onClick={()=>setShowRetosMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
               <div className="fi" style={{position:'fixed',top:retosPos.top,left:retosPos.left,width:190,background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,boxShadow:'0 12px 40px -12px rgba(10,27,61,0.3)',overflow:'hidden',zIndex:50}}>
                 <button onClick={()=>{setShowLibChecks(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:AZULMED}}>Checks</span>
+                  <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="lightbulb"/>Checks</span>
                   <span style={{fontSize:10.5,color:FAINT}}>128 ejercicios diarios</span>
                 </button>
                 <button onClick={()=>{setShowLibSemanales(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:AZULMED}}>Semanales</span>
+                  <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="lightbulb"/>Semanales</span>
                   <span style={{fontSize:10.5,color:FAINT}}>128 retos de la semana</span>
                 </button>
                 <button onClick={()=>{setShowSendChallenge(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:NARANJA}}>Contrarreloj</span>
+                  <span style={{fontSize:12.5,fontWeight:600,color:NARANJA,display:'flex',alignItems:'center',gap:6}}><Icon name="timer"/>Contrarreloj</span>
                   <span style={{fontSize:10.5,color:FAINT}}>5 palabras, 1 hora</span>
                 </button>
                 <button onClick={()=>{setShowSendDuet(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:AZUL}}>A dos manos</span>
+                  <span style={{fontSize:12.5,fontWeight:600,color:AZUL,display:'flex',alignItems:'center',gap:6}}><Icon name="hands-clapping"/>A dos manos</span>
                   <span style={{fontSize:10.5,color:FAINT}}>Turnos con una persona</span>
                 </button>
                 <button onClick={()=>{setShowStartChain(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:'#1A6B8A'}}>Encadenados</span>
+                  <span style={{fontSize:12.5,fontWeight:600,color:'#1A6B8A',display:'flex',alignItems:'center',gap:6}}><Icon name="link"/>Encadenados</span>
                   <span style={{fontSize:10.5,color:FAINT}}>Capítulos de 600+ palabras</span>
                 </button>
               </div>
@@ -6948,21 +6955,21 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
                 </div>
                 {/* Menu items */}
                 {[
-                  {icon:'✏️',label:'Editar perfil',action:()=>{setShowProfileSettings(true);setShowUserMenu(false);}},
-                  {icon:'📨',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
-                  {icon:'⚙',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);},dot:getApiKey(user.id)?AZUL:null},
-                  {icon:'↓',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
-                  {icon:'🔗',label:'Mi perfil público',action:()=>{setShowProfile(true);setShowUserMenu(false);}},
+                  {icon:'sliders-horizontal',label:'Editar perfil',action:()=>{setShowProfileSettings(true);setShowUserMenu(false);}},
+                  {icon:'tray',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
+                  {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);},dot:getApiKey(user.id)?AZUL:null},
+                  {icon:'download-simple',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
+                  {icon:'link-simple',label:'Mi perfil público',action:()=>{setShowProfile(true);setShowUserMenu(false);}},
                 ].map(item=>(
                   <button key={item.label} onClick={item.action} style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                    <span style={{fontSize:14,width:20,textAlign:'center',flexShrink:0}}>{item.icon}</span>
+                    <span style={{width:20,textAlign:'center',flexShrink:0,display:'inline-flex',justifyContent:'center'}}><Icon name={item.icon} size={16} color={MUTED}/></span>
                     <span style={{fontSize:12,color:TXT,flex:1}}>{item.label}</span>
                     {item.badge>0&&<span style={{background:NARANJA,color:'#fff',borderRadius:10,padding:'1px 6px',fontSize:10,fontWeight:700}}>{item.badge}</span>}
                     {item.dot&&<span style={{width:7,height:7,borderRadius:'50%',background:item.dot,flexShrink:0}}/>}
                   </button>
                 ))}
                 <button onClick={()=>{onLogout();setShowUserMenu(false);}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',textAlign:'left',borderBottom:'1px solid '+BDR,fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:14,width:20,textAlign:'center'}}>←</span>
+                  <span style={{width:20,textAlign:'center',display:'inline-flex',justifyContent:'center'}}><Icon name="sign-out" size={16} color={MUTED}/></span>
                   <span style={{fontSize:12,color:MUTED}}>Cerrar sesión</span>
                 </button>
                 <div style={{padding:'8px 14px',display:'flex',gap:12}}>
@@ -7052,7 +7059,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <div className="fu" style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'16px 16px',display:'flex',flexDirection:'column',justifyContent:'space-between',position:'relative',overflow:'hidden'}}>
             <Signo char="!" size={100} top={-18} right={-4} color="azul"/>
             <div style={{display:'flex',alignItems:'flex-start',gap:8,position:'relative',zIndex:1}}>
-              <span style={{fontSize:26}}>🔥</span>
+              <Icon name="fire" size={26} color={NARANJA}/>
               <div style={{position:'relative'}}>
                 <div style={{fontFamily:'"Playfair Display",serif',fontSize:30,fontWeight:700,color:stats.streak>0?NARANJA:FAINT,letterSpacing:'-0.03em',lineHeight:1,position:'relative',display:'inline-block'}}>
                   {stats.streak}
@@ -7174,7 +7181,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
                 const cycle={privado:'amigos',amigos:'abierto',abierto:'privado'};
                 onChangeVisibility&&onChangeVisibility(e.id,cycle[v]||'privado');
               }} title="Cambiar visibilidad" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,cursor:'pointer',flexShrink:0}}>
-                {(e.visibility||'privado')==='privado'?'🔒':(e.visibility==='amigos'?'👥':'🌐')}
+                <Icon name={(e.visibility||'privado')==='privado'?'lock-simple':(e.visibility==='amigos'?'users':'globe')} size={12}/>
               </button>
               <button onClick={()=>onEditEntry&&onEditEntry(e)} title="Editar" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>✏</button>
               <button onClick={()=>{const ref=reflections.find(r=>r.sessionTitle===e.title&&r.date===e.date);exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>↓</button>
@@ -7266,7 +7273,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
           <div style={{padding:'0 18px 18px'}}>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
               <ModeBadge modeId={checkExercise.mode}/>
-              <button onClick={()=>openLeccion(checkExercise)} style={{background:'rgba(30,155,240,0.08)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#1E9BF0',cursor:'pointer'}}>📖 Lección</button>
+              <button onClick={()=>openLeccion(checkExercise)} style={{background:'rgba(30,155,240,0.08)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#1E9BF0',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}><Icon name="book-open" size={11}/>Lección</button>
               {checkDone&&<span style={{fontSize:11,color:'#1E9BF0',fontWeight:500,background:'rgba(30,155,240,0.09)',border:'0.5px solid rgba(30,155,240,0.22)',borderRadius:5,padding:'2px 8px'}}>✓ Hecho hoy · {checkWc} pal.</span>}
             </div>
             <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:16}}>{checkExercise.desc}</p>
@@ -7290,7 +7297,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
               <>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
                   <ModeBadge modeId={reto.mode||'tunel'}/>
-                  <button onClick={()=>openLeccion(reto)} style={{background:'rgba(30,155,240,0.08)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#1E9BF0',cursor:'pointer'}}>📖 Lecciones</button>
+                  <button onClick={()=>openLeccion(reto)} style={{background:'rgba(30,155,240,0.08)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:5,padding:'2px 8px',fontSize:10,color:'#1E9BF0',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}}><Icon name="book-open" size={11}/>Lecciones</button>
                   <button onClick={()=>{setRetoEdit({title:reto.titulo||reto.title,desc:reto.desc,goal:reto.goal});setEditingReto(true)}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 8px',fontSize:10,color:MUTED,cursor:'pointer'}}>✎ Personalizar</button>
                 </div>
                 <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:14}}>{reto.desc}</p>
@@ -7323,7 +7330,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
           <div style={{padding:'14px 16px'}}>
             <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:14}}>Escribe un cuento usando 5 palabras al azar antes de que se agote 1 hora. Solo puedes publicar si usas las 5 palabras y superas los 2.500 caracteres.</p>
             <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:16}}>
-              {['⏱ 1 hora','5 palabras obligatorias','2.500 car. mínimo','Solo se puede publicar si completas todo'].map(t=><span key={t} style={{fontSize:11,background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:5,padding:'2px 8px',color:'#A82020'}}>{t}</span>)}
+              {[['timer','1 hora'],[null,'5 palabras obligatorias'],[null,'2.500 car. mínimo'],[null,'Solo se puede publicar si completas todo']].map(([ic,t])=><span key={t} style={{fontSize:11,background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:5,padding:'2px 8px',color:'#A82020',display:'inline-flex',alignItems:'center',gap:4}}>{ic&&<Icon name={ic} size={11}/>}{t}</span>)}
             </div>
             <button onClick={()=>onStart({type:'cuento'})} style={{width:'100%',height:42,background:SESSION_BTN_BG,border:'none',borderRadius:9,fontSize:13.5,fontWeight:600,color:SESSION_BTN_TXT,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Empezar cuento →</button>
           </div>
@@ -7337,10 +7344,10 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
             {!selectedGenre&&!creatingProject&&(<>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
                 {[
-                  {emoji:'📝',label:'Poesía', types:['Poemario']},
-                  {emoji:'📖',label:'Relato', types:['Relato corto','Microrrelatos']},
-                  {emoji:'📚',label:'Novela', types:['Novela','Guión']},
-                  {emoji:'🖊', label:'Ensayo', types:['Ensayo','Diario creativo']},
+                  {emoji:'feather',label:'Poesía', types:['Poemario']},
+                  {emoji:'book-open',label:'Relato', types:['Relato corto','Microrrelatos']},
+                  {emoji:'books',label:'Novela', types:['Novela','Guión']},
+                  {emoji:'pen-nib', label:'Ensayo', types:['Ensayo','Diario creativo']},
                 ].map(({emoji,label,types})=>{
                   const projs=projects.filter(p=>types.includes(p.type));
                   return(
@@ -7354,7 +7361,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
                       }
                     }}
                     style={{background:'rgba(30,155,240,0.04)',border:'0.5px solid rgba(30,155,240,0.15)',borderRadius:10,padding:'12px 10px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:4}}>
-                      <span style={{fontSize:20}}>{emoji}</span>
+                      <Icon name={emoji} size={20} color={AZUL}/>
                       <span style={{fontSize:12,fontWeight:600,color:TXT}}>{label}</span>
                       <span style={{fontSize:10,color:MUTED}}>{projs.length} proyecto{projs.length!==1?'s':''}</span>
                     </button>
@@ -7548,13 +7555,13 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
             {saveToLib&&(
               <div style={{display:'flex',gap:6,marginBottom:10}}>
                 {[
-                  {v:'privado',icon:'🔒',label:'Privado',hint:'Solo tú'},
-                  {v:'amigos',icon:'👥',label:'Amigos',hint:'Quienes te siguen'},
-                  {v:'abierto',icon:'🌐',label:'Público',hint:'Toda la comunidad'},
+                  {v:'privado',icon:'lock-simple',label:'Privado',hint:'Solo tú'},
+                  {v:'amigos',icon:'users',label:'Amigos',hint:'Quienes te siguen'},
+                  {v:'abierto',icon:'globe',label:'Público',hint:'Toda la comunidad'},
                 ].map(o=>(
                   <button key={o.v} onClick={()=>setPubVis(o.v)}
                     style={{flex:1,background:pubVis===o.v?'rgba(30,155,240,0.08)':'transparent',border:'0.5px solid '+(pubVis===o.v?'rgba(30,155,240,0.4)':BDR),borderRadius:9,padding:'8px 6px',cursor:'pointer',textAlign:'center'}}>
-                    <div style={{fontSize:15}}>{o.icon}</div>
+                    <div style={{display:'flex',justifyContent:'center'}}><Icon name={o.icon} size={15}/></div>
                     <div style={{fontSize:11,fontWeight:pubVis===o.v?600:400,color:pubVis===o.v?'#1E9BF0':TXT}}>{o.label}</div>
                     <div style={{fontSize:9,color:FAINT}}>{o.hint}</div>
                   </button>
@@ -7733,7 +7740,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
                       <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}><code style={{fontSize:10,wordBreak:'break-all',flex:1}}>{origin||'(usa HTTP)'}</code>{origin&&<button onClick={()=>navigator.clipboard?.writeText(origin)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 7px',fontSize:10,cursor:'pointer',color:MUTED,flexShrink:0}}>Copiar</button>}</div>
                       <div style={{fontSize:10,color:'#1B5FAA'}}>⚠ No necesitas URI de redirección. Activa también la API de Drive en Google Cloud.</div>
                     </div><div style={{display:'flex',gap:6,marginTop:8}}><Btn onClick={()=>setStep(2)} small>← Atrás</Btn><Btn variant="primary" onClick={()=>setStep(4)} small>Listo →</Btn></div></>},
-              {n:4,t:'Pega tu Client ID',c:<><input type="text" value={cid} onChange={e=>setCid(e.target.value)} placeholder="1234….apps.googleusercontent.com" style={{marginBottom:10,width:'100%'}}/><div style={{display:'flex',gap:6}}><Btn onClick={()=>setStep(3)} small>← Atrás</Btn><Btn variant="blue" onClick={connect} disabled={!!busy||!cid.trim()}>{busy==='c'?'Conectando…':'🔑 Conectar con Google'}</Btn></div>{busy==='c'&&<div style={{marginTop:10,background:'rgba(30,155,240,0.07)',border:'0.5px solid rgba(30,155,240,0.22)',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#1E9BF0'}}>Autoriza en la ventana de Google.</div>}</>},
+              {n:4,t:'Pega tu Client ID',c:<><input type="text" value={cid} onChange={e=>setCid(e.target.value)} placeholder="1234….apps.googleusercontent.com" style={{marginBottom:10,width:'100%'}}/><div style={{display:'flex',gap:6}}><Btn onClick={()=>setStep(3)} small>← Atrás</Btn><Btn variant="blue" onClick={connect} disabled={!!busy||!cid.trim()}>{busy==='c'?'Conectando…':<><Icon name="key" size={13}/> Conectar con Google</>}</Btn></div>{busy==='c'&&<div style={{marginTop:10,background:'rgba(30,155,240,0.07)',border:'0.5px solid rgba(30,155,240,0.22)',borderRadius:8,padding:'9px 12px',fontSize:12,color:'#1E9BF0'}}>Autoriza en la ventana de Google.</div>}</>},
             ].map(({n,t,c})=>(<div key={n} style={{display:'flex',gap:12,opacity:step===n?1:step>n?0.55:0.3}}><div style={{flexShrink:0,width:24,height:24,borderRadius:'50%',background:step>n?'#1E9BF0':step===n?TXT:'rgba(26,25,22,0.1)',display:'flex',alignItems:'center',justifyContent:'center',color:step>=n?'#fff':MUTED,fontSize:step>n?12:10,fontWeight:600}}>{step>n?'✓':n}</div><div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:step===n?8:0}}>{t}</div>{step===n&&c}</div></div>))}
           </>)}
         </div>
@@ -7972,7 +7979,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             <span style={{fontSize:13,color:'#1E9BF0',fontWeight:500}}>✓ Completado — {wc} palabras</span>
             <div style={{display:'flex',gap:6}}><Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn><Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn></div>
           </div>}
-          {toast&&<div style={{padding:'6px 18px',background:toast.color+'0C',borderBottom:'0.5px solid '+toast.color+'22',display:'flex',alignItems:'center',gap:8,flexShrink:0}}><span style={{fontSize:11,fontWeight:600,color:toast.color}}>{toast.sym} {toast.name}</span><span style={{fontSize:12,color:MUTED}}>{toast.full}</span></div>}
+          {toast&&<div style={{padding:'6px 18px',background:toast.color+'0C',borderBottom:'0.5px solid '+toast.color+'22',display:'flex',alignItems:'center',gap:8,flexShrink:0}}><span style={{fontSize:11,fontWeight:600,color:toast.color,display:'inline-flex',alignItems:'center',gap:5}}><Icon name={toast.icon} size={12}/>{toast.name}</span><span style={{fontSize:12,color:MUTED}}>{toast.full}</span></div>}
           {idleWarn&&ab==='presion'&&<div style={{padding:'6px 18px',background:'rgba(168,32,32,0.07)',borderBottom:'0.5px solid rgba(168,32,32,0.16)',fontSize:12,color:'#A82020',flexShrink:0}}>⚡ {idleLimit-idle}s antes de perder el párrafo</div>}
 
           {/* TOOLBAR */}
@@ -8011,7 +8018,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           {/* MOBILE MODE BAR */}
           <div className="mob-mode-bar" style={{display:'none',borderTop:'0.5px solid '+BDR,background:'#F9F8F5',padding:'6px 10px',gap:6,flexShrink:0,overflowX:'auto',WebkitOverflowScrolling:'touch'}}>
             <style>{'.mob-mode-bar{display:none!important}@media(max-width:600px){.mob-mode-bar{display:flex!important}.desk-only{display:none!important}}'}</style>
-            {MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} style={{background:ab===m.id?m.color+'15':'rgba(0,0,0,0.04)',border:'0.5px solid',borderColor:ab===m.id?m.color+'50':BDR,color:ab===m.id?m.color:MUTED,fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontWeight:ab===m.id?600:400,flexShrink:0,whiteSpace:'nowrap'}}>{m.sym} {m.name}</button>)}
+            {MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} style={{background:ab===m.id?m.color+'15':'rgba(0,0,0,0.04)',border:'0.5px solid',borderColor:ab===m.id?m.color+'50':BDR,color:ab===m.id?m.color:MUTED,fontSize:12,padding:'6px 12px',borderRadius:6,cursor:'pointer',fontWeight:ab===m.id?600:400,flexShrink:0,whiteSpace:'nowrap',display:'inline-flex',alignItems:'center',gap:5}}><Icon name={m.icon} size={12}/>{m.name}</button>)}
           </div>
           {/* BOTTOM BAR */}
           <div style={{height:38,borderTop:'1px solid '+BDR,background:CARD_BG,display:'flex',alignItems:'center',padding:'0 10px',gap:6,flexShrink:0}}>
@@ -8038,8 +8045,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
               </div>
             </div>}
             <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:7}}>Modo</div>
-            {lockedMode?(()=>{const m=MODES.find(m=>m.id===lockedMode);return<div style={{background:m.color+'0E',border:'0.5px solid '+m.color+'28',borderRadius:8,padding:'9px 11px',marginBottom:8}}><div style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}><span style={{fontSize:12,color:m.color}}>{m.sym}</span><div><div style={{fontSize:11,fontWeight:500,color:m.color}}>{m.name}</div><div style={{fontSize:10,color:FAINT}}>Asignado 🔒</div></div></div><div style={{fontSize:11,color:MUTED,lineHeight:1.4}}>{m.full}</div></div>})()
-              :<div style={{display:'flex',flexDirection:'column',gap:3}}>{MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} style={{background:ab===m.id?m.color+'10':'transparent',border:'0.5px solid',borderColor:ab===m.id?m.color+'30':BDR,borderRadius:7,padding:'6px 8px',cursor:'pointer',textAlign:'left',display:'flex',alignItems:'flex-start',gap:6}}><span style={{fontSize:12,color:ab===m.id?m.color:MUTED,flexShrink:0}}>{m.sym}</span><div><div style={{fontSize:11,fontWeight:ab===m.id?500:400,color:ab===m.id?m.color:TXT}}>{m.name}</div><div style={{fontSize:10,color:MUTED,lineHeight:1.3}}>{m.short}</div></div></button>)}</div>}
+            {lockedMode?(()=>{const m=MODES.find(m=>m.id===lockedMode);return<div style={{background:m.color+'0E',border:'0.5px solid '+m.color+'28',borderRadius:8,padding:'9px 11px',marginBottom:8}}><div style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}><Icon name={m.icon} size={13} color={m.color}/><div><div style={{fontSize:11,fontWeight:500,color:m.color}}>{m.name}</div><div style={{fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:3}}>Asignado<Icon name="lock-simple" size={10}/></div></div></div><div style={{fontSize:11,color:MUTED,lineHeight:1.4}}>{m.full}</div></div>})()
+              :<div style={{display:'flex',flexDirection:'column',gap:3}}>{MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} style={{background:ab===m.id?m.color+'10':'transparent',border:'0.5px solid',borderColor:ab===m.id?m.color+'30':BDR,borderRadius:7,padding:'6px 8px',cursor:'pointer',textAlign:'left',display:'flex',alignItems:'flex-start',gap:6}}><Icon name={m.icon} size={13} color={ab===m.id?m.color:MUTED} style={{flexShrink:0}}/><div><div style={{fontSize:11,fontWeight:ab===m.id?500:400,color:ab===m.id?m.color:TXT}}>{m.name}</div><div style={{fontSize:10,color:MUTED,lineHeight:1.3}}>{m.short}</div></div></button>)}</div>}
             {!lockedMode&&ab==='limite'&&<div style={{marginTop:6,padding:'9px 10px 8px',background:'rgba(27,95,170,0.06)',border:'0.5px solid rgba(27,95,170,0.22)',borderRadius:8}}>
               <div style={{marginBottom:9}}><div style={{fontSize:10,color:'#1B5FAA',marginBottom:4,fontWeight:500,display:'flex',justifyContent:'space-between'}}><span>Chars/intento</span><strong>{limChars}</strong></div><input type="range" min={5} max={80} value={limChars} onChange={e=>{setLimChars(+e.target.value);resetLim()}} style={{accentColor:'#1B5FAA'}}/></div>
               <div><div style={{fontSize:10,color:'#1B5FAA',marginBottom:4,fontWeight:500,display:'flex',justifyContent:'space-between'}}><span>Intentos</span><strong>{limDels}</strong></div><input type="range" min={1} max={10} value={limDels} onChange={e=>{const v=+e.target.value;setLimDels(v);setDelsLeft(v);isDel.current=false;setCharsInDel(0)}} style={{accentColor:'#1B5FAA'}}/></div>
@@ -8189,7 +8196,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
       {/* Header */}
       <div style={{background:'#0A1B3D',color:'#fff',flexShrink:0}}>
         {challenge&&<div style={{background:'rgba(255,255,255,0.07)',padding:'7px 14px',fontSize:11,color:'rgba(255,255,255,0.6)',display:'flex',alignItems:'center',gap:6}}>
-          <span>⏱</span><span>Reto de <strong style={{color:'rgba(255,255,255,0.85)'}}>@{challenge.from_username||challenge.from_name}</strong>{challenge.message&&<span style={{fontStyle:'italic'}}> · "{challenge.message}"</span>}</span>
+          <Icon name="timer" size={13}/><span>Reto de <strong style={{color:'rgba(255,255,255,0.85)'}}>@{challenge.from_username||challenge.from_name}</strong>{challenge.message&&<span style={{fontStyle:'italic'}}> · "{challenge.message}"</span>}</span>
         </div>}
         {/* Top bar */}
         <div style={{display:'flex',alignItems:'center',padding:'0 14px',height:44,borderBottom:'0.5px solid rgba(255,255,255,0.1)'}}>
@@ -8409,7 +8416,8 @@ const ReceivedChallengesBanner=({challenges,onAccept,onDismiss})=>{
     <div className="fu" style={{background:HEADER_NAVY_BG,borderRadius:13,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,alignItems:'flex-start',position:'relative',overflow:'hidden',boxShadow:'0 8px 24px -10px rgba(10,27,61,0.35)'}}>
       <Signo char="!" size={90} top={-22} right={-6} color="naranja"/>
       <div style={{flex:1}}>
-        <div style={{fontSize:10,fontWeight:500,color:'rgba(255,255,255,0.4)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:500,color:'rgba(255,255,255,0.4)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>
+          <Icon name="timer" size={12} color="#F15A24"/>
           Reto contrareloj de <span style={{color:'rgba(255,255,255,0.7)'}}>@{ch.from_username||ch.from_name}</span>
           {challenges.length>1&&<span style={{marginLeft:6,background:'rgba(255,255,255,0.1)',borderRadius:10,padding:'1px 7px',fontSize:9}}>+{challenges.length-1} más</span>}
         </div>
@@ -8536,7 +8544,7 @@ const TeamsScreen=({user,onClose})=>{
 
         {/* Intro */}
         {teams.length===0&&!loading&&<div className="fu" style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:28,marginBottom:20,textAlign:'center',position:'relative',zIndex:1}}>
-          <div style={{fontSize:36,marginBottom:12}}>✍️</div>
+          <div style={{marginBottom:12,display:'flex',justifyContent:'center'}}><Icon name="users-three" size={36} color={AZUL}/></div>
           <div style={{fontSize:18,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:8}}>Escribe en equipo</div>
           <p style={{fontSize:13,color:MUTED,lineHeight:1.75,maxWidth:400,margin:'0 auto 20px'}}>
             Los equipos te permiten compartir un reto semanal con otras personas, ver sus respuestas y comprometeros juntos a escribir con regularidad. Cada semana un miembro diferente propone el reto.
@@ -8615,7 +8623,7 @@ const CreateTeam=({user,onBack,onCreated})=>{
           <div style={{position:'relative',display:'inline-block'}}>
             {avatar
               ?<img src={avatar} style={{width:80,height:80,borderRadius:'50%',objectFit:'cover',border:'0.5px solid '+BDR}}/>
-              :<div style={{width:80,height:80,borderRadius:'50%',background:'rgba(30,155,240,0.1)',border:'2px dashed rgba(30,155,240,0.3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28}}>👥</div>}
+              :<div style={{width:80,height:80,borderRadius:'50%',background:'rgba(30,155,240,0.1)',border:'2px dashed rgba(30,155,240,0.3)',display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="users" size={28} color={AZUL}/></div>}
             <label style={{position:'absolute',bottom:0,right:0,background:TXT,border:'none',borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:12,color:'#fff'}}>
               +<input type="file" accept="image/*" onChange={pickImg} style={{display:'none'}}/>
             </label>
@@ -9105,7 +9113,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange})=>{
               {isOwn&&(
                 <button onClick={cycleVis} title="Cambiar visibilidad"
                   style={{display:'flex',alignItems:'center',gap:5,border:'0.5px solid '+BDR,borderRadius:14,padding:'3px 10px',background:'rgba(0,0,0,0.03)',cursor:'pointer',fontSize:11,fontWeight:500}}>
-                  <span>{vis==='privado'?'🔒 Privado':vis==='amigos'?'👥 Amigos':'🌐 Público'}</span>
+                  <span style={{display:'inline-flex',alignItems:'center',gap:5}}><Icon name={vis==='privado'?'lock-simple':vis==='amigos'?'users':'globe'} size={12}/>{vis==='privado'?'Privado':vis==='amigos'?'Amigos':'Público'}</span>
                   <span style={{color:FAINT,fontSize:9}}>→ {vis==='privado'?'Amigos':vis==='amigos'?'Público':'Privado'}</span>
                 </button>
               )}
@@ -9493,8 +9501,8 @@ const UserSearchPanel=({user,following,onFollow,teams,onAddToTeam})=>{
                 </button>
                 {/* Add to team */}
                 {teams&&teams.length>0&&<div style={{position:'relative'}}>
-                  <button onClick={()=>setAddingToTeam(addingToTeam===u.id?null:u.id)} style={{background:'rgba(241,90,36,0.08)',border:'1px solid rgba(241,90,36,0.28)',borderRadius:7,padding:'5px 10px',fontSize:11,fontWeight:600,color:NARANJA,cursor:'pointer'}}>
-                    👥 Equipo
+                  <button onClick={()=>setAddingToTeam(addingToTeam===u.id?null:u.id)} style={{background:'rgba(241,90,36,0.08)',border:'1px solid rgba(241,90,36,0.28)',borderRadius:7,padding:'5px 10px',fontSize:11,fontWeight:600,color:NARANJA,cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>
+                    <Icon name="users-three" size={12}/>Equipo
                   </button>
                   {addingToTeam===u.id&&<div className="fi" style={{position:'absolute',right:0,top:'calc(100% + 4px)',background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,boxShadow:'0 12px 30px -8px rgba(10,27,61,0.25)',overflow:'hidden',zIndex:10,minWidth:160}}>
                     {teams.map(t=>(
@@ -9537,19 +9545,19 @@ const UserSearchPanel=({user,following,onFollow,teams,onAddToTeam})=>{
 /* ─── VISIBILITY BADGE ───────────────────────────── */
 const VisibilityBadge=({v,small})=>{
   const cfg={
-    privado:{label:'Privado',icon:'🔒',bg:'rgba(10,27,61,0.05)',c:MUTED,bd:BDR},
-    amigos:{label:'Amigos',icon:'👥',bg:'rgba(27,95,170,0.08)',c:AZULMED,bd:'rgba(27,95,170,0.28)'},
-    abierto:{label:'Abierto',icon:'🌐',bg:'rgba(241,90,36,0.08)',c:NARANJA,bd:'rgba(241,90,36,0.28)'},
+    privado:{label:'Privado',icon:'lock-simple',bg:'rgba(10,27,61,0.05)',c:MUTED,bd:BDR},
+    amigos:{label:'Amigos',icon:'users',bg:'rgba(27,95,170,0.08)',c:AZULMED,bd:'rgba(27,95,170,0.28)'},
+    abierto:{label:'Abierto',icon:'globe',bg:'rgba(241,90,36,0.08)',c:NARANJA,bd:'rgba(241,90,36,0.28)'},
   }[v||'privado'];
-  return <span style={{display:'inline-flex',alignItems:'center',gap:4,background:cfg.bg,border:'0.5px solid '+cfg.bd,borderRadius:5,padding:small?'2px 7px':'3px 10px',fontSize:small?10:11,color:cfg.c,fontWeight:500}}>{cfg.icon} {cfg.label}</span>;
+  return <span style={{display:'inline-flex',alignItems:'center',gap:4,background:cfg.bg,border:'0.5px solid '+cfg.bd,borderRadius:5,padding:small?'2px 7px':'3px 10px',fontSize:small?10:11,color:cfg.c,fontWeight:500}}><Icon name={cfg.icon} size={small?10:11}/>{cfg.label}</span>;
 };
 
 /* ─── VISIBILITY PICKER ──────────────────────────── */
 const VisibilityPicker=({value,onChange})=>{
   const opts=[
-    {v:'privado',icon:'🔒',label:'Privado',desc:'Solo tú'},
-    {v:'amigos',icon:'👥',label:'Amigos',desc:'Seguidos mutuos'},
-    {v:'abierto',icon:'🌐',label:'Abierto',desc:'Todos los usuarios'},
+    {v:'privado',icon:'lock-simple',label:'Privado',desc:'Solo tú'},
+    {v:'amigos',icon:'users',label:'Amigos',desc:'Seguidos mutuos'},
+    {v:'abierto',icon:'globe',label:'Abierto',desc:'Todos los usuarios'},
   ];
   return(
     <div style={{display:'flex',gap:6}}>
@@ -9559,7 +9567,7 @@ const VisibilityPicker=({value,onChange})=>{
           border:'1px solid '+(value===o.v?o.v==='abierto'?'rgba(241,90,36,0.3)':o.v==='amigos'?'rgba(27,95,170,0.3)':'rgba(10,27,61,0.2)':BDR),
           borderRadius:9,padding:'8px 4px',cursor:'pointer',textAlign:'center',
         }}>
-          <div style={{fontSize:16,marginBottom:2}}>{o.icon}</div>
+          <div style={{marginBottom:2,display:'flex',justifyContent:'center'}}><Icon name={o.icon} size={16}/></div>
           <div style={{fontSize:11,fontWeight:value===o.v?600:400,color:value===o.v?TXT:MUTED}}>{o.label}</div>
           <div style={{fontSize:9,color:FAINT}}>{o.desc}</div>
         </button>
@@ -9677,7 +9685,7 @@ const MisTextos=({user,library,onVisibilityChange})=>{
 
                   <div style={{display:'flex',alignItems:'center'}}>
                     <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>{e.word_count||e.wordCount||0} pal.</span>
-                    {isPublic&&act&&(act.reactions>0||act.comments>0)&&<span style={{font:"500 11px/1 'Source Sans 3'",color:AZUL,marginLeft:'auto'}}>♥ {act.reactions} &nbsp;💬 {act.comments}</span>}
+                    {isPublic&&act&&(act.reactions>0||act.comments>0)&&<span style={{font:"500 11px/1 'Source Sans 3'",color:AZUL,marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:8}}><span style={{display:'inline-flex',alignItems:'center',gap:3}}><Icon name="heart" size={11}/>{act.reactions}</span><span style={{display:'inline-flex',alignItems:'center',gap:3}}><Icon name="chat-circle" size={11}/>{act.comments}</span></span>}
                   </div>
                 </div>
               </div>
@@ -9727,7 +9735,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
         )}
         {activity&&activity.comments>0&&(
           <><span style={{fontSize:11,color:FAINT}}>·</span>
-          <span style={{fontSize:11,color:'#1E9BF0',fontWeight:500}}>💬{activity.comments}</span></>
+          <span style={{fontSize:11,color:'#1E9BF0',fontWeight:500,display:'inline-flex',alignItems:'center',gap:3}}><Icon name="chat-circle" size={11}/>{activity.comments}</span></>
         )}
         {activity&&activity.reactions>0&&(
           <><span style={{fontSize:11,color:FAINT}}>·</span>
@@ -9867,7 +9875,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
 
           {loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando textos…</div>}
           {!loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40}}>
-            <div style={{fontSize:32,marginBottom:12}}>📖</div>
+            <div style={{marginBottom:12}}><Icon name="book-open" size={32} color={FAINT}/></div>
             <div style={{fontSize:14,fontWeight:500,color:TXT,marginBottom:6}}>La biblioteca está vacía</div>
             <div style={{fontSize:13,color:MUTED,lineHeight:1.65}}>Nadie ha publicado textos todavía.<br/>Sé el primero — ve a "Mis textos" y cambia la visibilidad de alguno a "Abierto".</div>
           </div>}
@@ -10286,7 +10294,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
       <div className="fi" style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:440,maxHeight:'90vh',overflow:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.3)'}}>
         <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div>
-            <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",Georgia,serif'}}>✍️ Relato a dos manos</div>
+            <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',display:'flex',alignItems:'center',gap:7}}><Icon name="hands-clapping" size={15}/>Relato a dos manos</div>
             <div style={{fontSize:11,color:MUTED,marginTop:2}}>Escribid por turnos. Tú empiezas.</div>
           </div>
           <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
@@ -10342,7 +10350,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
 
           <button onClick={send} disabled={!recipient||sending}
             style={{background:recipient&&!sending?TXT:'rgba(0,0,0,0.1)',border:'none',borderRadius:9,padding:'11px',fontSize:14,fontWeight:500,color:recipient&&!sending?'#fff':FAINT,cursor:recipient&&!sending?'pointer':'default'}}>
-            {sending?'Enviando…':'Enviar invitación ✍️'}
+            {sending?'Enviando…':<><Icon name="hands-clapping" size={13}/> Enviar invitación</>}
           </button>
         </div>
       </div>
@@ -10477,7 +10485,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
       <div style={{background:'#0A1B3D',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>← Salir</button>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>✍️ {duet.title}</div>
+          <div style={{fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6}}><Icon name="hands-clapping" size={13}/>{duet.title}</div>
           <div style={{fontSize:11,color:'rgba(255,255,255,0.5)'}}>con {otherName} · mín. {duet.min_words} pal./turno</div>
         </div>
         {duet.status==='active'&&(
@@ -10597,7 +10605,7 @@ const DuetsHub=({user})=>{
     <>
       {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={load}/>}
       <div className="fu" style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,color:TXT,marginBottom:12,fontFamily:'"Playfair Display",serif'}}>✍️ Relatos a dos manos</div>
+        <div style={{fontSize:13,fontWeight:700,color:TXT,marginBottom:12,fontFamily:'"Playfair Display",serif',display:'flex',alignItems:'center',gap:7}}><Icon name="hands-clapping" size={14}/>Relatos a dos manos</div>
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
 
           {invitations.map(d=>(
@@ -10605,7 +10613,7 @@ const DuetsHub=({user})=>{
               <div style={{fontSize:13,color:TXT,marginBottom:8}}><strong>{d.name_a}</strong> te invita a escribir «{d.title}» (mín. {d.min_words} pal./turno)</div>
               {d.premise&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"{d.premise}"</div>}
               <div style={{display:'flex',gap:8}}>
-                <button onClick={()=>accept(d)} style={{background:AZUL,border:'none',borderRadius:7,padding:'5px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Aceptar ✍️</button>
+                <button onClick={()=>accept(d)} style={{background:AZUL,border:'none',borderRadius:7,padding:'5px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:5}}>Aceptar<Icon name="hands-clapping" size={12}/></button>
                 <button onClick={()=>decline(d)} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'5px 14px',fontSize:12,color:MUTED,cursor:'pointer'}}>Rechazar</button>
               </div>
             </div>
@@ -10619,7 +10627,7 @@ const DuetsHub=({user})=>{
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.title}</div>
                   <div style={{fontSize:11,color:myTurn?AZUL:MUTED}}>
-                    con {other} · {d.status==='finish_proposed'?'propuesta de fin pendiente':myTurn?'✍️ ¡Es tu turno!':'turno de '+other}
+                    con {other} · {d.status==='finish_proposed'?'propuesta de fin pendiente':myTurn?'¡Es tu turno!':'turno de '+other}
                   </div>
                 </div>
                 <button onClick={()=>setOpenDuet(d)}
@@ -10696,7 +10704,7 @@ const FeedbackWidget=({user,library})=>{
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
         {newComments.slice(0,5).map(c=>(
           <div key={c.id} style={{fontSize:12,color:TXT,display:'flex',gap:6,alignItems:'baseline'}}>
-            <span>💬</span>
+            <Icon name="chat-circle" size={13}/>
             <span><strong>{c.author_name}</strong> comentó «{titleById[c.entry_id]||'tu texto'}»: <span style={{color:MUTED,fontStyle:'italic'}}>"{c.comment.slice(0,80)}{c.comment.length>80?'…':''}"</span></span>
           </div>
         ))}
@@ -10718,7 +10726,7 @@ const ShareNudge=({user,library})=>{
 
   return(
     <div className="fu" style={{background:'rgba(30,155,240,0.05)',border:'0.5px solid rgba(30,155,240,0.2)',borderRadius:14,padding:'14px 18px',marginBottom:16,display:'flex',alignItems:'center',gap:12}}>
-      <span style={{fontSize:22,flexShrink:0}}>📚</span>
+      <Icon name="books" size={22} color={AZUL} style={{flexShrink:0}}/>
       <div style={{flex:1,fontSize:12,color:TXT,lineHeight:1.5}}>
         Tienes <strong>{privCount} textos</strong> que nadie puede leer. ¿Por qué no compartes tu favorito? Pulsa el 🔒 junto a cualquier texto para hacerlo visible.
       </div>
@@ -11144,9 +11152,9 @@ const WelcomeCarousel=({onClose})=>{
       <div className="wc-mockup">
         <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/></div></div>
         <div className="mk-modes">
-          <div className="mk-mode rio"><div className="mk-mode-icon">〜</div><div className="mk-mode-tag">Río</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
-          <div className="mk-mode limite"><div className="mk-mode-icon">∂</div><div className="mk-mode-tag">Límite</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{width:'90%',position:'relative'}}><span style={{position:'absolute',inset:0,background:'#1B5FAA',borderRadius:2,top:'50%',height:1}}/></div><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
-          <div className="mk-mode presion"><div className="mk-mode-icon">⏱</div><div className="mk-mode-tag">Presión</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+          <div className="mk-mode rio"><div className="mk-mode-icon"><Icon name="waves" size={11}/></div><div className="mk-mode-tag">Río</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+          <div className="mk-mode limite"><div className="mk-mode-icon"><Icon name="pen" size={11}/></div><div className="mk-mode-tag">Límite</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{width:'90%',position:'relative'}}><span style={{position:'absolute',inset:0,background:'#1B5FAA',borderRadius:2,top:'50%',height:1}}/></div><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+          <div className="mk-mode presion"><div className="mk-mode-icon"><Icon name="lightning" size={11}/></div><div className="mk-mode-tag">Presión</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
         </div>
       </div>
     </div>,
@@ -11192,7 +11200,7 @@ const WelcomeCarousel=({onClose})=>{
             <div className="mk-lib-card-header"><div className="mk-lib-title"/><div className="mk-lib-privacy pub">Público</div></div>
             <div className="mk-lib-lines"><div className="mk-lib-line"/><div className="mk-lib-line s"/><div className="mk-lib-line xs"/></div>
             <div className="mk-feedback-bubble"><div className="mk-feedback-av"/><div style={{height:4,width:60,background:'#c8c0b4',borderRadius:2}}/></div>
-            <div className="mk-lib-footer"><span style={{fontSize:9,color:'#8a7f74'}}>♥ 4 &nbsp;💬 2</span></div>
+            <div className="mk-lib-footer"><span style={{fontSize:9,color:'#8a7f74',display:'inline-flex',alignItems:'center',gap:6}}><span style={{display:'inline-flex',alignItems:'center',gap:2}}><Icon name="heart" size={9}/>4</span><span style={{display:'inline-flex',alignItems:'center',gap:2}}><Icon name="chat-circle" size={9}/>2</span></span></div>
           </div>
           <div className="mk-lib-card">
             <div className="mk-lib-card-header"><div className="mk-lib-title"/><div className="mk-lib-privacy prv">Privado</div></div>
