@@ -1970,6 +1970,24 @@ const DB = {
     const { error } = await getSB().from('entries').update({ visibility }).eq('id', entryId);
     if (error) throw error;
   },
+  updateFolder: async (entryId, folder) => {
+    const { error } = await getSB().from('entries').update({ folder }).eq('id', entryId);
+    if (error) throw error;
+  },
+  getCustomFolders: async (uid) => {
+    const { data, error } = await getSB().from('custom_folders').select('*').eq('user_id', uid).order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+  createCustomFolder: async (uid, name) => {
+    const { data, error } = await getSB().from('custom_folders').insert({ user_id: uid, name }).select().single();
+    if (error) throw error;
+    return data;
+  },
+  deleteCustomFolder: async (id) => {
+    const { error } = await getSB().from('custom_folders').delete().eq('id', id);
+    if (error) throw error;
+  },
   // Follows
   getFollowing: async (uid) => {
     const { data: fids, error: e1 } = await getSB().from('follows').select('following_id').eq('follower_id', uid);
@@ -2144,6 +2162,22 @@ const DB = {
       .update({ completed: true, seen: true, entry_id: entryId }).eq('id', id);
     if (error) throw error;
   },
+  shareBackChallenge: async (id) => {
+    const { error } = await getSB().from('direct_challenges').update({ shared_back: true }).eq('id', id);
+    if (error) throw error;
+  },
+  getCompletedSentChallenges: async (uid) => {
+    // Retos que envié, ya completados y devueltos, que aún no he visto
+    const { data, error } = await getSB().from('direct_challenges')
+      .select('*').eq('from_user_id', uid).eq('shared_back', true).eq('from_seen', false)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  markSentChallengeSeen: async (id) => {
+    const { error } = await getSB().from('direct_challenges').update({ from_seen: true }).eq('id', id);
+    if (error) throw error;
+  },
   markChallengeSeen: async (id) => {
     const { error } = await getSB().from('direct_challenges').update({ seen: true }).eq('id', id);
     if (error) throw error;
@@ -2238,12 +2272,25 @@ const DB = {
     if (error) throw error;
   },
   getMyNominations: async (uid) => {
-    // Nominaciones específicas a mí, pendientes
-    const { data, error } = await getSB().from('chain_nominations')
+    // Nominaciones específicas a mí
+    const { data: direct, error: e1 } = await getSB().from('chain_nominations')
       .select('*, chains(id,title,premise,min_words,chapter_count,last_sentence,full_plain,status)')
       .eq('nominated_user_id', uid).eq('status', 'pending');
-    if (error) throw error;
-    return data || [];
+    if (e1) throw e1;
+    // + nominaciones a cualquier grupo del que sea miembro
+    const { data: myGroups } = await getSB().from('group_members').select('group_id').eq('user_id', uid);
+    const groupIds = (myGroups || []).map(g => g.group_id);
+    let viaGroup = [];
+    if (groupIds.length) {
+      const { data: g, error: e2 } = await getSB().from('chain_nominations')
+        .select('*, chains(id,title,premise,min_words,chapter_count,last_sentence,full_plain,status)')
+        .in('nominated_group_id', groupIds).eq('status', 'pending');
+      if (e2) throw e2;
+      viaGroup = g || [];
+    }
+    const all = [...(direct || []), ...viaGroup];
+    const seen = new Set();
+    return all.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; });
   },
   getOpenNominations: async () => {
     // Nominaciones abiertas a cualquiera (para Biblioteca > Encadenados)
@@ -6454,9 +6501,12 @@ const computeStats=(library,reflections)=>{
   const _firstDay=library.length?library[library.length-1].date?.slice(0,10)||today():today();const last7=Array.from({length:7},(_,i)=>{const d=new Date(_firstDay+'T12:00:00');d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
   const activeDates=new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean));
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
-  const weekElapsed=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).reduce((s,e)=>s+(e.elapsed||0),0);
+  const weekEntries=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo);
+  const weekElapsed=weekEntries.reduce((s,e)=>s+(e.elapsed||0),0);
+  const weekWords=weekEntries.reduce((s,e)=>{const wa=e.words_added;return s+(wa!=null?wa:(e.word_count||e.wordCount||0));},0);
+  const weekSessions=weekEntries.length;
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
-  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,totalElapsed};
+  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed};
 };
 
 /* ─── CLAUDE API ─────────────────────────────────── */
@@ -6835,7 +6885,7 @@ const AuthScreen=({onAuth})=>{
 };
 
 
-const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry,onChangeVisibility,followers=[],following=[],onFollow})=>{
+const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -6878,17 +6928,17 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
-        onVisibilityChange={(entryId,vis)=>setLibrary(prev=>prev.map(e=>e.id===entryId?{...e,visibility:vis}:e))}/>}
+        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
-      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)}/>}
+      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}/>}
       {showStartChain&&<StartChainModal user={user} onClose={()=>setShowStartChain(false)}/>}
       {showLibChecks&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="check" onStartLesson={onStartLesson} onClose={()=>setShowLibChecks(false)}/>}
       {showLibSemanales&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="reto" onStartLesson={onStartLesson} onClose={()=>setShowLibSemanales(false)}/>}
-      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)}/>}
+      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div className="topbar" style={{display:'flex',alignItems:'center',padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:18,letterSpacing:'-0.01em',color:TXT,flexShrink:0}}>Pretexto</div>
@@ -6985,6 +7035,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onDismiss={onDismissChallenge}/>
+        <SharedBackBanner user={user}/>
         <DuetsHub user={user}/>
         <ChainsHub user={user}/>
         <FeedbackWidget user={user} library={library}/>
@@ -7617,12 +7668,11 @@ const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntr
       <div className="fi" style={{background:PAGE_BG,width:'100%',maxWidth:900,maxHeight:'88vh',borderRadius:'16px 16px 0 0',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 -8px 50px -8px rgba(10,27,61,0.25)'}}>
         <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,position:'relative',overflow:'hidden'}}>
           <Signo char="¶" size={80} top={-22} left={150} color="azul"/>
+          <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,padding:'4px 6px',borderRadius:6,flexShrink:0,position:'relative',zIndex:1,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
           <div style={{position:'relative',zIndex:1}}>
             <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:15,color:TXT}}>{screenTitle}</div>
             <div style={{fontSize:11,color:FAINT,marginTop:1}}>{allLessons.length} lecciones</div>
           </div>
-          <div style={{flex:1}}/>
-          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
         </div>
         <div style={{flex:1,overflowY:'auto',padding:'16px 20px 24px'}}>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:14}}>
@@ -7751,7 +7801,7 @@ const DrivePanel=({user,driveState,onUpdate,onClose,library})=>{
 
 /* ─── EDITOR ─────────────────────────────────────── */
 const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,sessionConfig})=>{
-  const sk=sessionConfig.type==='reto'?'reto':sessionConfig.type==='proyecto'?'proyecto':'check';
+  const sk=sessionConfig.sk||(sessionConfig.type==='reto'?'reto':sessionConfig.type==='proyecto'?'proyecto':'check');
   const customExercise=sessionConfig.exercise||null;
   const customReto=sessionConfig.reto||null;
   const currentProject=sessionConfig.project||null;
@@ -7775,6 +7825,9 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
   const edRef=useRef(null);const prevLen=useRef(0);const isDel=useRef(false);const lastSaved=useRef('');const initialWcRef=useRef(0);
   const entryIdRef=useRef(sessionConfig.entryId||(sk+'_'+user.id.slice(-6)+'_'+Date.now()));
+  // Si estamos reeditando un cuento contrareloj ya publicado, el tiempo original NO se toca;
+  // el tiempo de esta nueva sesión se acumula aparte, en extra_elapsed.
+  const originalEntryRef=useRef(sessionConfig.type==='edit'?library.find(e=>e.id===sessionConfig.entryId):null);
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
 
   const fontObj=FONTS[fontIdx];
@@ -7797,6 +7850,16 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const resetLim=(d=limDels)=>{isDel.current=false;setCharsInDel(0);setDelsLeft(d)};
   const buildEntry=()=>{
     const id=entryIdRef.current;
+    // La carpeta se asigna sola la primera vez (check/reto/cuento -> "retos"); si el usuario
+    // ya la movió a mano en una sesión anterior, se respeta esa carpeta en los guardados siguientes.
+    const existing=library.find(e=>e.id===id);
+    const defaultFolder=['check','reto','cuento'].includes(sk)?'retos':null;
+    const folder=existing?(existing.folder!==undefined?existing.folder:defaultFolder):defaultFolder;
+    // Reedición de un cuento contrareloj ya publicado: el "elapsed" original queda fijo,
+    // y el tiempo de esta sesión se suma aparte como tiempo extra de edición.
+    const isReeditingCuento=sessionConfig.type==='edit'&&originalEntryRef.current?.sk==='cuento';
+    const finalElapsed=isReeditingCuento?(originalEntryRef.current.elapsed||0):elapsed;
+    const finalExtraElapsed=isReeditingCuento?((originalEntryRef.current.extra_elapsed||0)+elapsed):(existing?.extra_elapsed||0);
     return {
       id,ts:Date.now(),sk,date:today(),
       words_added:Math.max(0,wc-initialWcRef.current), // increment only, 0 if didn't add words
@@ -7805,12 +7868,15 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       html:edRef.current?.innerHTML||'',
       plain:plainTxt,
       word_count:wc,wordCount:wc,
-      elapsed,
+      elapsed:finalElapsed,
+      extra_elapsed:finalExtraElapsed,
+      meta_words:existing?.meta_words||null,
       font_idx:fontIdx,fontIdx,
       editor_size:sz,editorSize:sz,
       align_dir:align,alignDir:align,
       week_id:sessionConfig.weekId||null,weekId:sessionConfig.weekId||null,
       project_id:currentProject?.id||null,projectId:currentProject?.id||null,
+      folder,
     };
   };
 
@@ -8104,6 +8170,8 @@ const wordUsed=(text,word)=>{
 
 const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
   const [words]=useState(()=>challenge?.words||pick5Words());
+  const [title,setTitle]=useState(challenge?('Para @'+(challenge.from_username||challenge.from_name)):'');
+  const [sharingBack,setSharingBack]=useState(false);
   const [text,setText]=useState('');
   const [chars,setChars]=useState(0);
   const [timer,setTimer]=useState(3600); // 1 hour
@@ -8150,7 +8218,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
     const entry={
       id:'cuento_'+Date.now(),
       sk:'cuento',
-      title:'Cuento contrareloj · '+new Date().toLocaleDateString('es-ES',{day:'numeric',month:'short'}),
+      title:title.trim()||('Cuento contrareloj · '+new Date().toLocaleDateString('es-ES',{day:'numeric',month:'short'})),
       session_label:'Cuento contrareloj',
       html:edRef.current?.innerHTML||'',
       plain:text,
@@ -8179,6 +8247,16 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
     return(h>0?h+':':'')+(m).toString().padStart(h>0?2:1,'0')+':'+sec.toString().padStart(2,'0');
   };
 
+  const returnStory=async()=>{
+    if(!challenge||!publishedEntry)return;
+    setSharingBack(true);
+    try{
+      await DB.shareBackChallenge(challenge.id);
+      await DB.updateVisibility(publishedEntry.id,'amigos');
+    }catch(e){console.error(e);}
+    onFinish(publishedEntry?.id);
+  };
+
   if(published)return(
     <div style={{height:'var(--app-height,100dvh)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#FBF8F0',padding:32,textAlign:'center'}}>
       <div style={{fontSize:48,marginBottom:16}}>✦</div>
@@ -8187,7 +8265,15 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
       <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginBottom:24}}>
         {words.map(w=><span key={w} style={{background:'rgba(30,155,240,0.1)',border:'0.5px solid rgba(30,155,240,0.3)',borderRadius:20,padding:'3px 12px',fontSize:12,color:'#1E9BF0',fontWeight:500,textDecoration:'line-through'}}>✓ {w}</span>)}
       </div>
-      <Btn variant="primary" onClick={()=>onFinish(publishedEntry?.id)}>Volver al dashboard →</Btn>
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
+        <Btn variant="ghost" onClick={()=>onFinish(publishedEntry?.id)}>Volver al dashboard →</Btn>
+        {challenge&&<Btn variant="primary" onClick={returnStory} disabled={sharingBack}>
+          {sharingBack?'Enviando…':'Devolver relato →'}
+        </Btn>}
+      </div>
+      {challenge&&<div style={{fontSize:11,color:FAINT,marginTop:14,maxWidth:300}}>
+        "Devolver relato" avisa a @{challenge.from_username||challenge.from_name} de que ya puede leer tu cuento.
+      </div>}
     </div>
   );
 
@@ -8198,6 +8284,11 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
         {challenge&&<div style={{background:'rgba(255,255,255,0.07)',padding:'7px 14px',fontSize:11,color:'rgba(255,255,255,0.6)',display:'flex',alignItems:'center',gap:6}}>
           <Icon name="timer" size={13}/><span>Reto de <strong style={{color:'rgba(255,255,255,0.85)'}}>@{challenge.from_username||challenge.from_name}</strong>{challenge.message&&<span style={{fontStyle:'italic'}}> · "{challenge.message}"</span>}</span>
         </div>}
+        {/* Título */}
+        <div style={{padding:'8px 14px 0'}}>
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ponle un título a tu cuento…"
+            style={{width:'100%',background:'transparent',border:'none',outline:'none',color:'#fff',fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",serif',padding:'4px 0'}}/>
+        </div>
         {/* Top bar */}
         <div style={{display:'flex',alignItems:'center',padding:'0 14px',height:44,borderBottom:'0.5px solid rgba(255,255,255,0.1)'}}>
           <button onClick={()=>{if(!started||window.confirm('¿Salir? Perderás el progreso del cuento.'))onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir</button>
@@ -8434,6 +8525,55 @@ const ReceivedChallengesBanner=({challenges,onAccept,onDismiss})=>{
   );
 };
 
+
+/* ─── SHARED BACK BANNER (tu amigo terminó y devolvió el reto) ────── */
+const SharedBackBanner=({user})=>{
+  const [items,setItems]=useState([]);
+  const [readingModal,setReadingModal]=useState(null);
+
+  const load=()=>{DB.getCompletedSentChallenges(user.id).then(setItems).catch(()=>{});};
+  useEffect(()=>{load();},[user.id]);
+
+  if(!items.length)return null;
+  const ch=items[0];
+
+  const dismiss=async(id)=>{
+    try{await DB.markSentChallengeSeen(id);}catch(e){}
+    setItems(prev=>prev.filter(c=>c.id!==id));
+  };
+
+  const openStory=async()=>{
+    if(!ch.entry_id)return;
+    try{
+      const { data } = await getSB().from('entries').select('*').eq('id',ch.entry_id).single();
+      if(data)setReadingModal(data);
+    }catch(e){console.error(e);}
+  };
+
+  return(
+    <>
+      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)}/>}
+      <div className="fu" style={{background:HEADER_NAVY_BG,borderRadius:13,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,alignItems:'flex-start',position:'relative',overflow:'hidden',boxShadow:'0 8px 24px -10px rgba(10,27,61,0.35)'}}>
+        <Signo char="&rdquo;" size={90} top={-22} right={-6} color="azul"/>
+        <div style={{flex:1}}>
+          <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:500,color:'rgba(255,255,255,0.4)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>
+            <Icon name="check-circle" size={12} color="#1E9BF0"/>
+            Tu contrarreloj está listo
+          </div>
+          <div style={{fontSize:13,color:'rgba(255,255,255,0.85)'}}>
+            Tu amigo ha terminado y compartido el cuento contrarreloj que le retaste a escribir.
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
+          <button onClick={()=>{openStory();dismiss(ch.id);}} style={{background:'#1E9BF0',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Leer →</button>
+          <button onClick={()=>dismiss(ch.id)} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'4px 14px',fontSize:11,color:'rgba(255,255,255,0.4)',cursor:'pointer'}}>Más tarde</button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+
 /* ─── USERNAME SETTINGS ──────────────────────────── */
 const UsernamePanel=({user,onClose,onSave})=>{
   const [username,setUsername]=useState(user.username||'');
@@ -8484,7 +8624,7 @@ const UsernamePanel=({user,onClose,onSave})=>{
 };
 
 /* ─── TEAMS SCREEN ───────────────────────────────── */
-const TeamsScreen=({user,onClose})=>{
+const TeamsScreen=({user,onClose,onEdit})=>{
   const [teams,setTeams]=useState([]);
   const [view,setView]=useState('list'); // 'list'|'create'|'detail'|'invite'
   const [selected,setSelected]=useState(null);
@@ -8526,15 +8666,14 @@ const TeamsScreen=({user,onClose})=>{
   };
 
   if(view==='create')return<CreateTeam user={user} onBack={()=>setView('list')} onCreated={async t=>{await loadTeams();setSelected(t);setView('detail');}}/>;
-  if(view==='detail'&&selected)return<TeamDetail user={user} team={selected} onBack={()=>{setView('list');loadTeams();}} onInvite={()=>setView('invite')}/>;
+  if(view==='detail'&&selected)return<TeamDetail user={user} team={selected} onBack={()=>{setView('list');loadTeams();}} onInvite={()=>setView('invite')} onEdit={onEdit}/>;
   if(view==='invite'&&selected)return<InvitePanel user={user} team={selected} onBack={()=>setView('detail')}/>;
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,padding:'4px 6px',borderRadius:6,flexShrink:0,marginRight:4,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:16,color:TXT}}>Equipos</div>
-        <div style={{flex:1}}/>
-        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer',lineHeight:1}}>×</button>
       </div>
 
       <div style={{flex:1,overflowY:'auto',maxWidth:640,width:'100%',margin:'0 auto',padding:'32px 20px 48px',position:'relative'}}>
@@ -8726,7 +8865,7 @@ const InvitePanel=({user,team,onBack})=>{
 };
 
 /* ─── TEAM DETAIL ────────────────────────────────── */
-const TeamDetail=({user,team,onBack,onInvite})=>{
+const TeamDetail=({user,team,onBack,onInvite,onEdit})=>{
   const [members,setMembers]=useState([]);
   const [challenges,setChallenges]=useState([]);
   const [teamEntries,setTeamEntries]=useState([]);
@@ -8794,7 +8933,7 @@ const TeamDetail=({user,team,onBack,onInvite})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)}/>}
+      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)} onEdit={()=>{setReadingModal(null);onEdit&&onEdit(readingModal);}}/>}
       {/* Share modal */}
       {sharing&&<div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)setSharing(null)}}>
         <div className="fi" style={{background:CARD_BG,borderRadius:14,width:'100%',maxWidth:440,maxHeight:'80vh',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.3)'}}>
@@ -8996,7 +9135,8 @@ const StatsChart=({library})=>{
 
 
 /* ─── READING MODAL (with comments + ratings) ───────────────── */
-const ReadingModal=({entry,user,onClose,onVisibilityChange})=>{
+const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit})=>{
+  const [showEncadenar,setShowEncadenar]=useState(false);
   const [comments,setComments]=useState([]);
   const [ratings,setRatings]=useState([]);
   const [reactions,setReactions]=useState([]);
@@ -9095,6 +9235,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange})=>{
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'24px 16px',overflowY:'auto'}}>
       <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:640,padding:'28px 28px 24px',position:'relative',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.3)'}}>
+        {showEncadenar&&<EncadenarModal user={user} entry={entry} onClose={()=>setShowEncadenar(false)}/>}
         <button onClick={onClose} style={{position:'absolute',top:16,right:16,background:'transparent',border:'none',fontSize:18,cursor:'pointer',color:MUTED}}>✕</button>
 
         {/* Entry header */}
@@ -9103,6 +9244,21 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange})=>{
             {entry.session_label||entry.sessionLabel||entry.sk||'Texto'} · {fmtDate(entry.date)}
           </div>
           <div style={{fontSize:20,fontWeight:700,color:TXT,letterSpacing:'-0.02em',marginBottom:6}}>{entry.title||'Sin título'}</div>
+          {entry.sk==='cuento'&&(
+            <div style={{marginBottom:10}}>
+              {entry.meta_words&&<div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:6}}>
+                {entry.meta_words.split(',').map(w=>(
+                  <span key={w} style={{fontSize:10.5,background:'rgba(168,32,32,0.08)',border:'1px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'3px 9px',color:'#A82020',textDecoration:'line-through',opacity:0.75}}>{w}</span>
+                ))}
+              </div>}
+              <div style={{fontSize:11,color:FAINT,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                <span>{(entry.plain||'').length.toLocaleString()} caracteres</span>
+                <span>·</span>
+                <span>escrito en {fmtTime(entry.elapsed)}</span>
+                {entry.extra_elapsed>0&&<><span>·</span><span style={{color:AZULMED}}>+{fmtTime(entry.extra_elapsed)} de edición posterior</span></>}
+              </div>
+            </div>
+          )}
           {!loadingData&&(
             <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:2}}>
               {avgRating&&<div style={{display:'flex',alignItems:'center',gap:5}}>
@@ -9115,6 +9271,18 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange})=>{
                   style={{display:'flex',alignItems:'center',gap:5,border:'0.5px solid '+BDR,borderRadius:14,padding:'3px 10px',background:'rgba(0,0,0,0.03)',cursor:'pointer',fontSize:11,fontWeight:500}}>
                   <span style={{display:'inline-flex',alignItems:'center',gap:5}}><Icon name={vis==='privado'?'lock-simple':vis==='amigos'?'users':'globe'} size={12}/>{vis==='privado'?'Privado':vis==='amigos'?'Amigos':'Público'}</span>
                   <span style={{color:FAINT,fontSize:9}}>→ {vis==='privado'?'Amigos':vis==='amigos'?'Público':'Privado'}</span>
+                </button>
+              )}
+              {isOwn&&onEdit&&(
+                <button onClick={()=>{onClose();onEdit(entry);}} title="Editar este texto"
+                  style={{display:'flex',alignItems:'center',gap:5,border:'none',borderRadius:14,padding:'4px 12px',background:ADVANCE_BG,color:ADVANCE_TXT,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
+                  <Icon name="pencil-simple" size={12}/>Editar
+                </button>
+              )}
+              {isOwn&&(
+                <button onClick={()=>setShowEncadenar(true)} title="Proponer como inicio de un relato encadenado"
+                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(27,95,170,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(27,95,170,0.07)',color:AZULMED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
+                  <Icon name="link" size={12}/>Encadenar
                 </button>
               )}
             </div>
@@ -9577,16 +9745,31 @@ const VisibilityPicker=({value,onChange})=>{
 };
 
 /* ─── MIS TEXTOS ─────────────────────────────────── */
-const MisTextos=({user,library,onVisibilityChange})=>{
+const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
   const [filter,setFilter]=useState('all');
+  const [folder,setFolder]=useState('todos'); // 'todos' | 'sin' | slug de carpeta por defecto | id de carpeta personalizada
+  const [customFolders,setCustomFolders]=useState([]);
+  const [creatingFolder,setCreatingFolder]=useState(false);
+  const [newFolderName,setNewFolderName]=useState('');
+  const [movingEntry,setMovingEntry]=useState(null); // entry para el menú "mover a carpeta"
   const [updating,setUpdating]=useState(null);
   const [readEntry,setReadEntry]=useState(null);
   const [activity,setActivity]=useState({});
 
-  const myTexts=library.filter(e=>e.visibility!=='ejercicio');
-  const filtered=myTexts.filter(e=>filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado'));
+  const DEFAULT_FOLDERS=[['retos','Retos'],['poesia','Poesía'],['relato','Relato'],['novela','Novela'],['ensayo','Ensayo']];
 
-  // Carga comentarios/reacciones para los textos no-privados (igual que en Explorar)
+  useEffect(()=>{DB.getCustomFolders(user.id).then(setCustomFolders).catch(()=>{});},[user.id]);
+
+  const allFolders=[...DEFAULT_FOLDERS,...customFolders.map(f=>[f.id,f.name])];
+
+  const myTexts=library.filter(e=>e.visibility!=='ejercicio');
+  const inFolder=e=>{
+    if(folder==='todos')return true;
+    if(folder==='sin')return !e.folder;
+    return e.folder===folder;
+  };
+  const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado')));
+
   useEffect(()=>{
     const publicIds=myTexts.filter(e=>e.visibility&&e.visibility!=='privado').map(e=>e.id);
     if(!publicIds.length)return;
@@ -9595,11 +9778,26 @@ const MisTextos=({user,library,onVisibilityChange})=>{
 
   const changeVis=async(entry,vis)=>{
     setUpdating(entry.id);
-    try{
-      await DB.updateVisibility(entry.id,vis);
-      onVisibilityChange(entry.id,vis);
-    }catch(e){alert('Error: '+e.message);}
+    try{await DB.updateVisibility(entry.id,vis);onVisibilityChange(entry.id,vis);}
+    catch(e){alert('Error: '+e.message);}
     finally{setUpdating(null);}
+  };
+
+  const moveToFolder=async(entry,folderId)=>{
+    setMovingEntry(null);
+    try{await DB.updateFolder(entry.id,folderId);onFolderChange&&onFolderChange(entry.id,folderId);}
+    catch(e){alert('Error: '+e.message);}
+  };
+
+  const createFolder=async()=>{
+    const name=newFolderName.trim();
+    if(!name)return;
+    try{
+      const f=await DB.createCustomFolder(user.id,name);
+      setCustomFolders(prev=>[...prev,f]);
+      setNewFolderName('');setCreatingFolder(false);
+      setFolder(f.id);
+    }catch(e){alert('Error: '+e.message);}
   };
 
   const relTime=iso=>{
@@ -9615,7 +9813,6 @@ const MisTextos=({user,library,onVisibilityChange})=>{
     return Math.floor(days/30)+' meses';
   };
 
-  // Igual que en la referencia: Privado = gris discreto, Amigos = azul medio, Público = naranja (énfasis)
   const VIS_META={
     privado:{label:'Privado',color:MUTED,bg:'rgba(10,27,61,0.06)',signo:';',signoColor:'navy'},
     amigos:{label:'Amigos',color:AZULMED,bg:'rgba(27,95,170,0.1)',signo:',',signoColor:'azul'},
@@ -9626,21 +9823,61 @@ const MisTextos=({user,library,onVisibilityChange})=>{
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}}/>}
+      {movingEntry&&<div onClick={()=>setMovingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+        <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
+          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Mover a…</div>
+          <div style={{fontSize:11,color:MUTED,marginBottom:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>«{movingEntry.title||'Sin título'}»</div>
+          <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:260,overflowY:'auto'}}>
+            <button onClick={()=>moveToFolder(movingEntry,null)} style={{display:'flex',alignItems:'center',gap:8,background:!movingEntry.folder?'rgba(30,155,240,0.08)':'transparent',border:'none',borderRadius:8,padding:'8px 10px',cursor:'pointer',textAlign:'left',fontSize:13,color:TXT,fontFamily:"'Source Sans 3',sans-serif"}}>
+              <Icon name="x-circle" size={14} color={FAINT}/>Sin carpeta
+            </button>
+            {allFolders.map(([id,name])=>(
+              <button key={id} onClick={()=>moveToFolder(movingEntry,id)} style={{display:'flex',alignItems:'center',gap:8,background:movingEntry.folder===id?'rgba(30,155,240,0.08)':'transparent',border:'none',borderRadius:8,padding:'8px 10px',cursor:'pointer',textAlign:'left',fontSize:13,color:TXT,fontFamily:"'Source Sans 3',sans-serif"}}>
+                <Icon name="folder-simple" size={14} color={AZUL}/>{name}
+              </button>
+            ))}
+          </div>
+          <button onClick={()=>setMovingEntry(null)} style={{width:'100%',marginTop:12,background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'8px',fontSize:12,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+        </div>
+      </div>}
 
-      {/* Filter pills */}
-      <div style={{display:'flex',gap:7,padding:'14px 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
+      {/* Carpetas */}
+      <div style={{display:'flex',gap:7,padding:'14px 16px 0',flexShrink:0,flexWrap:'wrap',alignItems:'center'}}>
+        {[['todos','Todos'],['sin','Sin carpeta'],...allFolders].map(([id,name])=>{
+          const active=folder===id;
+          return(
+            <button key={id} onClick={()=>setFolder(id)} style={{
+              background:active?AZUL:'rgba(30,155,240,0.06)',color:active?'#fff':AZULMED,
+              border:'none',borderRadius:8,padding:'6px 12px',fontSize:11,fontWeight:600,cursor:'pointer',
+              fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5,
+            }}>
+              {id!=='todos'&&id!=='sin'&&<Icon name="folder-simple" size={11}/>}{name}
+            </button>
+          );
+        })}
+        {!creatingFolder&&<button onClick={()=>setCreatingFolder(true)} style={{background:'transparent',border:'1px dashed rgba(30,155,240,0.4)',borderRadius:8,padding:'6px 12px',fontSize:11,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5}}>
+          <Icon name="plus" size={11}/>Nueva carpeta
+        </button>}
+        {creatingFolder&&<div style={{display:'flex',gap:5,alignItems:'center'}}>
+          <input autoFocus value={newFolderName} onChange={e=>setNewFolderName(e.target.value)}
+            onKeyDown={e=>{if(e.key==='Enter')createFolder();if(e.key==='Escape'){setCreatingFolder(false);setNewFolderName('');}}}
+            placeholder="Nombre de la carpeta…" style={{width:160,padding:'6px 10px',fontSize:11,borderRadius:7}}/>
+          <button onClick={createFolder} style={{background:AZUL,border:'none',borderRadius:7,padding:'6px 10px',color:'#fff',cursor:'pointer'}}><Icon name="check" size={12}/></button>
+          <button onClick={()=>{setCreatingFolder(false);setNewFolderName('');}} style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:'6px'}}><Icon name="x" size={12}/></button>
+        </div>}
+      </div>
+
+      {/* Filter pills (visibilidad) */}
+      <div style={{display:'flex',gap:7,padding:'10px 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
         {FILTERS.map(([v,l])=>{
-          const count=myTexts.filter(e=>v==='all'||e.visibility===v||(!e.visibility&&v==='privado')).length;
+          const count=myTexts.filter(e=>inFolder(e)&&(v==='all'||e.visibility===v||(!e.visibility&&v==='privado'))).length;
           const active=filter===v;
           return(
             <button key={v} onClick={()=>setFilter(v)} style={{
-              background:active?NAVY:'rgba(10,27,61,0.06)',
-              color:active?'#fff':MUTED,
-              border:'none',borderRadius:8,padding:'7px 14px',
-              fontSize:11,fontWeight:600,cursor:'pointer',
-              fontFamily:"'Source Sans 3',sans-serif",
-              display:'flex',alignItems:'center',gap:5,
+              background:active?NAVY:'rgba(10,27,61,0.06)',color:active?'#fff':MUTED,
+              border:'none',borderRadius:8,padding:'7px 14px',fontSize:11,fontWeight:600,cursor:'pointer',
+              fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5,
             }}>
               {l}{count>0&&<span style={{opacity:active?0.75:0.6,fontSize:10}}>({count})</span>}
             </button>
@@ -9648,9 +9885,9 @@ const MisTextos=({user,library,onVisibilityChange})=>{
         })}
       </div>
 
-      {/* Grid de tarjetas — 3 columnas como en la referencia */}
+      {/* Grid de tarjetas */}
       <div style={{flex:1,overflowY:'auto',padding:'4px 16px 24px'}}>
-        {filtered.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay textos en esta categoría.</div>}
+        {filtered.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay textos en esta carpeta.</div>}
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
           {filtered.map(e=>{
             const vis=e.visibility||'privado';
@@ -9662,9 +9899,13 @@ const MisTextos=({user,library,onVisibilityChange})=>{
             return(
               <div key={e.id} onClick={()=>setReadEntry(e)} style={{position:'relative',overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,padding:'16px',cursor:'pointer',display:'flex',flexDirection:'column',minHeight:165}}>
                 <Signo char={meta.signo} size={60} top={-12} right={10} color={meta.signoColor}/>
+                <button onClick={e2=>{e2.stopPropagation();setMovingEntry(e);}} title="Mover a carpeta"
+                  style={{position:'absolute',top:10,right:10,zIndex:2,background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:3,display:'flex'}}>
+                  <Icon name="folder-simple" size={14}/>
+                </button>
 
                 <div style={{position:'relative',display:'flex',flexDirection:'column',flex:1}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:6}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:6,paddingRight:18}}>
                     <span onClick={e2=>{
                         e2.stopPropagation();
                         if(isUpdating)return;
@@ -9749,7 +9990,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
+const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,onEdit})=>{
   const [tab,setTab]=useState('explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
@@ -9824,13 +10065,12 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}}/>}
 
       {/* Header */}
-      <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,padding:'4px 6px',borderRadius:6,flexShrink:0,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:16,color:TXT}}>Biblioteca</div>
-        <div style={{flex:1}}/>
-        <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer',lineHeight:1}}>×</button>
       </div>
 
       {/* Tabs */}
@@ -9936,7 +10176,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange})=>{
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
-        {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange}/>}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit}/>}
       </div>
     </div>
   );
@@ -10042,7 +10282,7 @@ const AmigosScreen=({user,onClose})=>{
         {/* Header */}
         <div style={{background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,padding:'16px 24px',display:'flex',alignItems:'center',gap:12,flexShrink:0,position:'relative',overflow:'hidden'}}>
           <Signo char="*" size={80} top={-22} left={250} color="naranja"/>
-          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,cursor:'pointer',color:MUTED,padding:'0 4px',lineHeight:1,position:'relative',zIndex:1}}>←</button>
+          <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,padding:'4px 6px',borderRadius:6,position:'relative',zIndex:1,flexShrink:0,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:17,color:TXT,letterSpacing:'-0.01em',position:'relative',zIndex:1}}>Amigos</div>
           {!loading&&<div style={{fontSize:12,color:MUTED,marginLeft:4,position:'relative',zIndex:1}}>{friends.length} {friends.length===1?'persona':'personas'} seguidas</div>}
         </div>
@@ -10201,8 +10441,10 @@ const k=e.sk==='dueto'?'A dos manos':e.sk==='cuento'&&_sl.toLowerCase().includes
         <Signo char="*" size={130} top={-10} right={-6} color="naranja"/>
         {/* Header */}
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,position:'relative',zIndex:1}}>
-          <div style={{fontSize:21,fontWeight:700,letterSpacing:'-0.02em',color:TXT,fontFamily:'"Playfair Display",serif'}}>Estadísticas</div>
-          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,cursor:'pointer',color:MUTED,padding:'0 4px'}}>✕</button>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,padding:'4px 6px',borderRadius:6,flexShrink:0,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
+            <div style={{fontSize:21,fontWeight:700,letterSpacing:'-0.02em',color:TXT,fontFamily:'"Playfair Display",serif'}}>Estadísticas</div>
+          </div>
         </div>
 
         {/* Stat cards */}
@@ -10901,8 +11143,9 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
                   dangerouslySetInnerHTML={{__html:chapters.map(c=>c.html).join('<hr style="opacity:0.15;margin:16px 0">')}}/>
               )}
               {requiredStart&&(
-                <div style={{fontSize:11,fontWeight:600,color:NARANJA,textTransform:'uppercase',letterSpacing:'.1em',marginBottom:8}}>
-                  Debes empezar con esta frase
+                <div style={{background:'rgba(241,90,36,0.06)',border:'1px solid rgba(241,90,36,0.25)',borderRadius:10,padding:'10px 14px',marginBottom:14}}>
+                  <div style={{fontSize:10,fontWeight:700,color:NARANJA,textTransform:'uppercase',letterSpacing:'.12em',marginBottom:5}}>Debes empezar con esta frase</div>
+                  <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:14,color:TXT,lineHeight:1.5}}>&ldquo;{requiredStart}&rdquo;</div>
                 </div>
               )}
               <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
@@ -11070,6 +11313,152 @@ const StartChainModal=({user,onClose})=>{
           <div style={{display:'flex',gap:10}}>
             <button onClick={onClose} style={{flex:'0 0 auto',background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'11px 16px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
             <button onClick={()=>setOpened(true)} style={{flex:1,background:NARANJA,border:'none',borderRadius:9,padding:'11px',fontSize:13.5,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",boxShadow:'0 8px 18px -8px rgba(241,90,36,.6)'}}>Empezar a escribir →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+
+/* ─── ENCADENAR MODAL (proponer un texto existente como inicio de cadena) ── */
+const EncadenarModal=({user,entry,onClose})=>{
+  const [step,setStep]=useState('form'); // 'form' | 'done'
+  const [title,setTitle]=useState(entry.title||'');
+  const [target,setTarget]=useState('open'); // 'open' | 'user' | 'group'
+  const [nomQuery,setNomQuery]=useState('');
+  const [nomResults,setNomResults]=useState([]);
+  const [nominees,setNominees]=useState([]);
+  const [myGroups,setMyGroups]=useState([]);
+  const [selectedGroup,setSelectedGroup]=useState(null);
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{DB.getMyGroups(user.id).then(setMyGroups).catch(()=>{});},[user.id]);
+
+  useEffect(()=>{
+    if(nomQuery.length<2){setNomResults([]);return;}
+    const t=setTimeout(async()=>{
+      try{const r=await DB.searchUsers(nomQuery);setNomResults(r.filter(u=>u.id!==user.id&&!nominees.find(n=>n.id===u.id)));}catch(e){}
+    },300);
+    return()=>clearTimeout(t);
+  },[nomQuery,nominees]);
+
+  const extractLastSentence=txt=>{
+    const parts=(txt||'').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+    return parts[parts.length-1]||(txt||'').trim().slice(-140);
+  };
+
+  const confirm=async()=>{
+    if(target==='user'&&nominees.length===0){alert('Elige al menos una persona.');return;}
+    if(target==='group'&&!selectedGroup){alert('Elige un equipo.');return;}
+    setSaving(true);
+    try{
+      const lastSentence=extractLastSentence(entry.plain);
+      const created=await DB.createChain({
+        title:title.trim()||entry.title||'Relato encadenado',
+        min_words:600,status:'active',chapter_count:1,
+        full_html:entry.html||'',full_plain:entry.plain||'',
+        last_sentence:lastSentence,creator_id:user.id,
+      });
+      await DB.addChainChapter({
+        chain_id:created.id,user_id:user.id,author_name:user.name,
+        html:entry.html||'',plain:entry.plain||'',
+        word_count:entry.word_count||entry.wordCount||0,chapter_number:1,
+      });
+      if(target==='open'){
+        await DB.createNomination({chain_id:created.id,chapter_number:2,nominated_user_id:null,nominated_by:user.id});
+      }else if(target==='group'){
+        await DB.createNomination({chain_id:created.id,chapter_number:2,nominated_group_id:selectedGroup.id,nominated_by:user.id});
+      }else{
+        for(const n of nominees){
+          await DB.createNomination({chain_id:created.id,chapter_number:2,nominated_user_id:n.id,nominated_by:user.id});
+        }
+      }
+      setStep('done');
+    }catch(e){alert('Error: '+e.message);}
+    setSaving(false);
+  };
+
+  if(step==='done')return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:260,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:380,padding:'28px 24px',textAlign:'center',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.35)'}}>
+        <div style={{fontSize:36,marginBottom:12}}>✓</div>
+        <div style={{fontFamily:'"Playfair Display",serif',fontSize:18,fontWeight:700,color:TXT,marginBottom:8}}>¡Encadenado propuesto!</div>
+        <div style={{fontSize:13,color:MUTED,marginBottom:20,lineHeight:1.5}}>
+          {target==='open'?'Cualquiera podrá reclamar el siguiente capítulo desde la Biblioteca.':target==='group'?'Se ha avisado a todo el equipo «'+selectedGroup.name+'».':'Hemos avisado a la persona elegida para que continúe el relato.'}
+        </div>
+        <button onClick={onClose} style={{background:ADVANCE_BG,border:'none',borderRadius:9,padding:'11px 24px',fontSize:13.5,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cerrar</button>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:260,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="fi" style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:440,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.35)',padding:'26px 24px',position:'relative'}}>
+        <Signo char="&hellip;" size={110} top={-14} right={-4} color="azul"/>
+        <div style={{position:'relative',zIndex:1}}>
+          <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:6}}>
+            <Icon name="link" size={16} color={AZULMED}/>
+            <div style={{fontFamily:'"Playfair Display",serif',fontSize:18,fontWeight:700,color:TXT}}>Encadenar este relato</div>
+          </div>
+          <p style={{fontSize:12.5,color:MUTED,lineHeight:1.6,marginBottom:18}}>
+            «{entry.title||'Sin título'}» se convertirá en el primer capítulo. Quien lo continúe deberá empezar con la última frase de tu texto.
+          </p>
+
+          <div style={{marginBottom:16}}>
+            <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Título de la cadena</label>
+            <input type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="Relato encadenado" style={{width:'100%'}}/>
+          </div>
+
+          <div style={{display:'flex',gap:6,marginBottom:14}}>
+            {[['open','Abierta'],['user','Persona'],['group','Equipo']].map(([id,label])=>(
+              <button key={id} onClick={()=>setTarget(id)} style={{flex:1,background:target===id?AZUL:'rgba(30,155,240,0.06)',color:target===id?'#fff':AZULMED,border:'none',borderRadius:8,padding:'8px 6px',fontSize:11.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{label}</button>
+            ))}
+          </div>
+
+          {target==='open'&&<div style={{fontSize:12,color:MUTED,background:'rgba(30,155,240,0.06)',borderRadius:9,padding:'10px 12px',marginBottom:6,lineHeight:1.5}}>
+            Cualquiera podrá reclamarlo desde la Biblioteca.
+          </div>}
+
+          {target==='user'&&<>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:nominees.length?10:0}}>
+              {nominees.map(n=>(
+                <span key={n.id} style={{display:'flex',alignItems:'center',gap:6,background:'rgba(27,95,170,0.1)',border:'1px solid rgba(27,95,170,0.25)',borderRadius:20,padding:'4px 6px 4px 10px',fontSize:12,color:AZULMED}}>
+                  {n.name}
+                  <button onClick={()=>setNominees(p=>p.filter(x=>x.id!==n.id))} style={{background:'transparent',border:'none',cursor:'pointer',color:AZULMED,fontSize:13,padding:0,lineHeight:1}}>×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{position:'relative'}}>
+              <input type="text" value={nomQuery} onChange={e=>setNomQuery(e.target.value)} placeholder="Buscar por nombre o @usuario…" style={{width:'100%'}}/>
+              {nomResults.length>0&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,boxShadow:'0 12px 30px -8px rgba(10,27,61,0.25)',overflow:'hidden',zIndex:10}}>
+                {nomResults.map(r=>(
+                  <button key={r.id} onClick={()=>{setNominees(p=>[...p,r]);setNomQuery('');setNomResults([]);}}
+                    style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'9px 12px',cursor:'pointer',borderBottom:'1px solid '+BDR}}>
+                    <UserAvatar user={r} size={26}/>
+                    <span style={{fontSize:12,color:TXT}}>{r.name}</span>
+                  </button>
+                ))}
+              </div>}
+            </div>
+          </>}
+
+          {target==='group'&&<div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {myGroups.length===0&&<div style={{fontSize:12,color:FAINT}}>No formas parte de ningún equipo todavía.</div>}
+            {myGroups.map(g=>(
+              <button key={g.id} onClick={()=>setSelectedGroup(g)} style={{display:'flex',alignItems:'center',gap:8,background:selectedGroup?.id===g.id?'rgba(30,155,240,0.08)':'transparent',border:'1px solid '+(selectedGroup?.id===g.id?'rgba(30,155,240,0.3)':BDR),borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+                <Icon name="users-three" size={14} color={AZUL}/>
+                <span style={{fontSize:13,color:TXT}}>{g.name}</span>
+              </button>
+            ))}
+          </div>}
+
+          <div style={{display:'flex',gap:10,marginTop:22}}>
+            <button onClick={onClose} style={{flex:'0 0 auto',background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'11px 16px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+            <button onClick={confirm} disabled={saving} style={{flex:1,background:ADVANCE_BG,border:'none',borderRadius:9,padding:'11px',fontSize:13.5,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",opacity:saving?0.6:1}}>
+              {saving?'Proponiendo…':'Encadenar →'}
+            </button>
           </div>
         </div>
       </div>
@@ -11599,6 +11988,9 @@ const App=()=>{
       date:e.date||null,ts:e.ts||Date.now(),
       visibility:e.visibility||'privado',
       shared_group_id:e.shared_group_id||null,
+      folder:e.folder!==undefined?e.folder:null,
+      meta_words:e.meta_words||null,
+      extra_elapsed:e.extra_elapsed||0,
     };
     try{
       await DB.upsertEntry(dbEntry);
@@ -11670,6 +12062,7 @@ const App=()=>{
       onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
       onEditEntry={e=>setEditingEntry(e)}
       onChangeVisibility={async(id,vis)=>{try{await DB.updateVisibility(id,vis);setLibrary(prev=>prev.map(x=>x.id===id?{...x,visibility:vis}:x));}catch(e){console.error(e);}}}
+      onChangeFolder={async(id,folder)=>{try{await DB.updateFolder(id,folder);setLibrary(prev=>prev.map(x=>x.id===id?{...x,folder}:x));}catch(e){console.error(e);}}}
       followers={followers}
       following={following}
       onFollow={async(targetId,isFollowing)=>{
