@@ -11859,6 +11859,44 @@ const App=()=>{
   const [followers,setFollowers]=useState([]);
   const [following,setFollowing]=useState([]);
 
+  // Reintenta subir cualquier entrada que se cacheó localmente porque su guardado
+  // en la nube falló (red caída, error temporal, etc.). saveEntry() siempre deja
+  // una copia en localStorage hasta que el guardado tiene éxito; esto la recupera.
+  const recoverPendingEntries=async(uid)=>{
+    const prefix='flujo:cache:'+uid+':';
+    const keys=S.list(prefix);
+    if(!keys.length)return;
+    let recovered=0;
+    for(const k of keys){
+      const cached=S.get(k);
+      if(!cached)continue;
+      try{
+        await DB.upsertEntry({
+          id:cached.id,user_id:uid,sk:cached.sk||null,title:cached.title||null,
+          session_label:cached.session_label||cached.sessionLabel||null,
+          html:cached.html||null,plain:cached.plain||null,
+          word_count:cached.word_count||cached.wordCount||0,
+          words_added:cached.words_added||null,
+          elapsed:cached.elapsed||0,font_idx:cached.font_idx||cached.fontIdx||0,
+          editor_size:cached.editor_size||cached.editorSize||17,
+          align_dir:cached.align_dir||cached.alignDir||'left',
+          week_id:cached.week_id||cached.weekId||null,
+          project_id:cached.project_id||cached.projectId||null,
+          date:cached.date||null,ts:cached.ts||Date.now(),
+          visibility:cached.visibility||'privado',
+          shared_group_id:cached.shared_group_id||null,
+          folder:cached.folder!==undefined?cached.folder:null,
+          meta_words:cached.meta_words||null,
+          extra_elapsed:cached.extra_elapsed||0,
+        });
+        S.del(k);
+        recovered++;
+      }catch(e){console.error('recoverPendingEntries:',k,e?.message||e);}
+    }
+    if(recovered>0)console.log('Recuperadas '+recovered+' entrada(s) pendiente(s) de un guardado anterior fallido.');
+    return recovered;
+  };
+
   const loadUserData=async(uid)=>{
     if(!uid)return;
     setSyncStatus('syncing');
@@ -11928,7 +11966,7 @@ const App=()=>{
           const profile=await DB.getProfile(session.user.id);
           const resolvedProfile=profile||{id:session.user.id,name:session.user.email?.split('@')[0]||'Usuario',initials:'U',accent:'#1E9BF0',bg:'#EEEDFE',text_col:'#3C3489'};
           setUser({...session.user,...resolvedProfile});
-          loadUserData(session.user.id); // non-blocking
+          recoverPendingEntries(session.user.id).then(()=>loadUserData(session.user.id)); // non-blocking
         }else{
           clearTimeout(timeout);
           setLoading(false);
@@ -11955,6 +11993,7 @@ const App=()=>{
     const session=await DB.getSession();
     if(session?.user){
       setUser({...session.user,...profile});
+      await recoverPendingEntries(session.user.id);
       await loadUserData(session.user.id);
       setView('dashboard');
     }
