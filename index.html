@@ -1970,6 +1970,12 @@ const DB = {
     const { error } = await getSB().from('entries').update({ visibility }).eq('id', entryId);
     if (error) throw error;
   },
+  stripEntryContent: async (entryId) => {
+    // Borra el TEXTO de una entrada (html/plain) pero conserva word_count/elapsed/words_added
+    // para que las estadísticas (palabras escritas, tiempo escrito) sigan siendo correctas.
+    const { error } = await getSB().from('entries').update({ html: '', plain: '', visibility: 'ejercicio' }).eq('id', entryId);
+    if (error) throw error;
+  },
   updateFolder: async (entryId, folder) => {
     const { error } = await getSB().from('entries').update({ folder }).eq('id', entryId);
     if (error) throw error;
@@ -7860,6 +7866,9 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const isReeditingCuento=sessionConfig.type==='edit'&&originalEntryRef.current?.sk==='cuento';
     const finalElapsed=isReeditingCuento?(originalEntryRef.current.elapsed||0):elapsed;
     const finalExtraElapsed=isReeditingCuento?((originalEntryRef.current.extra_elapsed||0)+elapsed):(existing?.extra_elapsed||0);
+    // La visibilidad se preserva siempre que la entrada ya existiera (p.ej. al reeditar un texto
+    // ya publicado como "amigos"/"abierto"). Solo las entradas nuevas nacen como "privado".
+    const visibility=existing?(existing.visibility||'privado'):'privado';
     return {
       id,ts:Date.now(),sk,date:today(),
       words_added:Math.max(0,wc-initialWcRef.current), // increment only, 0 if didn't add words
@@ -7871,12 +7880,14 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       elapsed:finalElapsed,
       extra_elapsed:finalExtraElapsed,
       meta_words:existing?.meta_words||null,
+      visibility,
       font_idx:fontIdx,fontIdx,
       editor_size:sz,editorSize:sz,
       align_dir:align,alignDir:align,
       week_id:sessionConfig.weekId||null,weekId:sessionConfig.weekId||null,
       project_id:currentProject?.id||null,projectId:currentProject?.id||null,
       folder,
+      visibility:existing?.visibility, // preserva la visibilidad ya elegida; si es una entrada nueva, queda undefined y cae al valor por defecto ('privado') más abajo en saveEntry
     };
   };
 
@@ -9764,7 +9775,12 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
 
   const myTexts=library.filter(e=>e.visibility!=='ejercicio');
   const inFolder=e=>{
-    if(folder==='todos')return true;
+    // Los checks y retos semanales que siguen en la carpeta "Retos" por defecto
+    // (es decir, nadie los ha movido a mano todavía) no aparecen en "Todos":
+    // son ejercicios de calentamiento, no piezas que el usuario haya curado.
+    // En cuanto se mueven a otra carpeta, se comportan como cualquier otro texto.
+    const isUncuratedExercise=e.folder==='retos'&&(e.sk==='check'||e.sk==='reto');
+    if(folder==='todos')return !isUncuratedExercise;
     if(folder==='sin')return !e.folder;
     return e.folder===folder;
   };
@@ -11402,9 +11418,21 @@ const EncadenarModal=({user,entry,onClose})=>{
             <Icon name="link" size={16} color={AZULMED}/>
             <div style={{fontFamily:'"Playfair Display",serif',fontSize:18,fontWeight:700,color:TXT}}>Encadenar este relato</div>
           </div>
-          <p style={{fontSize:12.5,color:MUTED,lineHeight:1.6,marginBottom:18}}>
+          <p style={{fontSize:12.5,color:MUTED,lineHeight:1.6,marginBottom:14}}>
             «{entry.title||'Sin título'}» se convertirá en el primer capítulo. Quien lo continúe deberá empezar con la última frase de tu texto.
           </p>
+
+          {(entry.visibility||'privado')!=='abierto'&&(
+            <div style={{background:'rgba(241,90,36,0.07)',border:'1px solid rgba(241,90,36,0.25)',borderRadius:9,padding:'10px 12px',marginBottom:16,display:'flex',gap:8,alignItems:'flex-start'}}>
+              <Icon name="warning-circle" size={15} color={NARANJA} style={{flexShrink:0,marginTop:1}}/>
+              <div style={{fontSize:11.5,color:TXT,lineHeight:1.55}}>
+                {(entry.visibility||'privado')==='privado'?'Este texto es privado ahora mismo. ':'Este texto solo es visible para tus amigos ahora mismo. '}
+                Al encadenarlo, su contenido completo será legible por
+                {target==='open'?' cualquier persona que reclame el siguiente capítulo desde la Biblioteca':target==='group'?' todos los miembros del equipo que elijas':' la persona que nomines'}
+                , sin importar su visibilidad actual.
+              </div>
+            </div>
+          )}
 
           <div style={{marginBottom:16}}>
             <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Título de la cadena</label>
@@ -11957,11 +11985,20 @@ const App=()=>{
         date:ref.date||null,ts:ref.ts||Date.now(),
       };
       try{await DB.upsertReflection(dbRef);}catch(e){console.error('save reflection',e);}
-      // Apply chosen visibility to the saved entry
+      // Apply chosen visibility to the saved entry.
+      // Si el usuario NO eligió guardarlo en su biblioteca ('ejercicio'), borramos el
+      // contenido (html/plain) de la base de datos: las palabras y el tiempo ya quedaron
+      // registrados en la reflexión de arriba, así que las estadísticas no se ven afectadas,
+      // pero el texto en sí no se almacena — evitando ruido y reduciendo el almacenamiento.
       if(ref.entryId&&ref.visibility){
         try{
-          await DB.updateVisibility(ref.entryId,ref.visibility);
-          setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:ref.visibility}:x));
+          if(ref.visibility==='ejercicio'){
+            await DB.stripEntryContent(ref.entryId);
+            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:'ejercicio',html:'',plain:''}:x));
+          }else{
+            await DB.updateVisibility(ref.entryId,ref.visibility);
+            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:ref.visibility}:x));
+          }
         }catch(e){console.error('apply visibility',e);}
       }
     }
