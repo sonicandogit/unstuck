@@ -1976,6 +1976,17 @@ const DB = {
     const { error } = await getSB().from('entries').update({ html: '', plain: '', visibility: 'ejercicio' }).eq('id', entryId);
     if (error) throw error;
   },
+  appendFeedbackToEntry: async (entryId, htmlAppend, plainAppend) => {
+    // Añade la revisión de Claude al final del propio documento, para que quede
+    // guardada junto al texto y se vea siempre al releerlo en la biblioteca.
+    const { data, error: e1 } = await getSB().from('entries').select('html, plain').eq('id', entryId).single();
+    if (e1) throw e1;
+    const { error: e2 } = await getSB().from('entries').update({
+      html: (data?.html || '') + htmlAppend,
+      plain: (data?.plain || '') + plainAppend,
+    }).eq('id', entryId);
+    if (e2) throw e2;
+  },
   updateFolder: async (entryId, folder) => {
     const { error } = await getSB().from('entries').update({ folder }).eq('id', entryId);
     if (error) throw error;
@@ -12032,7 +12043,22 @@ const App=()=>{
             setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:'ejercicio',html:'',plain:''}:x));
           }else{
             await DB.updateVisibility(ref.entryId,ref.visibility);
-            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:ref.visibility}:x));
+            let htmlAppend='',plainAppend='';
+            // Si hubo revisión de Claude y el texto se va a quedar guardado, se añade
+            // al final del propio documento — así siempre se ve junto al texto, releyéndolo
+            // en la biblioteca, sin tener que buscarla por separado.
+            if(ref.feedback&&ref.feedback.trim()){
+              const fbParas=ref.feedback.trim().split(/\n+/).map(l=>l.trim()).filter(Boolean);
+              plainAppend='\n\n— — —\n\n✦ Revisión de Claude\n\n'+fbParas.join('\n');
+              htmlAppend='<div style="margin-top:2em;padding-top:1.2em;border-top:1px solid rgba(10,27,61,0.12)">'
+                +'<div style="font-family:\'Playfair Display\',serif;font-style:italic;font-weight:600;font-size:0.95em;color:#1B5FAA;margin-bottom:0.6em">✦ Revisión de Claude</div>'
+                +fbParas.map(p=>'<p style="color:#5B6478;font-size:0.92em;line-height:1.65;margin:0 0 0.6em">'+p.replace(/^(\d)\.\s*/,'<strong>$1.</strong> ')+'</p>').join('')
+                +'</div>';
+              try{
+                await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);
+              }catch(e){console.error('append feedback',e);}
+            }
+            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:ref.visibility,html:(x.html||'')+htmlAppend,plain:(x.plain||'')+plainAppend}:x));
           }
         }catch(e){console.error('apply visibility',e);}
       }
