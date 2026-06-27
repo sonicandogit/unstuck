@@ -2408,8 +2408,7 @@ const exportZip=async(user,library,reflections,projects)=>{
     textos.file((e.date||'sin-fecha')+'_'+name+'.txt',[
       '# '+(e.title||'Sin título'),
       'Fecha: '+(e.date||''),'Palabras: '+(e.word_count||e.wordCount||0),'',e.plain||''
-    ].join('
-'));
+    ].join('\n'));
   });
   if(reflections.length){
     const refs=zip.folder('reflexiones');
@@ -2417,11 +2416,8 @@ const exportZip=async(user,library,reflections,projects)=>{
       refs.file((r.date||'sin-fecha')+'_reflexion.txt',[
         'Sesión: '+(r.session_title||r.sessionTitle||''),
         'Valoración: '+(r.rating||0)+'/10','',r.notes||'',
-        r.feedback?'
---- Claude ---
-'+r.feedback:''
-      ].join('
-'));
+        r.feedback?'\n--- Claude ---\n'+r.feedback:''
+      ].join('\n'));
     });
   }
   const blob=await zip.generateAsync({type:'blob'});
