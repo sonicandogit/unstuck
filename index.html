@@ -1841,6 +1841,21 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  getReadableEntries: async (uid, limit=12) => {
+    // Trae los textos de "uid" que YO (el usuario logueado) puedo leer de verdad.
+    // No hace falta replicar aquí la lógica de amigos/mutuo: RLS ya filtra por
+    // auth.uid() en el servidor, así que esto siempre refleja lo que se puede ver.
+    const { data, error } = await getSB().from('entries')
+      .select('id, user_id, title, html, plain, word_count, wordCount, visibility, date, sk')
+      .eq('user_id', uid)
+      .eq('deleted', false)
+      .in('visibility', ['abierto','amigos'])
+      .not('plain', 'is', null)
+      .order('ts', { ascending: false })
+      .limit(limit);
+    if (error) { console.error('getReadableEntries:', error.message); throw error; }
+    return data || [];
+  },
   getUserRatings: async (uid) => {
     // Get avg rating across all public entries of a user
     const { data: entries } = await getSB().from('entries').select('id').eq('user_id', uid);
@@ -9494,6 +9509,9 @@ const ChallengesHistory=({user,onClose})=>{
 const PublicProfile=({user,onClose})=>{
   const [stats,setStats]=useState(null);
   const [loading,setLoading]=useState(true);
+  const [showTexts,setShowTexts]=useState(false);
+  const [texts,setTexts]=useState(null); // null=no cargado, []=cargado y vacío
+  const [readEntry,setReadEntry]=useState(null);
 
   useEffect(()=>{
     if(!user?.id){setLoading(false);return;}
@@ -9502,6 +9520,13 @@ const PublicProfile=({user,onClose})=>{
       .catch(e=>console.error('profile stats:',e))
       .finally(()=>setLoading(false));
   },[user?.id]);
+
+  const openTexts=()=>{
+    setShowTexts(true);
+    if(texts===null){
+      DB.getReadableEntries(user.id).then(setTexts).catch(()=>setTexts([]));
+    }
+  };
 
   if(!user)return null;
   const profileUrl=window.location.origin+window.location.pathname+'?user='+(user.username||user.id);
@@ -9537,13 +9562,36 @@ const PublicProfile=({user,onClose})=>{
 
         {/* Stats 3×2 grid */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'1px',background:BDR}}>
-          {statCards.map(s=>(
-            <div key={s.l} style={{background:CARD_BG,padding:'14px 6px',textAlign:'center'}}>
-              <div style={{fontSize:18,fontWeight:700,color:TXT,letterSpacing:'-0.02em',lineHeight:1.1,fontFamily:'"Playfair Display",serif'}}>{s.v}</div>
-              <div style={{fontSize:9,color:FAINT,marginTop:3,textTransform:'uppercase',letterSpacing:'.06em'}}>{s.l}</div>
-            </div>
-          ))}
+          {statCards.map(s=>{
+            const clickable=s.l==='Textos'&&stats?.publicTexts>0;
+            return(
+              <div key={s.l} onClick={clickable?openTexts:undefined} style={{background:CARD_BG,padding:'14px 6px',textAlign:'center',cursor:clickable?'pointer':'default',position:'relative'}}>
+                <div style={{fontSize:18,fontWeight:700,color:clickable?AZUL:TXT,letterSpacing:'-0.02em',lineHeight:1.1,fontFamily:'"Playfair Display",serif'}}>{s.v}</div>
+                <div style={{fontSize:9,color:FAINT,marginTop:3,textTransform:'uppercase',letterSpacing:'.06em'}}>{s.l}</div>
+                {clickable&&<div style={{fontSize:8,color:AZUL,marginTop:1}}>Ver →</div>}
+              </div>
+            );
+          })}
         </div>
+
+        {/* Textos recientes legibles — se despliega al pulsar "Textos" */}
+        {showTexts&&(
+          <div style={{padding:'14px 20px 4px',borderTop:'1px solid '+BDR,maxHeight:280,overflowY:'auto'}}>
+            {texts===null&&<div style={{fontSize:12,color:MUTED,textAlign:'center',padding:12}}>Cargando…</div>}
+            {texts!==null&&texts.length===0&&<div style={{fontSize:12,color:MUTED,textAlign:'center',padding:12}}>No hay textos que puedas leer ahora mismo.</div>}
+            {texts!==null&&texts.length>0&&(
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {texts.map(t=>(
+                  <button key={t.id} onClick={()=>setReadEntry(t)} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:3,background:'rgba(10,27,61,0.025)',border:'1px solid '+BDR,borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",width:'100%'}}>
+                    <span style={{fontSize:13,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{t.title||'Sin título'}</span>
+                    <span style={{fontSize:10.5,color:FAINT}}>{t.visibility==='amigos'?'Amigos':'Público'} · {t.word_count||t.wordCount||0} pal.</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
 
         {/* Share + close */}
         <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
