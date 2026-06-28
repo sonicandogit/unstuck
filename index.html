@@ -1846,7 +1846,7 @@ const DB = {
     // No hace falta replicar aquí la lógica de amigos/mutuo: RLS ya filtra por
     // auth.uid() en el servidor, así que esto siempre refleja lo que se puede ver.
     const { data, error } = await getSB().from('entries')
-      .select('id, user_id, title, html, plain, word_count, wordCount, visibility, date, sk')
+      .select('id, user_id, title, html, plain, word_count, visibility, date, sk')
       .eq('user_id', uid)
       .eq('deleted', false)
       .in('visibility', ['abierto','amigos'])
