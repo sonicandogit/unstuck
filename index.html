@@ -6949,14 +6949,14 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
-      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}}/>}
+      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}/>}
       {showStartChain&&<StartChainModal user={user} onClose={()=>setShowStartChain(false)}/>}
       {showLibChecks&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="check" onStartLesson={onStartLesson} onClose={()=>setShowLibChecks(false)}/>}
       {showLibSemanales&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="reto" onStartLesson={onStartLesson} onClose={()=>setShowLibSemanales(false)}/>}
-      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry}/>}
+      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry} onVisibilityChange={onChangeVisibility}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div className="topbar" style={{display:'flex',alignItems:'center',padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:18,letterSpacing:'-0.01em',color:TXT,flexShrink:0}}>Pretexto</div>
@@ -8647,7 +8647,7 @@ const UsernamePanel=({user,onClose,onSave})=>{
 };
 
 /* ─── TEAMS SCREEN ───────────────────────────────── */
-const TeamsScreen=({user,onClose,onEdit})=>{
+const TeamsScreen=({user,onClose,onEdit,onVisibilityChange})=>{
   const [teams,setTeams]=useState([]);
   const [view,setView]=useState('list'); // 'list'|'create'|'detail'|'invite'
   const [selected,setSelected]=useState(null);
@@ -8689,7 +8689,7 @@ const TeamsScreen=({user,onClose,onEdit})=>{
   };
 
   if(view==='create')return<CreateTeam user={user} onBack={()=>setView('list')} onCreated={async t=>{await loadTeams();setSelected(t);setView('detail');}}/>;
-  if(view==='detail'&&selected)return<TeamDetail user={user} team={selected} onBack={()=>{setView('list');loadTeams();}} onInvite={()=>setView('invite')} onEdit={onEdit}/>;
+  if(view==='detail'&&selected)return<TeamDetail user={user} team={selected} onBack={()=>{setView('list');loadTeams();}} onInvite={()=>setView('invite')} onEdit={onEdit} onVisibilityChange={onVisibilityChange}/>;
   if(view==='invite'&&selected)return<InvitePanel user={user} team={selected} onBack={()=>setView('detail')}/>;
 
   return(
@@ -8888,7 +8888,7 @@ const InvitePanel=({user,team,onBack})=>{
 };
 
 /* ─── TEAM DETAIL ────────────────────────────────── */
-const TeamDetail=({user,team,onBack,onInvite,onEdit})=>{
+const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange})=>{
   const [members,setMembers]=useState([]);
   const [challenges,setChallenges]=useState([]);
   const [teamEntries,setTeamEntries]=useState([]);
@@ -8956,7 +8956,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)} onEdit={()=>{setReadingModal(null);onEdit&&onEdit(readingModal);}}/>}
+      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)} onEdit={()=>{setReadingModal(null);onEdit&&onEdit(readingModal);}} onVisibilityChange={onVisibilityChange}/>}
       {/* Share modal */}
       {sharing&&<div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)setSharing(null)}}>
         <div className="fi" style={{background:CARD_BG,borderRadius:14,width:'100%',maxWidth:440,maxHeight:'80vh',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.3)'}}>
@@ -9879,7 +9879,7 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange}/>}
       {movingEntry&&<div onClick={()=>setMovingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Mover a…</div>
@@ -10144,7 +10144,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange}/>}
 
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:10,padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
