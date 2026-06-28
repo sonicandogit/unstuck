@@ -9524,7 +9524,7 @@ const PublicProfile=({user,onClose})=>{
   const openTexts=()=>{
     setShowTexts(true);
     if(texts===null){
-      DB.getReadableEntries(user.id).then(setTexts).catch(()=>setTexts([]));
+      DB.getReadableEntries(user.id).then(setTexts).catch(e=>{console.error('getReadableEntries:',e.message);setTexts([]);});
     }
   };
 
