@@ -1835,6 +1835,7 @@ const DB = {
     const { data, error } = await getSB().from('entries')
       .select('id, word_count, visibility, date, elapsed, sk')
       .eq('user_id', uid)
+      .eq('deleted', false)
       .neq('visibility', 'privado')
       .order('ts', { ascending: false });
     if (error) throw error;
@@ -1854,7 +1855,9 @@ const DB = {
     if (error) throw error;
   },
   deleteEntry: async (id) => {
-    const { error } = await getSB().from('entries').delete().eq('id', id);
+    // Borrado "suave": se vacía el contenido (privacidad) pero se conservan
+    // word_count/elapsed, para que las estadísticas históricas no bajen al borrar un texto.
+    const { error } = await getSB().from('entries').update({ html: '', plain: '', deleted: true }).eq('id', id);
     if (error) throw error;
   },
 
@@ -1942,6 +1945,7 @@ const DB = {
     const { data, error } = await getSB().from('entries')
       .select('*, profiles(name, username, initials, accent, bg)')
       .eq('visibility', 'abierto')
+      .eq('deleted', false)
       .not('plain', 'is', null)
       .order('ts', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -1965,6 +1969,7 @@ const DB = {
       .select('*, profiles(name, username, initials, accent, bg)')
       .eq('visibility', 'amigos')
       .in('user_id', mutualIds)
+      .eq('deleted', false)
       .not('plain', 'is', null)
       .order('ts', { ascending: false })
       .limit(50);
@@ -6946,7 +6951,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
-        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry}/>}
+        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility}/>}
@@ -7242,7 +7247,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         {library.slice(0,3).length>0&&<div className="fu">
           <div style={{fontSize:11,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>Últimos textos</div>
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {library.slice(0,3).map(e=>{const sc={check:AZUL,reto:NARANJA,proyecto:AZULMED,cuento:'#A82020',dueto:'#1A6B8A'}[e.sk]||MUTED;return <div key={e.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,padding:'10px 14px',display:'flex',alignItems:'center',gap:10}}>
+            {library.filter(e=>!e.deleted).slice(0,3).map(e=>{const sc={check:AZUL,reto:NARANJA,proyecto:AZULMED,cuento:'#A82020',dueto:'#1A6B8A'}[e.sk]||MUTED;return <div key={e.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,padding:'10px 14px',display:'flex',alignItems:'center',gap:10}}>
               <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.title}</div><div style={{fontSize:11,color:MUTED}}>{fmtDate(e.date)} · {e.wordCount} palabras</div></div>
               <button onClick={()=>{
@@ -7460,7 +7465,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
                   </button>
                   <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
                     {genreProjs.map(p=>{
-                      const _projEntries=library.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
+                      const _projEntries=library.filter(e=>(e.project_id||e.projectId)===p.id&&!e.deleted).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
                       return(
                         <div key={p.id} style={{background:'#F8F7F4',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
                           <div style={{flex:1,minWidth:0}}>
@@ -7517,7 +7522,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack}
 const PostSession=({sessionData,onComplete,onBack,user})=>{
   const [rating,setRating]=useState(7);
   const [notes,setNotes]=useState('');
-  const [saveToLib,setSaveToLib]=useState(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento');
+  const [saveToLib,setSaveToLib]=useState(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
   const [pubVis,setPubVis]=useState('privado');
   const [fbState,setFbState]=useState(getApiKey(user.id)?'ready':'no_key');
   const [fbError,setFbError]=useState('');
@@ -9795,7 +9800,9 @@ const VisibilityPicker=({value,onChange})=>{
 };
 
 /* ─── MIS TEXTOS ─────────────────────────────────── */
-const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
+const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
+  const [deletingEntry,setDeletingEntry]=useState(null);
+  const [deleting,setDeleting]=useState(false);
   const [filter,setFilter]=useState('all');
   const [folder,setFolder]=useState('todos'); // 'todos' | 'sin' | slug de carpeta por defecto | id de carpeta personalizada
   const [customFolders,setCustomFolders]=useState([]);
@@ -9813,7 +9820,7 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
 
   const allFolders=[...DEFAULT_FOLDERS,...customFolders.map(f=>[f.id,f.name])];
 
-  const myTexts=library.filter(e=>e.visibility!=='ejercicio');
+  const myTexts=library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted);
   const inFolder=e=>{
     // Los checks y retos semanales que siguen en la carpeta "Retos" por defecto
     // (es decir, nadie los ha movido a mano todavía) no aparecen en "Todos":
@@ -9895,6 +9902,30 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
             ))}
           </div>
           <button onClick={()=>setMovingEntry(null)} style={{width:'100%',marginTop:12,background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'8px',fontSize:12,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+        </div>
+      </div>}
+
+      {deletingEntry&&<div onClick={()=>!deleting&&setDeletingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.45)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+        <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'20px',width:'100%',maxWidth:320,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+            <Icon name="warning-circle" size={18} color={DANGER}/>
+            <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT}}>Eliminar texto</div>
+          </div>
+          <p style={{fontSize:12.5,color:MUTED,lineHeight:1.55,marginBottom:18}}>
+            ¿Seguro que quieres eliminar «{deletingEntry.title||'Sin título'}»? Esta acción no se puede deshacer.
+          </p>
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>setDeletingEntry(null)} disabled={deleting} style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+            <button onClick={async()=>{
+                setDeleting(true);
+                try{await onDelete(deletingEntry.id);setDeletingEntry(null);}
+                catch(e){alert('Error al eliminar: '+e.message);}
+                setDeleting(false);
+              }} disabled={deleting}
+              style={{flex:1,background:DANGER,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",opacity:deleting?0.6:1}}>
+              {deleting?'Eliminando…':'Eliminar'}
+            </button>
+          </div>
         </div>
       </div>}
 
@@ -9980,8 +10011,12 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit})=>{
               <div key={e.id} onClick={()=>setReadEntry(e)} style={{position:'relative',overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,padding:'16px',cursor:'pointer',display:'flex',flexDirection:'column',minHeight:165}}>
                 <Signo char={meta.signo} size={60} top={-12} right={10} color={meta.signoColor}/>
                 <button onClick={e2=>{e2.stopPropagation();setMovingEntry(e);}} title="Mover a carpeta"
-                  style={{position:'absolute',top:10,right:10,zIndex:2,background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:3,display:'flex'}}>
+                  style={{position:'absolute',top:10,right:32,zIndex:2,background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:3,display:'flex'}}>
                   <Icon name="folder-simple" size={14}/>
+                </button>
+                <button onClick={e2=>{e2.stopPropagation();setDeletingEntry(e);}} title="Eliminar"
+                  style={{position:'absolute',top:10,right:10,zIndex:2,background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:3,display:'flex'}}>
+                  <Icon name="trash" size={14}/>
                 </button>
 
                 <div style={{position:'relative',display:'flex',flexDirection:'column',flex:1}}>
@@ -10069,7 +10104,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,onEdit})=>{
+const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
   const [tab,setTab]=useState('explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
@@ -10255,7 +10290,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
-        {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit}/>}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete}/>}
       </div>
     </div>
   );
@@ -11039,7 +11074,7 @@ const FeedbackWidget=({user,library})=>{
 /* ─── SHARE NUDGE (dashboard) ───────────────────────────────── */
 const ShareNudge=({user,library})=>{
   const [dismissed,setDismissed]=useState(()=>!!S.get('pretexto:nudge_share:'+user.id));
-  const realTexts=library.filter(e=>e.visibility!=='ejercicio');
+  const realTexts=library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted);
   const privCount=realTexts.filter(e=>!e.visibility||e.visibility==='privado').length;
   const sharedCount=realTexts.filter(e=>e.visibility==='abierto'||e.visibility==='amigos').length;
 
@@ -12157,8 +12192,14 @@ const App=()=>{
 
   const deleteEntry=async(id)=>{
     if(!user)return;
-    try{await DB.deleteEntry(id);setLibrary(prev=>prev.filter(e=>e.id!==id));}
-    catch(e){console.error('delete entry',e);}
+    try{
+      await DB.deleteEntry(id);
+      // No se quita del array: se marca como borrada y se vacía el contenido,
+      // así computeStats sigue contando sus palabras/tiempo en el histórico,
+      // pero deja de mostrarse en cualquier listado de textos.
+      setLibrary(prev=>prev.map(e=>e.id===id?{...e,deleted:true,html:'',plain:''}:e));
+    }
+    catch(e){console.error('delete entry',e);throw e;}
   };
 
   const saveProject=async(proj)=>{
