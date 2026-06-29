@@ -279,12 +279,12 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 }
 </style>
 <!-- Google Analytics (consent mode — only fires after user accepts) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-XYZY2N39EM"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-40469E0V68"></script>
 <script>
   window.dataLayer=window.dataLayer||[];
   function gtag(){dataLayer.push(arguments);}
   gtag('js',new Date());
-  gtag('config','G-XYZY2N39EM',{
+  gtag('config','G-40469E0V68',{
     anonymize_ip:true,
     client_storage:'none',
     analytics_storage:'denied',
@@ -1932,9 +1932,15 @@ const DB = {
     return grp;
   },
   getGroupMembers: async (groupId) => {
-    const { data, error } = await getSB().from('group_members').select('user_id, role, profiles(name, initials, accent, bg, text_col)').eq('group_id', groupId);
+    const { data, error } = await getSB().from('group_members').select('user_id, role').eq('group_id', groupId);
     if (error) throw error;
-    return data || [];
+    const rows = data || [];
+    if (!rows.length) return rows;
+    const uids = [...new Set(rows.map(r => r.user_id))];
+    const { data: profs } = await getSB().from('profiles')
+      .select('id, name, initials, accent, bg, text_col').in('id', uids);
+    const byId = {}; (profs || []).forEach(p => byId[p.id] = p);
+    return rows.map(r => ({ ...r, profiles: byId[r.user_id] || null }));
   },
   getGroupActivity: async (groupId) => {
     const { data, error } = await getSB().from('group_activity').select('*').eq('group_id', groupId).order('created_at', { ascending: false }).limit(50);
@@ -1946,9 +1952,14 @@ const DB = {
     if (error) console.log('group activity error:', error);
   },
   getGroupChallenges: async (groupId) => {
-    const { data, error } = await getSB().from('group_challenges').select('*, profiles(name)').eq('group_id', groupId).order('created_at', { ascending: false });
+    const { data, error } = await getSB().from('group_challenges').select('*').eq('group_id', groupId).order('created_at', { ascending: false });
     if (error) throw error;
-    return data || [];
+    const rows = data || [];
+    if (!rows.length) return rows;
+    const uids = [...new Set(rows.map(r => r.proposed_by).filter(Boolean))];
+    const { data: profs } = await getSB().from('profiles').select('id, name').in('id', uids);
+    const byId = {}; (profs || []).forEach(p => byId[p.id] = p);
+    return rows.map(r => ({ ...r, profiles: byId[r.proposed_by] || null }));
   },
   proposeChallenge: async (challenge) => {
     const { data, error } = await getSB().from('group_challenges').insert(challenge).select().single();
@@ -1957,15 +1968,25 @@ const DB = {
   },
   // Public library
   getPublicEntries: async (limit=30, offset=0) => {
+    // No usamos el join automático de Supabase (entries->profiles) porque depende
+    // de que PostgREST tenga la relación cacheada, y a veces no la detecta aunque
+    // la clave foránea exista. Se traen los perfiles aparte y se unen aquí.
     const { data, error } = await getSB().from('entries')
-      .select('*, profiles(name, username, initials, accent, bg)')
+      .select('*')
       .eq('visibility', 'abierto')
       .eq('deleted', false)
       .not('plain', 'is', null)
       .order('ts', { ascending: false })
       .range(offset, offset + limit - 1);
     if (error) { console.error('getPublicEntries:', error.message); throw error; }
-    return data || [];
+    const rows = data || [];
+    if (!rows.length) return rows;
+    const uids = [...new Set(rows.map(r => r.user_id))];
+    const { data: profs, error: pe } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg').in('id', uids);
+    if (pe) console.error('getPublicEntries (profiles):', pe.message);
+    const byId = {}; (profs || []).forEach(p => byId[p.id] = p);
+    return rows.map(r => ({ ...r, profiles: byId[r.user_id] || null }));
   },
   getFriendsEntries: async (uid) => {
     // "Amigos" = seguimiento MUTUO: tú les sigues a ellos Y ellos te siguen a ti.
@@ -1981,7 +2002,7 @@ const DB = {
     const mutualIds = (followers || []).map(f => f.follower_id);
     if (!mutualIds.length) return [];
     const { data, error } = await getSB().from('entries')
-      .select('*, profiles(name, username, initials, accent, bg)')
+      .select('*')
       .eq('visibility', 'amigos')
       .in('user_id', mutualIds)
       .eq('deleted', false)
@@ -1989,7 +2010,13 @@ const DB = {
       .order('ts', { ascending: false })
       .limit(50);
     if (error) { console.error('getFriendsEntries:', error.message); throw error; }
-    return data || [];
+    const rows = data || [];
+    if (!rows.length) return rows;
+    const { data: profs, error: pe } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg').in('id', mutualIds);
+    if (pe) console.error('getFriendsEntries (profiles):', pe.message);
+    const byId = {}; (profs || []).forEach(p => byId[p.id] = p);
+    return rows.map(r => ({ ...r, profiles: byId[r.user_id] || null }));
   },
   updateVisibility: async (entryId, visibility) => {
     const { error } = await getSB().from('entries').update({ visibility }).eq('id', entryId);
@@ -2094,11 +2121,17 @@ const DB = {
   // Shared entries in team
   getTeamEntries: async (groupId) => {
     const { data, error } = await getSB().from('entries')
-      .select('*, profiles(name, initials, accent, bg)')
+      .select('*')
       .eq('shared_group_id', groupId)
       .order('ts', { ascending: false });
     if (error) throw error;
-    return data || [];
+    const rows = data || [];
+    if (!rows.length) return rows;
+    const uids = [...new Set(rows.map(r => r.user_id))];
+    const { data: profs } = await getSB().from('profiles')
+      .select('id, name, initials, accent, bg').in('id', uids);
+    const byId = {}; (profs || []).forEach(p => byId[p.id] = p);
+    return rows.map(r => ({ ...r, profiles: byId[r.user_id] || null }));
   },
   shareEntry: async (entryId, groupId) => {
     const { error } = await getSB().from('entries').update({ shared_group_id: groupId }).eq('id', entryId);
@@ -2316,7 +2349,7 @@ const DB = {
   getMyNominations: async (uid) => {
     // Nominaciones específicas a mí
     const { data: direct, error: e1 } = await getSB().from('chain_nominations')
-      .select('*, chains(id,title,premise,min_words,chapter_count,last_sentence,full_plain,status)')
+      .select('*')
       .eq('nominated_user_id', uid).eq('status', 'pending');
     if (e1) throw e1;
     // + nominaciones a cualquier grupo del que sea miembro
@@ -2325,23 +2358,34 @@ const DB = {
     let viaGroup = [];
     if (groupIds.length) {
       const { data: g, error: e2 } = await getSB().from('chain_nominations')
-        .select('*, chains(id,title,premise,min_words,chapter_count,last_sentence,full_plain,status)')
+        .select('*')
         .in('nominated_group_id', groupIds).eq('status', 'pending');
       if (e2) throw e2;
       viaGroup = g || [];
     }
     const all = [...(direct || []), ...viaGroup];
     const seen = new Set();
-    return all.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; });
+    const unique = all.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; });
+    return await DB._attachChains(unique);
   },
   getOpenNominations: async () => {
     // Nominaciones abiertas a cualquiera (para Biblioteca > Encadenados)
     const { data, error } = await getSB().from('chain_nominations')
-      .select('*, chains(id,title,premise,min_words,chapter_count,last_sentence,full_plain,status)')
+      .select('*')
       .is('nominated_user_id', null).eq('status', 'pending')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return data || [];
+    return await DB._attachChains(data || []);
+  },
+  _attachChains: async (nominations) => {
+    // Sin join automático: trae las cadenas referenciadas aparte y las une aquí
+    // (evita depender de que PostgREST tenga cacheada la relación chain_nominations->chains).
+    if (!nominations.length) return nominations;
+    const chainIds = [...new Set(nominations.map(n => n.chain_id))];
+    const { data: chainsData } = await getSB().from('chains')
+      .select('id,title,premise,min_words,chapter_count,last_sentence,full_plain,status').in('id', chainIds);
+    const byId = {}; (chainsData || []).forEach(c => byId[c.id] = c);
+    return nominations.map(n => ({ ...n, chains: byId[n.chain_id] || null }));
   },
   getMyChains: async (uid) => {
     // Cadenas que he creado o en las que he escrito al menos un capítulo
@@ -7539,6 +7583,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   const [notes,setNotes]=useState('');
   const [saveToLib,setSaveToLib]=useState(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
   const [pubVis,setPubVis]=useState('privado');
+  const [saveFeedback,setSaveFeedback]=useState(true);
   const [fbState,setFbState]=useState(getApiKey(user.id)?'ready':'no_key');
   const [fbError,setFbError]=useState('');
   const [feedback,setFeedback]=useState('');
@@ -7562,7 +7607,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   // feedback is manual — no auto-trigger
 
   const save=()=>{
-    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'?feedback:'',
+    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',
       saveToLibrary:saveToLib,visibility:saveToLib?pubVis:'ejercicio',entryId:sessionData.entryId||null};
     onComplete(r);
   };
@@ -7632,32 +7677,50 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
               <div style={{fontSize:12,color:MUTED,marginBottom:9,lineHeight:1.6}}>Aprendizajes, patrones, lo que mejor te ha funcionado…</div>
               <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder={'"Escribo mejor con música de fondo"\n"El modo Río me ayuda a soltar el texto"\n"Me cuesta arrancar, pero luego fluye"'} rows={4} style={{width:'100%',resize:'vertical',fontSize:13,lineHeight:1.7,color:TXT}}/>
             </div>
-            <div style={{display:'flex',gap:10}}><Btn variant="ghost" onClick={()=>onComplete(null)} small>Saltar</Btn><div onClick={()=>setSaveToLib(v=>!v)} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",marginBottom:10,border:"0.5px solid "+BDR}}>
-              <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveToLib?"#1E9BF0":BDR),background:saveToLib?"#1E9BF0":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
-                {saveToLib&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                <div onClick={()=>setSaveToLib(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
+                  <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveToLib?"#1E9BF0":BDR),background:saveToLib?"#1E9BF0":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                    {saveToLib&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:500,color:TXT}}>Guardar en mi biblioteca</div>
+                    <div style={{fontSize:11,color:MUTED}}>{saveToLib?"Visible en Mis textos":"Solo cuenta para las estadísticas"}</div>
+                  </div>
+                </div>
+                {fbState==='done'&&(
+                  <div onClick={()=>setSaveFeedback(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
+                    <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveFeedback?"#1B5FAA":BDR),background:saveFeedback?"#1B5FAA":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                      {saveFeedback&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:500,color:TXT}}>Guardar feedback de Claude</div>
+                      <div style={{fontSize:11,color:MUTED}}>{saveFeedback?"Se añade al final del texto":"No se guarda junto al texto"}</div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <div style={{fontSize:13,fontWeight:500,color:TXT}}>Guardar en mi biblioteca</div>
-                <div style={{fontSize:11,color:MUTED}}>{saveToLib?"Visible en Mis textos":"Solo cuenta para las estadísticas"}</div>
+              {saveToLib&&(
+                <div style={{display:'flex',gap:6}}>
+                  {[
+                    {v:'privado',icon:'lock-simple',label:'Privado',hint:'Solo tú'},
+                    {v:'amigos',icon:'users',label:'Amigos',hint:'Seguimiento mutuo'},
+                    {v:'abierto',icon:'globe',label:'Público',hint:'Toda la comunidad'},
+                  ].map(o=>(
+                    <button key={o.v} onClick={()=>setPubVis(o.v)}
+                      style={{flex:1,background:pubVis===o.v?'rgba(30,155,240,0.08)':'transparent',border:'0.5px solid '+(pubVis===o.v?'rgba(30,155,240,0.4)':BDR),borderRadius:9,padding:'8px 6px',cursor:'pointer',textAlign:'center'}}>
+                      <div style={{display:'flex',justifyContent:'center'}}><Icon name={o.icon} size={15}/></div>
+                      <div style={{fontSize:11,fontWeight:pubVis===o.v?600:400,color:pubVis===o.v?'#1E9BF0':TXT}}>{o.label}</div>
+                      <div style={{fontSize:9,color:FAINT}}>{o.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
+                <Btn variant="ghost" onClick={()=>onComplete(null)} small>Saltar</Btn>
+                <Btn variant="primary" onClick={save} style={{height:42,fontSize:14,paddingLeft:24,paddingRight:24}}>Guardar reflexión →</Btn>
               </div>
             </div>
-            {saveToLib&&(
-              <div style={{display:'flex',gap:6,marginBottom:10}}>
-                {[
-                  {v:'privado',icon:'lock-simple',label:'Privado',hint:'Solo tú'},
-                  {v:'amigos',icon:'users',label:'Amigos',hint:'Seguimiento mutuo'},
-                  {v:'abierto',icon:'globe',label:'Público',hint:'Toda la comunidad'},
-                ].map(o=>(
-                  <button key={o.v} onClick={()=>setPubVis(o.v)}
-                    style={{flex:1,background:pubVis===o.v?'rgba(30,155,240,0.08)':'transparent',border:'0.5px solid '+(pubVis===o.v?'rgba(30,155,240,0.4)':BDR),borderRadius:9,padding:'8px 6px',cursor:'pointer',textAlign:'center'}}>
-                    <div style={{display:'flex',justifyContent:'center'}}><Icon name={o.icon} size={15}/></div>
-                    <div style={{fontSize:11,fontWeight:pubVis===o.v?600:400,color:pubVis===o.v?'#1E9BF0':TXT}}>{o.label}</div>
-                    <div style={{fontSize:9,color:FAINT}}>{o.hint}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-            <Btn variant="primary" onClick={save} full style={{height:42,fontSize:14}}>Guardar reflexión →</Btn></div>
           </div>
         </div>
       </div>
@@ -12315,6 +12378,41 @@ const App=()=>{
   </>;
 };
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+/* ─── ROOT CON BANNER DE COOKIES ─────────────────────
+   Independiente de App: así el banner se ve en cualquier pantalla
+   (login, dashboard, editor...) sin tener que tocar los muchos
+   "return" anticipados que tiene App para cada vista. */
+const Root=()=>{
+  const [consent,setConsent]=useState(()=>S.get('pretexto:cookie_consent'));
+  useEffect(()=>{
+    // gtag siempre arranca denegado por defecto (más seguro); si ya
+    // habías aceptado antes, hay que volver a concederlo en cada carga.
+    if(consent==='granted'&&window.gtag){
+      window.gtag('consent','update',{analytics_storage:'granted'});
+    }
+  },[]);
+  const accept=()=>{
+    S.set('pretexto:cookie_consent','granted');
+    setConsent('granted');
+    if(window.gtag)window.gtag('consent','update',{analytics_storage:'granted'});
+  };
+  const decline=()=>{
+    S.set('pretexto:cookie_consent','denied');
+    setConsent('denied');
+    // Por si venía de "Preferencias de cookies" retirando un consentimiento
+    // ya concedido antes: hay que revocarlo también para la sesión actual.
+    if(window.gtag)window.gtag('consent','update',{analytics_storage:'denied'});
+  };
+  return(<>
+    <App/>
+    {!consent&&<CookieBanner onAccept={accept} onDecline={decline}/>}
+    {consent&&<button onClick={()=>setConsent(null)} title="Volver a elegir si aceptas cookies analíticas"
+      style={{position:'fixed',bottom:8,left:8,zIndex:400,background:'rgba(10,27,61,0.85)',color:'rgba(255,255,255,0.7)',border:'none',borderRadius:6,padding:'4px 9px',fontSize:10,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+      Preferencias de cookies
+    </button>}
+  </>);
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
 
 </script>
