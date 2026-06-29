@@ -7045,11 +7045,11 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               <div className="fi" style={{position:'fixed',top:retosPos.top,left:retosPos.left,width:190,background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,boxShadow:'0 12px 40px -12px rgba(10,27,61,0.3)',overflow:'hidden',zIndex:50}}>
                 <button onClick={()=>{setShowLibChecks(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="lightbulb"/>Checks</span>
-                  <span style={{fontSize:10.5,color:FAINT}}>128 ejercicios diarios</span>
+                  <span style={{fontSize:10.5,color:FAINT}}>Ejercicios diarios</span>
                 </button>
                 <button onClick={()=>{setShowLibSemanales(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="lightbulb"/>Semanales</span>
-                  <span style={{fontSize:10.5,color:FAINT}}>128 retos de la semana</span>
+                  <span style={{fontSize:10.5,color:FAINT}}>Retos de la semana</span>
                 </button>
                 <button onClick={()=>{setShowSendChallenge(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:NARANJA,display:'flex',alignItems:'center',gap:6}}><Icon name="timer"/>Contrarreloj</span>
@@ -7930,6 +7930,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   // el tiempo de esta nueva sesión se acumula aparte, en extra_elapsed.
   const originalEntryRef=useRef(sessionConfig.type==='edit'?library.find(e=>e.id===sessionConfig.entryId):null);
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
+  const tunnelWrapRef=useRef();
+  const [tunnelRects,setTunnelRects]=useState([]);
 
   const fontObj=FONTS[fontIdx];
   const minW=customExercise?.min||currentProject?.goal||0;
@@ -8019,29 +8021,56 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const syncFmt=()=>{try{setBold(document.queryCommandState('bold'));setItalic(document.queryCommandState('italic'));setUnder(document.queryCommandState('underline'))}catch(e){}};
   const doAlign=d=>{setAlign(d);edRef.current?.focus();document.execCommand({left:'justifyLeft',center:'justifyCenter',right:'justifyRight'}[d],false,null)};
 
-  const updateTunnelStyle=()=>{
-    if(!edRef.current)return;
-    const el=edRef.current;
-    const blocks=Array.from(el.children).filter(b=>b.nodeType===1&&b.tagName!=='BR');
-    if(ab!=='tunel'){
-      blocks.forEach(b=>{b.style.filter='';b.style.opacity='1';b.style.transition='';b.style.pointerEvents='';b.style.userSelect='';b.style.color='';});
-      return;
+  // Túnel: por TRAMOS DE 500 CARACTERES, no por párrafos/Enter. Mientras escribes dentro
+  // de un tramo de 500, se ve normal; en cuanto lo superas, todo ese tramo se cubre con un velo
+  // (opacidad+blur) y el siguiente tramo de 500 queda despejado — y así sucesivamente.
+  // No se toca el contenido del editor: se dibuja una capa encima usando Range.getClientRects(),
+  // así no hay riesgo de romper el cursor, el deshacer, ni la composición de texto (IME).
+  const updateTunnelOverlay=()=>{
+    const el=edRef.current,wrap=tunnelWrapRef.current;
+    if(!el||!wrap){setTunnelRects([]);return;}
+    if(ab!=='tunel'){setTunnelRects([]);return;}
+
+    const fullText=el.innerText||'';
+    // Mismo efecto que antes, pero medido en PALABRAS en vez de caracteres, para que el
+    // corte caiga siempre entre palabras y nunca a mitad de una. Con una media de 6
+    // caracteres por palabra: 350 car.≈58 palabras, 150 car.≈25 palabras.
+    const WORDS_VISIBLE=25,WORDS_PER_JUMP=58;
+    // Cada "palabra" incluye el espacio/salto que la sigue, para poder sumar caracteres
+    // directamente sin tener que volver a buscar dónde empieza la siguiente.
+    const wordMatches=fullText.match(/\S+\s*/g)||[];
+    const totalWords=wordMatches.length;
+    const wordBoundaryIdx=Math.max(0,Math.floor((totalWords-WORDS_VISIBLE)/WORDS_PER_JUMP))*WORDS_PER_JUMP;
+    if(wordBoundaryIdx<=0){setTunnelRects([]);return;}
+
+    // Traduce "hasta la palabra N" a una posición de carácter exacta
+    let windowStart=0;
+    for(let i=0;i<wordBoundaryIdx&&i<wordMatches.length;i++)windowStart+=wordMatches[i].length;
+    if(windowStart<=0){setTunnelRects([]);return;}
+
+    // Encuentra el nodo de texto + offset que corresponde a la posición "windowStart"
+    const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);
+    let acc=0,targetNode=null,targetOffset=0,node;
+    while((node=walker.nextNode())){
+      const len=node.nodeValue.length;
+      if(acc+len>=windowStart){targetNode=node;targetOffset=windowStart-acc;break;}
+      acc+=len;
     }
-    if(!blocks.length)return;
-    // Always show only the last paragraph
-    const curIdx=blocks.length-1;
-    blocks.forEach((b,i)=>{
-      const isCur=i===curIdx;
-      b.style.filter=isCur?'none':'blur(3px)';
-      b.style.opacity=isCur?'1':'0.18';
-      b.style.transition='filter 0.35s ease,opacity 0.35s ease';
-      b.style.pointerEvents=isCur?'auto':'none';
-      b.style.userSelect=isCur?'text':'none';
-      b.style.color=isCur?PROSE_TEXT:'rgba(10,27,61,0.45)';
-      if(isCur){
-        b.scrollIntoView({block:'center',behavior:'smooth'});
-      }
-    });
+    if(!targetNode){setTunnelRects([]);return;}
+
+    try{
+      const range=document.createRange();
+      range.selectNodeContents(el);
+      range.setEnd(targetNode,targetOffset);
+      const wrapRect=wrap.getBoundingClientRect();
+      // Se extiende cada línea un poco más arriba/abajo de lo que da el rect "puro" del texto,
+      // para que no quede una rendija visible entre líneas (eso es lo que se veía como "subrayado").
+      const PAD=5;
+      const rects=Array.from(range.getClientRects()).map(r=>({
+        top:r.top-wrapRect.top-PAD,left:r.left-wrapRect.left-2,width:r.width+4,height:r.height+PAD*2,
+      })).filter(r=>r.width>0&&r.height>0);
+      setTunnelRects(rects);
+    }catch(e){setTunnelRects([]);}
   };
 
   useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p');const init=sessionConfig.initialHtml||'';if(init&&edRef.current){edRef.current.innerHTML=init;const txt=edRef.current.innerText||'';setPlainTxt(txt);const iwc=txt.trim().split(/\s+/).filter(Boolean).length;setWc(iwc);initialWcRef.current=iwc;}},[]);
@@ -8059,10 +8088,24 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   useEffect(()=>{clearInterval(eRef.current);if(running)eRef.current=setInterval(()=>setElapsed(e=>e+1),1000);return()=>clearInterval(eRef.current)},[running]);
   useEffect(()=>{clearInterval(iRef.current);if(ab==='presion'&&running){iRef.current=setInterval(()=>setIdle(s=>{const n=s+1;if(n>=idleLimit-5)setIdleWarn(true);if(n>=idleLimit){const el=edRef.current;if(el){const bs=Array.from(el.querySelectorAll('p,div')).filter(e=>e.innerText?.trim());if(bs.length>1)bs[bs.length-1].remove();else{const ls=el.innerText.trimEnd().split('\n');if(ls.length>1){ls.pop();el.innerText=ls.join('\n')}else el.innerHTML=''}const np=el.innerText||'';prevLen.current=np.length;setPlainTxt(np);setWc(np.trim()?np.trim().split(/\s+/).filter(Boolean).length:0)}setIdleWarn(false);return 0}return n}),1000)}return()=>clearInterval(iRef.current)},[ab,running,idleLimit]);
   useEffect(()=>{
-    updateTunnelStyle();
-    const onSel=()=>updateTunnelStyle();
+    updateTunnelOverlay();
+    const onSel=()=>updateTunnelOverlay();
     document.addEventListener('selectionchange',onSel);
-    return()=>document.removeEventListener('selectionchange',onSel);
+    const el=edRef.current;
+    el?.addEventListener('scroll',onSel);
+    window.addEventListener('resize',onSel);
+    // visualViewport: más fiable que el "resize" normal cuando aparece/desaparece
+    // el teclado virtual en móvil (sobre todo en iOS Safari), que es justo cuando
+    // más cambia el espacio disponible y la superposición necesita recalcularse.
+    window.visualViewport?.addEventListener('resize',onSel);
+    window.visualViewport?.addEventListener('scroll',onSel);
+    return()=>{
+      document.removeEventListener('selectionchange',onSel);
+      el?.removeEventListener('scroll',onSel);
+      window.removeEventListener('resize',onSel);
+      window.visualViewport?.removeEventListener('resize',onSel);
+      window.visualViewport?.removeEventListener('scroll',onSel);
+    };
   },[ab]);
   useEffect(()=>{clearInterval(asRef.current);if(!autoSave||!started){setAsCd(AUTOSAVE);return}setAsCd(AUTOSAVE);asRef.current=setInterval(()=>setAsCd(c=>{if(c<=1){if(plainTxt!==lastSaved.current)saveNow(true);return AUTOSAVE}return c-1}),1000);return()=>clearInterval(asRef.current)},[autoSave,started,plainTxt]);
 
@@ -8080,7 +8123,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     prevLen.current=cur;setPlainTxt(plain);setWc(plain.trim()?plain.trim().split(/\s+/).filter(Boolean).length:0);
     if(ab==='presion'){setIdle(0);setIdleWarn(false)}
     if(!started){setStarted(true);setRunning(true)}
-    syncFmt();if(ab==='tunel')setTimeout(updateTunnelStyle,10);
+    syncFmt();if(ab==='tunel')setTimeout(updateTunnelOverlay,10);
   };
   const handleKey=e=>{if(ab==='rio'&&(e.key==='Backspace'||e.key==='Delete'))e.preventDefault()};
   const timerCol=()=>{if(!timerDur||timerSec==null)return headerAccent;const p=timerSec/timerDur;return p>0.4?headerAccent:p>0.15?'#1B5FAA':'#A82020'};
@@ -8178,13 +8221,16 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           </div>
 
           {/* WRITING AREA */}
-          <div style={{flex:1,minHeight:0,position:'relative',overflow:'hidden'}}>
+          <div ref={tunnelWrapRef} style={{flex:1,minHeight:0,position:'relative',overflow:'hidden'}}>
             <Signo char="&ldquo;" size={220} top={-10} left={-6} color="azul"/>
             {!plainTxt&&<div style={{position:'absolute',top:20,left:36,pointerEvents:'none',zIndex:2,fontSize:sz,fontFamily:fontObj.value,lineHeight:1.85,color:'rgba(26,25,22,0.28)'}}>{sk==='proyecto'?'Continúa donde lo dejaste…':'Empieza a escribir…'}</div>}
             {!started&&!plainTxt&&<div style={{position:'absolute',bottom:12,left:36,pointerEvents:'none',zIndex:2,fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}><span style={{width:4,height:4,borderRadius:'50%',background:headerAccent,opacity:0.6}}/>El temporizador arranca al escribir</div>}
             {ab==='limite'&&started&&(()=>{const h=limHint();return(<div style={{position:'absolute',top:8,left:36,pointerEvents:'none',zIndex:2,display:'flex',alignItems:'center',gap:4,fontSize:10,color:h.c}}>{Array.from({length:limDels}).map((_,i)=><span key={i} style={{width:6,height:6,borderRadius:'50%',background:i<delsLeft?'#1B5FAA':'rgba(0,0,0,0.1)',display:'inline-block'}}/>)}<span style={{marginLeft:2}}>{h.l}</span></div>)})()}
             <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt} onPaste={e=>{if(sk!=='proyecto')e.preventDefault()}}
               style={{position:'absolute',inset:0,overflowY:'auto',padding:'20px 18px 80px',outline:'none',boxSizing:'border-box',fontFamily:fontObj.value,fontSize:sz+'px',lineHeight:1.85,color:textCol(),caretColor:NARANJA,WebkitOverflowScrolling:'touch'}}/>
+            {ab==='tunel'&&tunnelRects.map((r,i)=>(
+              <div key={i} style={{position:'absolute',top:r.top,left:r.left,width:r.width,height:r.height,background:'#fff',opacity:0.94,backdropFilter:'blur(5.5px)',WebkitBackdropFilter:'blur(5.5px)',pointerEvents:'none',transition:'opacity 0.4s ease'}}/>
+            ))}
           </div>
 
           {/* MOBILE MODE BAR */}
@@ -9574,6 +9620,7 @@ const PublicProfile=({user,onClose})=>{
   const [loading,setLoading]=useState(true);
   const [showTexts,setShowTexts]=useState(false);
   const [texts,setTexts]=useState(null); // null=no cargado, []=cargado y vacío
+  const [textsActivity,setTextsActivity]=useState({});
   const [readEntry,setReadEntry]=useState(null);
 
   useEffect(()=>{
@@ -9587,7 +9634,11 @@ const PublicProfile=({user,onClose})=>{
   const openTexts=()=>{
     setShowTexts(true);
     if(texts===null){
-      DB.getReadableEntries(user.id).then(setTexts).catch(e=>{console.error('getReadableEntries:',e.message);setTexts([]);});
+      DB.getReadableEntries(user.id).then(ts=>{
+        setTexts(ts);
+        const ids=ts.map(t=>t.id);
+        if(ids.length)DB.getActivityForEntries(ids).then(setTextsActivity).catch(()=>{});
+      }).catch(e=>{console.error('getReadableEntries:',e.message);setTexts([]);});
     }
   };
 
@@ -9644,12 +9695,20 @@ const PublicProfile=({user,onClose})=>{
             {texts!==null&&texts.length===0&&<div style={{fontSize:12,color:MUTED,textAlign:'center',padding:12}}>No hay textos que puedas leer ahora mismo.</div>}
             {texts!==null&&texts.length>0&&(
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {texts.map(t=>(
-                  <button key={t.id} onClick={()=>setReadEntry(t)} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:3,background:'rgba(10,27,61,0.025)',border:'1px solid '+BDR,borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",width:'100%'}}>
-                    <span style={{fontSize:13,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{t.title||'Sin título'}</span>
-                    <span style={{fontSize:10.5,color:FAINT}}>{t.visibility==='amigos'?'Amigos':'Público'} · {t.word_count||t.wordCount||0} pal.</span>
-                  </button>
-                ))}
+                {texts.map(t=>{
+                  const act=textsActivity[t.id];
+                  return(
+                    <button key={t.id} onClick={()=>setReadEntry(t)} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:3,background:'rgba(10,27,61,0.025)',border:'1px solid '+BDR,borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",width:'100%'}}>
+                      <span style={{fontSize:13,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{t.title||'Sin título'}</span>
+                      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                        <span style={{fontSize:10.5,color:FAINT}}>{t.visibility==='amigos'?'Amigos':'Público'} · {t.word_count||t.wordCount||0} pal.</span>
+                        {act&&act.avgRating&&<span style={{fontSize:10.5,color:NARANJA,display:'inline-flex',alignItems:'center',gap:2}}><Icon name="star" size={10}/>{act.avgRating}</span>}
+                        {act&&act.reactions>0&&<span style={{fontSize:10.5,color:AZUL,display:'inline-flex',alignItems:'center',gap:2}}><Icon name="heart" size={10}/>{act.reactions}</span>}
+                        {act&&act.comments>0&&<span style={{fontSize:10.5,color:AZUL,display:'inline-flex',alignItems:'center',gap:2}}><Icon name="chat-circle" size={10}/>{act.comments}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -10285,7 +10344,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
     {id:'buscar',label:'Buscar',count:0},
-    {id:'mis_textos',label:'Mis textos',count:library.length},
+    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted).length},
   ];
 
   return(
