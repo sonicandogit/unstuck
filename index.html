@@ -12000,8 +12000,8 @@ const NotificationBell=({user,onNavigate})=>{
         {unread>0&&<span style={{position:'absolute',top:0,right:0,background:NARANJA,color:'#fff',borderRadius:'50%',minWidth:15,height:15,fontSize:9,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 3px'}}>{unread>9?'9+':unread}</span>}
       </button>
       {open&&<>
-        <div onClick={()=>setOpen(false)} style={{position:'fixed',inset:0,zIndex:149}}/>
-        <div className="fi" style={{position:'absolute',top:'calc(100% + 8px)',right:0,width:320,maxWidth:'88vw',maxHeight:420,overflowY:'auto',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',zIndex:150}}>
+        <div onClick={()=>setOpen(false)} style={{position:'fixed',inset:0,zIndex:399}}/>
+        <div className="fi" style={{position:'fixed',top:54,right:8,width:320,maxWidth:'calc(100vw - 16px)',maxHeight:'70vh',overflowY:'auto',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',zIndex:400}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px',borderBottom:'1px solid '+BDR,position:'sticky',top:0,background:CARD_BG}}>
             <span style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:13,color:TXT}}>Notificaciones</span>
             {unread>0&&<button onClick={markAllRead} style={{background:'transparent',border:'none',color:AZUL,fontSize:11,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Marcar todo leído</button>}
