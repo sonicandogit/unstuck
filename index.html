@@ -2466,6 +2466,43 @@ const DB = {
     } catch(e) {}
     return result;
   },
+  // ── Notificaciones ──
+  getNotifications: async (uid, limit=20) => {
+    const { data, error } = await getSB().from('notifications')
+      .select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return data || [];
+  },
+  getUnreadNotificationCount: async (uid) => {
+    const { count, error } = await getSB().from('notifications')
+      .select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('read', false);
+    if (error) throw error;
+    return count || 0;
+  },
+  markNotificationRead: async (id) => {
+    const { error } = await getSB().from('notifications').update({ read: true }).eq('id', id);
+    if (error) throw error;
+  },
+  markAllNotificationsRead: async (uid) => {
+    const { error } = await getSB().from('notifications').update({ read: true }).eq('user_id', uid).eq('read', false);
+    if (error) throw error;
+  },
+  getEntryById: async (id) => {
+    const { data, error } = await getSB().from('entries').select('*').eq('id', id).single();
+    if (error) throw error;
+    return data;
+  },
+  // ── Push subscriptions (notificaciones push reales) ──
+  savePushSubscription: async (uid, sub) => {
+    const { error } = await getSB().from('push_subscriptions').upsert({
+      user_id: uid, endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth,
+    }, { onConflict: 'endpoint' });
+    if (error) throw error;
+  },
+  deletePushSubscriptionByEndpoint: async (endpoint) => {
+    const { error } = await getSB().from('push_subscriptions').delete().eq('endpoint', endpoint);
+    if (error) throw error;
+  },
 };
 </script>
 
@@ -6478,6 +6515,50 @@ const USER_COLORS=[
 ];
 const AUTOSAVE=30;
 
+// ─── PUSH NOTIFICATIONS ─────────────────────────────────────────
+// Clave pública VAPID (la privada vive SOLO en el servidor — Edge Function).
+const VAPID_PUBLIC_KEY='BJNdxkIRc64nIX5f-uUT_0fZ5UYxhFGEM6CTF9_3afmGfw-DX2MLnAFIjEF55QiENMTsmth1RA3CGVga0FqyRkE';
+
+const urlBase64ToUint8Array=base64String=>{
+  const padding='='.repeat((4-base64String.length%4)%4);
+  const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw=atob(base64);
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+};
+
+// Pide permiso de notificaciones al navegador, se suscribe a push, y guarda
+// la suscripción en Supabase. Devuelve 'granted'|'denied'|'unsupported'|'error'.
+const subscribeToPush=async(uid)=>{
+  if(!('serviceWorker' in navigator)||!('PushManager' in window))return'unsupported';
+  try{
+    const permission=await Notification.requestPermission();
+    if(permission!=='granted')return'denied';
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      sub=await reg.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    await DB.savePushSubscription(uid,sub.toJSON());
+    return'granted';
+  }catch(e){console.error('subscribeToPush:',e);return'error';}
+};
+
+// Cancela la suscripción de este dispositivo (botón "Desactivar" en Ajustes).
+const unsubscribeFromPush=async()=>{
+  if(!('serviceWorker' in navigator))return;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub){
+      await DB.deletePushSubscriptionByEndpoint(sub.endpoint).catch(()=>{});
+      await sub.unsubscribe();
+    }
+  }catch(e){console.error('unsubscribeFromPush:',e);}
+};
+
 /* ─── SIGNOS DESIGN TOKENS ─────────────────────────── */
 // Paleta fija (no cambia entre temas)
 const NAVY='#0A1B3D';      // tinta principal: titulares, logo, botón de avance, nav
@@ -6978,6 +7059,22 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [showBiblioteca,setShowBiblioteca]=useState(false);
   const [showStats,setShowStats]=useState(false);
   const [showAmigos,setShowAmigos]=useState(false);
+  const [notifProfile,setNotifProfile]=useState(null); // perfil abierto desde una notificación
+  const handleNotificationNavigate=async(n)=>{
+    try{
+      if(n.type==='new_friend_text'||n.type==='new_comment'){
+        const entry=await DB.getEntryById(n.entity_id);
+        if(entry)setReadingEntry(entry);
+      }else if(n.type==='new_follower'){
+        const profile=await DB.getProfile(n.actor_id);
+        if(profile)setNotifProfile(profile);
+      }else if(n.type==='challenge_received'||n.type==='challenge_returned'){
+        setShowChallengesHistory(true);
+      }
+      // duet_your_turn y chain_nomination: ya están visibles en los widgets
+      // DuetsHub/ChainsHub del propio Dashboard, no hace falta navegar a ningún sitio.
+    }catch(e){console.error('notification navigate:',e);}
+  };
   const [showSendDuet,setShowSendDuet]=useState(false);
   const [showStartChain,setShowStartChain]=useState(false);
   const [showLibChecks,setShowLibChecks]=useState(false);
@@ -7008,19 +7105,20 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
       {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
       {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
+      {notifProfile&&<PublicProfile user={notifProfile} onClose={()=>setNotifProfile(null)}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
-      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility}/>}
+      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}/>}
       {showStartChain&&<StartChainModal user={user} onClose={()=>setShowStartChain(false)}/>}
       {showLibChecks&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="check" onStartLesson={onStartLesson} onClose={()=>setShowLibChecks(false)}/>}
       {showLibSemanales&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="reto" onStartLesson={onStartLesson} onClose={()=>setShowLibSemanales(false)}/>}
-      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry} onVisibilityChange={onChangeVisibility}/>}
+      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div className="topbar" style={{display:'flex',alignItems:'center',padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:18,letterSpacing:'-0.01em',color:TXT,flexShrink:0}}>Pretexto</div>
@@ -7066,6 +7164,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               </div>
             </>}
           </div>
+          <NotificationBell user={user} onNavigate={handleNotificationNavigate}/>
           <ThemeToggle theme={theme} setTheme={setTheme} small/>
           {/* User menu button */}
           <div style={{position:'relative'}}>
@@ -8776,7 +8875,7 @@ const UsernamePanel=({user,onClose,onSave})=>{
 };
 
 /* ─── TEAMS SCREEN ───────────────────────────────── */
-const TeamsScreen=({user,onClose,onEdit,onVisibilityChange})=>{
+const TeamsScreen=({user,onClose,onEdit,onVisibilityChange,onDelete})=>{
   const [teams,setTeams]=useState([]);
   const [view,setView]=useState('list'); // 'list'|'create'|'detail'|'invite'
   const [selected,setSelected]=useState(null);
@@ -8818,7 +8917,7 @@ const TeamsScreen=({user,onClose,onEdit,onVisibilityChange})=>{
   };
 
   if(view==='create')return<CreateTeam user={user} onBack={()=>setView('list')} onCreated={async t=>{await loadTeams();setSelected(t);setView('detail');}}/>;
-  if(view==='detail'&&selected)return<TeamDetail user={user} team={selected} onBack={()=>{setView('list');loadTeams();}} onInvite={()=>setView('invite')} onEdit={onEdit} onVisibilityChange={onVisibilityChange}/>;
+  if(view==='detail'&&selected)return<TeamDetail user={user} team={selected} onBack={()=>{setView('list');loadTeams();}} onInvite={()=>setView('invite')} onEdit={onEdit} onVisibilityChange={onVisibilityChange} onDelete={onDelete}/>;
   if(view==='invite'&&selected)return<InvitePanel user={user} team={selected} onBack={()=>setView('detail')}/>;
 
   return(
@@ -9017,7 +9116,7 @@ const InvitePanel=({user,team,onBack})=>{
 };
 
 /* ─── TEAM DETAIL ────────────────────────────────── */
-const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange})=>{
+const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange,onDelete})=>{
   const [members,setMembers]=useState([]);
   const [challenges,setChallenges]=useState([]);
   const [teamEntries,setTeamEntries]=useState([]);
@@ -9085,7 +9184,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange})=>{
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)} onEdit={()=>{setReadingModal(null);onEdit&&onEdit(readingModal);}} onVisibilityChange={onVisibilityChange}/>}
+      {readingModal&&<ReadingModal entry={readingModal} user={user} onClose={()=>setReadingModal(null)} onEdit={()=>{setReadingModal(null);onEdit&&onEdit(readingModal);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}/>}
       {/* Share modal */}
       {sharing&&<div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)setSharing(null)}}>
         <div className="fi" style={{background:CARD_BG,borderRadius:14,width:'100%',maxWidth:440,maxHeight:'80vh',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.3)'}}>
@@ -9287,8 +9386,10 @@ const StatsChart=({library})=>{
 
 
 /* ─── READING MODAL (with comments + ratings) ───────────────── */
-const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit})=>{
+const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete})=>{
   const [showEncadenar,setShowEncadenar]=useState(false);
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const [deleting,setDeleting]=useState(false);
   const [comments,setComments]=useState([]);
   const [ratings,setRatings]=useState([]);
   const [reactions,setReactions]=useState([]);
@@ -9393,6 +9494,29 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit})=>{
     <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'24px 16px',overflowY:'auto'}}>
       <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:640,padding:'28px 28px 24px',position:'relative',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.3)'}}>
         {showEncadenar&&<EncadenarModal user={user} entry={entry} onClose={()=>setShowEncadenar(false)}/>}
+        {confirmDelete&&<div onClick={()=>!deleting&&setConfirmDelete(false)} style={{position:'fixed',inset:0,zIndex:310,background:'rgba(10,27,61,0.45)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'20px',width:'100%',maxWidth:320,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+              <Icon name="warning-circle" size={18} color={DANGER}/>
+              <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT}}>Eliminar texto</div>
+            </div>
+            <p style={{fontSize:12.5,color:MUTED,lineHeight:1.55,marginBottom:18}}>
+              ¿Seguro que quieres eliminar «{entry.title||'Sin título'}»? Esta acción no se puede deshacer.
+            </p>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setConfirmDelete(false)} disabled={deleting} style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+              <button onClick={async()=>{
+                  setDeleting(true);
+                  try{await onDelete(entry.id);setConfirmDelete(false);onClose();}
+                  catch(e){alert('Error al eliminar: '+e.message);}
+                  setDeleting(false);
+                }} disabled={deleting}
+                style={{flex:1,background:DANGER,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",opacity:deleting?0.6:1}}>
+                {deleting?'Eliminando…':'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>}
         {showVisMenu&&<div onClick={()=>setShowVisMenu(false)} style={{position:'fixed',inset:0,zIndex:310,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
           <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
             <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:14}}>Visibilidad</div>
@@ -9439,7 +9563,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit})=>{
             </div>
           )}
           {!loadingData&&(
-            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:2}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:2,flexWrap:'wrap',rowGap:8}}>
               {avgRating&&<div style={{display:'flex',alignItems:'center',gap:5}}>
                 <Stars value={Math.round(avgRating)} readonly/>
                 <span style={{fontSize:11,color:MUTED}}>{avgRating}/5 ({ratings.length} valoración{ratings.length!==1?'es':''})</span>
@@ -9460,8 +9584,14 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit})=>{
               )}
               {isOwn&&(
                 <button onClick={()=>setShowEncadenar(true)} title="Proponer como inicio de un relato encadenado"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(27,95,170,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(27,95,170,0.07)',color:AZULMED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
+                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(27,95,170,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(27,95,170,0.07)',color:AZULMED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
                   <Icon name="link" size={12}/>Encadenar
+                </button>
+              )}
+              {isOwn&&onDelete&&(
+                <button onClick={()=>setConfirmDelete(true)} title="Eliminar este texto"
+                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(197,34,31,0.25)',borderRadius:14,padding:'4px 12px',background:'rgba(197,34,31,0.05)',color:DANGER,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                  <Icon name="trash" size={12}/>Eliminar
                 </button>
               )}
             </div>
@@ -9737,6 +9867,23 @@ const UserAvatar=({user,size=36,onClick})=>{
 /* ─── PROFILE SETTINGS ───────────────────────────── */
 const ProfileSettings=({user,onClose,onSave})=>{
   const [avatar,setAvatar]=useState(user.avatar||null);
+  const [pushStatus,setPushStatus]=useState('checking'); // checking|granted|default|denied|unsupported
+  useEffect(()=>{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)){setPushStatus('unsupported');return;}
+    navigator.serviceWorker.ready.then(reg=>reg.pushManager.getSubscription()).then(sub=>{
+      setPushStatus(sub?'granted':(Notification.permission==='denied'?'denied':'default'));
+    }).catch(()=>setPushStatus('default'));
+  },[]);
+  const togglePush=async()=>{
+    if(pushStatus==='granted'){
+      await unsubscribeFromPush();
+      setPushStatus('default');
+    }else{
+      setPushStatus('checking');
+      const result=await subscribeToPush(user.id);
+      setPushStatus(result==='granted'?'granted':result==='denied'?'denied':'default');
+    }
+  };
   const [name,setName]=useState(user.name||'');
   const [username,setUsername]=useState(user.username||'');
   const [checking,setChecking]=useState(false);
@@ -9832,6 +9979,25 @@ const ProfileSettings=({user,onClose,onSave})=>{
           </div>
 
           {err&&<div style={{fontSize:12,color:'#C5221F',padding:'8px 11px',background:'rgba(197,34,31,0.06)',borderRadius:7}}>{err}</div>}
+
+          {pushStatus!=='unsupported'&&(
+            <div onClick={pushStatus==='denied'?undefined:togglePush} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',background:'rgba(0,0,0,0.02)',borderRadius:10,border:'0.5px solid '+BDR,cursor:pushStatus==='denied'?'default':'pointer'}}>
+              <Icon name="bell" size={16} color={pushStatus==='granted'?AZUL:MUTED}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:500,color:TXT}}>Notificaciones push</div>
+                <div style={{fontSize:11,color:MUTED}}>
+                  {pushStatus==='granted'?'Activadas en este dispositivo':
+                   pushStatus==='denied'?'Bloqueadas — actívalas desde los ajustes del navegador':
+                   pushStatus==='checking'?'Comprobando…':'Avisos de amigos, retos y comentarios'}
+                </div>
+              </div>
+              {pushStatus!=='denied'&&pushStatus!=='checking'&&(
+                <div style={{width:36,height:20,borderRadius:10,background:pushStatus==='granted'?AZUL:'rgba(0,0,0,0.12)',position:'relative',flexShrink:0}}>
+                  <div style={{position:'absolute',top:2,left:pushStatus==='granted'?18:2,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{display:'flex',gap:8}}>
             <Btn onClick={onClose} variant="ghost" full>Cancelar</Btn>
@@ -10056,7 +10222,7 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}/>}
       {movingEntry&&<div onClick={()=>setMovingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Mover a…</div>
@@ -10180,27 +10346,29 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete
             return(
               <div key={e.id} onClick={()=>setReadEntry(e)} style={{position:'relative',overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,padding:'16px',cursor:'pointer',display:'flex',flexDirection:'column',minHeight:165}}>
                 <Signo char={meta.signo} size={60} top={-12} right={10} color={meta.signoColor}/>
-                <button onClick={e2=>{e2.stopPropagation();setMovingEntry(e);}} title="Mover a carpeta"
-                  style={{position:'absolute',top:10,right:32,zIndex:2,background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:3,display:'flex'}}>
-                  <Icon name="folder-simple" size={14}/>
-                </button>
-                <button onClick={e2=>{e2.stopPropagation();setDeletingEntry(e);}} title="Eliminar"
-                  style={{position:'absolute',top:10,right:10,zIndex:2,background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:3,display:'flex'}}>
-                  <Icon name="trash" size={14}/>
-                </button>
 
                 <div style={{position:'relative',display:'flex',flexDirection:'column',flex:1}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:6,paddingRight:18}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:6}}>
                     <span onClick={e2=>{
                         e2.stopPropagation();
                         if(isUpdating)return;
                         setVisMenuEntry(e);
                       }}
                       title="Cambiar visibilidad"
-                      style={{font:"600 9px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:meta.color,background:meta.bg,padding:'4px 7px',borderRadius:5,whiteSpace:'nowrap',cursor:'pointer'}}>
+                      style={{font:"600 9px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:meta.color,background:meta.bg,padding:'4px 7px',borderRadius:5,whiteSpace:'nowrap',cursor:'pointer',flexShrink:0}}>
                       {isUpdating?'…':meta.label}
                     </span>
-                    <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT,whiteSpace:'nowrap'}}>{relTime(e.date)}</span>
+                    <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
+                      <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT,whiteSpace:'nowrap'}}>{relTime(e.date)}</span>
+                      <button onClick={e2=>{e2.stopPropagation();setMovingEntry(e);}} title="Mover a carpeta"
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
+                        <Icon name="folder-simple" size={13}/>
+                      </button>
+                      <button onClick={e2=>{e2.stopPropagation();setDeletingEntry(e);}} title="Eliminar"
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
+                        <Icon name="trash" size={13}/>
+                      </button>
+                    </div>
                   </div>
 
                   <div style={{fontFamily:'"Playfair Display",serif',fontWeight:600,fontSize:16,lineHeight:1.28,color:TXT,marginBottom:6}}>{e.title||'Sin título'}</div>
@@ -10349,7 +10517,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:200,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}/>}
 
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:10,padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
@@ -11763,6 +11931,102 @@ const EncadenarModal=({user,entry,onClose})=>{
 };
 
 
+
+/* ─── NOTIFICATION BELL (campana + panel desplegable) ──────────────── */
+const NOTIF_ICON={
+  new_follower:'user-plus', new_friend_text:'book-open', challenge_received:'timer',
+  challenge_returned:'check-circle', duet_your_turn:'hands-clapping', chain_nomination:'link', new_comment:'chat-circle',
+};
+const NOTIF_COLOR={
+  new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
+  challenge_returned:AZUL, duet_your_turn:AZUL, chain_nomination:'#1A6B8A', new_comment:AZUL,
+};
+
+const relNotifTime=iso=>{
+  if(!iso)return'';
+  const d=new Date(iso);
+  const mins=Math.floor((Date.now()-d.getTime())/60000);
+  if(mins<1)return'ahora';
+  if(mins<60)return mins+'min';
+  const hrs=Math.floor(mins/60);
+  if(hrs<24)return hrs+'h';
+  const days=Math.floor(hrs/24);
+  if(days<7)return days+'d';
+  return d.toLocaleDateString('es-ES',{day:'numeric',month:'short'});
+};
+
+const NotificationBell=({user,onNavigate})=>{
+  const [open,setOpen]=useState(false);
+  const [items,setItems]=useState([]);
+  const [unread,setUnread]=useState(0);
+  const [loaded,setLoaded]=useState(false);
+
+  const load=async()=>{
+    try{
+      const data=await DB.getNotifications(user.id,20);
+      setItems(data);
+      setUnread(data.filter(n=>!n.read).length);
+    }catch(e){console.error('notifications:',e);}
+    setLoaded(true);
+  };
+
+  useEffect(()=>{
+    load();
+    const t=setInterval(load,60000); // refresco cada minuto mientras la app está abierta
+    return()=>clearInterval(t);
+  },[user.id]);
+
+  const handleClick=async(n)=>{
+    setOpen(false);
+    if(!n.read){
+      try{await DB.markNotificationRead(n.id);}catch(e){}
+      setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
+      setUnread(prev=>Math.max(0,prev-1));
+    }
+    onNavigate&&onNavigate(n);
+  };
+
+  const markAllRead=async()=>{
+    try{await DB.markAllNotificationsRead(user.id);}catch(e){}
+    setItems(prev=>prev.map(x=>({...x,read:true})));
+    setUnread(0);
+  };
+
+  return(
+    <div style={{position:'relative'}}>
+      <button onClick={()=>setOpen(v=>!v)} title="Notificaciones"
+        style={{position:'relative',background:'transparent',border:'none',cursor:'pointer',padding:'4px 6px',display:'flex',color:MUTED}}>
+        <Icon name="bell" size={18}/>
+        {unread>0&&<span style={{position:'absolute',top:0,right:0,background:NARANJA,color:'#fff',borderRadius:'50%',minWidth:15,height:15,fontSize:9,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 3px'}}>{unread>9?'9+':unread}</span>}
+      </button>
+      {open&&<>
+        <div onClick={()=>setOpen(false)} style={{position:'fixed',inset:0,zIndex:149}}/>
+        <div className="fi" style={{position:'absolute',top:'calc(100% + 8px)',right:0,width:320,maxWidth:'88vw',maxHeight:420,overflowY:'auto',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',zIndex:150}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px',borderBottom:'1px solid '+BDR,position:'sticky',top:0,background:CARD_BG}}>
+            <span style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:13,color:TXT}}>Notificaciones</span>
+            {unread>0&&<button onClick={markAllRead} style={{background:'transparent',border:'none',color:AZUL,fontSize:11,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Marcar todo leído</button>}
+          </div>
+          {loaded&&items.length===0&&<div style={{padding:'32px 16px',textAlign:'center',color:MUTED,fontSize:12.5}}>Aún no tienes notificaciones.</div>}
+          {items.map(n=>(
+            <button key={n.id} onClick={()=>handleClick(n)} style={{display:'flex',gap:10,width:'100%',background:n.read?'transparent':'rgba(30,155,240,0.05)',border:'none',borderBottom:'1px solid '+BDR,padding:'11px 14px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+              <div style={{width:28,height:28,borderRadius:'50%',background:(NOTIF_COLOR[n.type]||AZUL)+'18',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name={NOTIF_ICON[n.type]||'bell'} size={13} color={NOTIF_COLOR[n.type]||AZUL}/>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,color:TXT,fontWeight:n.read?400:600,lineHeight:1.4}}>{n.title}</div>
+                {n.body&&<div style={{fontSize:11.5,color:MUTED,marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.body}</div>}
+                <div style={{fontSize:10,color:FAINT,marginTop:3}}>{relNotifTime(n.created_at)}</div>
+              </div>
+              {!n.read&&<div style={{width:7,height:7,borderRadius:'50%',background:NARANJA,flexShrink:0,marginTop:5}}/>}
+            </button>
+          ))}
+        </div>
+      </>}
+    </div>
+  );
+};
+
+
 /* ─── WELCOME CAROUSEL ──────────────────────────────────────── */
 const WelcomeCarousel=({onClose})=>{
   const TOTAL=6;
@@ -12443,6 +12707,13 @@ const App=()=>{
    "return" anticipados que tiene App para cada vista. */
 const Root=()=>{
   const [consent,setConsent]=useState(()=>S.get('pretexto:cookie_consent'));
+  useEffect(()=>{
+    // Registro del Service Worker: necesario tanto para el caché offline (PWA)
+    // como para poder recibir notificaciones push más adelante.
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('/sw.js').catch(e=>console.error('SW register:',e));
+    }
+  },[]);
   useEffect(()=>{
     // gtag siempre arranca denegado por defecto (más seguro); si ya
     // habías aceptado antes, hay que volver a concederlo en cada carga.
