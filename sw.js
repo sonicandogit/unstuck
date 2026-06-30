@@ -70,3 +70,35 @@ self.addEventListener('fetch', (e) => {
     })
   );
 });
+
+// ─── PUSH NOTIFICATIONS ──────────────────────────────────────────
+// Recibe el push enviado desde la Edge Function (send-push) y lo muestra
+// como notificación del sistema, aunque la app esté cerrada.
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) { data = {}; }
+
+  const title = data.title || 'Pretexto';
+  const options = {
+    body: data.body || '',
+    icon: '/unstuckfavicon.png',
+    badge: '/unstuckfavicon.png',
+    data: { type: data.type, entity_id: data.entity_id },
+    tag: data.type || 'pretexto-notification', // agrupa notificaciones del mismo tipo
+  };
+
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Al pulsar la notificación: si ya hay una pestaña de Pretexto abierta, la
+// enfoca; si no, abre una nueva.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientsArr) => {
+      const existing = clientsArr.find((c) => c.url.includes(self.registration.scope));
+      if (existing) return existing.focus();
+      return self.clients.openWindow('/');
+    })
+  );
+});
