@@ -6643,7 +6643,7 @@ const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos día
 const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return days[d.getDay()].charAt(0).toUpperCase()+days[d.getDay()].slice(1)+', '+d.getDate()};
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
 const ratingMsg=v=>{if(v<=2)return'fue duro';if(v<=4)return'costó arrancar';if(v<=6)return'razonable';if(v<=8)return'bien';return'en el flujo ✦'};
-const computeStats=(library,reflections)=>{
+const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
   // totalWords = sum of words_added across all entries
   // words_added stores the INCREMENT per session (new words only)
   // For old entries without words_added, fall back to word_count
@@ -6656,20 +6656,34 @@ const computeStats=(library,reflections)=>{
   const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};
   const activeDayEntries=library.filter(e=>effectiveWc(e)>=100);
   const dates=[...new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
-  let streak=0;const ref=new Date();ref.setHours(0,0,0,0);
-  for(const d of dates){const dt=new Date(d);dt.setHours(0,0,0,0);const diff=Math.round((ref-dt)/(864e5));if(diff<=1){streak++;ref.setTime(dt.getTime())}else break}
+  let streak=0,wildcardCount=wildcards||0,wildcardUsed=0;
+  const ref=new Date();ref.setHours(0,0,0,0);
+  for(const d of dates){
+    const dt=new Date(d);dt.setHours(0,0,0,0);
+    const diff=Math.round((ref-dt)/(864e5));
+    if(diff<=1){streak++;ref.setTime(dt.getTime());}
+    else if(diff===2&&wildcardCount>0){
+      // Hueco de exactamente 1 día — gastar un comodín para bridgearlo
+      streak++;wildcardCount--;wildcardUsed++;
+      ref.setTime(dt.getTime());
+    }else break;
+  }
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
   const thisWeek=new Set(activeDayEntries.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).map(e=>e.date?.slice(0,10))).size;
   const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
   const _firstDay=library.length?library[library.length-1].date?.slice(0,10)||today():today();const last7=Array.from({length:7},(_,i)=>{const d=new Date(_firstDay+'T12:00:00');d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
   const activeDates=new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean));
+  // Comodín: activeDates debe estar definido antes de usarlo
+  const todayStr=today();
+  const todayActive=activeDates.has(todayStr);
+  const newMilestone=(streak>0&&streak%7===0)?streak:0;
   const last7status=last7.map(d=>({date:d,done:activeDates.has(d)}));
   const weekEntries=library.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo);
   const weekElapsed=weekEntries.reduce((s,e)=>s+(e.elapsed||0),0);
   const weekWords=weekEntries.reduce((s,e)=>{const wa=e.words_added;return s+(wa!=null?wa:(e.word_count||e.wordCount||0));},0);
   const weekSessions=weekEntries.length;
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
-  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed};
+  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newMilestone,todayActive};
 };
 
 /* ─── CLAUDE API ─────────────────────────────────── */
@@ -7089,7 +7103,28 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [readingEntry,setReadingEntry]=useState(null);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
 
-  const stats=useMemo(()=>computeStats(library,reflections),[library,reflections]);
+  const wildcards=user?.wildcards||0;
+  const wildcard_milestone=user?.wildcard_milestone||0;
+  const stats=useMemo(()=>computeStats(library,reflections,wildcards,wildcard_milestone),[library,reflections,wildcards,wildcard_milestone]);
+  // Actualizar comodines cuando la racha los gana o gasta
+  const wildcardUpdateRef=useRef(null);
+  useEffect(()=>{
+    const key=stats.streak+':'+stats.wildcardUsed+':'+stats.newMilestone;
+    if(wildcardUpdateRef.current===key||!user?.id)return;
+    wildcardUpdateRef.current=key;
+    let newWc=wildcards;
+    let newMilestone=wildcard_milestone;
+    if(stats.wildcardUsed>0){newWc=Math.max(0,newWc-stats.wildcardUsed);}
+    if(stats.newMilestone>0&&stats.newMilestone>wildcard_milestone&&stats.todayActive){
+      newWc++;newMilestone=stats.newMilestone;
+    }
+    if(newWc!==wildcards||newMilestone!==wildcard_milestone){
+      // Solo actualizamos la BD — setUser no está disponible en Dashboard,
+      // el nuevo valor se leerá del perfil en la próxima carga de la app.
+      getSB().from('profiles').update({wildcards:newWc,wildcard_milestone:newMilestone}).eq('id',user.id)
+        .catch(e=>console.error('wildcard update:',e));
+    }
+  },[stats.streak,stats.wildcardUsed,stats.newMilestone]);
   const em=energyMsg(energy);
   const recentNotes=reflections.filter(r=>r.notes?.trim()).slice(0,3);
   const ec=energy<=3?'#1B5FAA':energy<=6?'#1B5FAA':'#1E9BF0';
@@ -7290,24 +7325,28 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           {/* Racha */}
           <div className="fu" style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'16px 16px',display:'flex',flexDirection:'column',justifyContent:'space-between',position:'relative',overflow:'hidden'}}>
             <Signo char="!" size={100} top={-18} right={-4} color="azul"/>
-            <div style={{display:'flex',alignItems:'flex-start',gap:8,position:'relative',zIndex:1}}>
-              <Icon name="fire" size={26} color={NARANJA}/>
-              <div style={{position:'relative'}}>
-                <div style={{fontFamily:'"Playfair Display",serif',fontSize:30,fontWeight:700,color:stats.streak>0?NARANJA:FAINT,letterSpacing:'-0.03em',lineHeight:1,position:'relative',display:'inline-block'}}>
-                  {stats.streak}
-                  <span style={{position:'absolute',top:-6,right:-14,fontFamily:'"Playfair Display",serif',fontSize:16,color:AZUL}}>*</span>
+            <div style={{display:'flex',alignItems:'center',gap:10,position:'relative',zIndex:1}}>
+              <Icon name="fire" size={32} color={stats.streak>0?NARANJA:FAINT}/>
+              <div>
+                <div style={{display:'flex',alignItems:'flex-start',gap:3}}>
+                  <span style={{fontFamily:'"Playfair Display",serif',fontSize:34,fontWeight:700,color:stats.streak>0?NARANJA:FAINT,letterSpacing:'-0.03em',lineHeight:1}}>{stats.streak}</span>
+                  <Icon name="asterisk" size={13} color={AZUL} style={{marginTop:4}}/>
                 </div>
-                <div style={{fontSize:10,color:MUTED}}>días seguidos</div>
+                <div style={{fontSize:10,color:MUTED,marginTop:2}}>días seguidos</div>
               </div>
             </div>
-            <div style={{fontSize:11,color:MUTED,lineHeight:1.4,marginTop:8}}>
-              {stats.streak===0?'Hoy es un buen día para empezar.':
-               stats.streak===1?'¡Primer día! El más difícil ya pasó.':
-               stats.streak<7?'Llevas '+stats.streak+' días. ¡Sigue así! Completa 7 para ganar un comodín.':
-               stats.streak===7?'🎉 ¡Semana completa! Has ganado un comodín.':
-               stats.streak<14?'¡'+stats.streak+' días! Vas a por las dos semanas.':
-               stats.streak<30?'⚡ ¡'+stats.streak+' días! Increíble constancia.':
-               '🏆 ¡'+stats.streak+' días seguidos! Eres imparable.'}
+            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:MUTED,lineHeight:1.4,marginTop:10}}>
+              {stats.streak===0&&<><Icon name="pencil-line" size={13} color={FAINT}/><span>Hoy es un buen día para empezar.</span></>}
+              {stats.streak===1&&<><Icon name="star" size={13} color={NARANJA}/><span>¡Primer día! El más difícil ya pasó.</span></>}
+              {stats.streak>1&&stats.streak<7&&<><Icon name="trend-up" size={13} color={AZUL}/><span>Llevas {stats.streak} días. Completa 7 para ganar un comodín.</span></>}
+              {stats.streak>0&&stats.streak%7===0&&stats.todayActive&&<><Icon name="gift" size={13} color={AZUL}/><span>¡Semana completa! Has ganado un comodín.</span></>}
+              {stats.streak>0&&stats.streak%7!==0&&stats.streak>=7&&stats.streak<14&&<><Icon name="trend-up" size={13} color={AZUL}/><span>¡{stats.streak} días! Vas a por las dos semanas.</span></>}
+              {stats.streak>=14&&stats.streak<30&&<><Icon name="lightning" size={13} color={NARANJA}/><span>¡{stats.streak} días! Increíble constancia.</span></>}
+              {stats.streak>=30&&<><Icon name="trophy" size={13} color={NARANJA}/><span>¡{stats.streak} días seguidos! Eres imparable.</span></>}
+              {wildcards>0&&<div style={{display:'flex',alignItems:'center',gap:4,marginTop:4,paddingTop:4,borderTop:'1px solid '+BDR}}>
+                {Array.from({length:Math.min(wildcards,5)}).map((_,i)=><Icon key={i} name="shield-star" size={12} color={AZUL}/>)}
+                <span style={{fontSize:10,color:AZULMED}}>{wildcards} comodín{wildcards>1?'es':''} disponible{wildcards>1?'s':''}</span>
+              </div>}
             </div>
           </div>
         </div>
@@ -11844,15 +11883,26 @@ const VoiceButton=({onTranscript,dark=false,size=16})=>{
       });
       const resp=await fetch(TRANSCRIBE_URL,{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
+        headers:{
+          'Content-Type':'application/json',
+          // Supabase requiere el anon key para llamar a Edge Functions
+          'Authorization':'Bearer '+_SB_KEY,
+        },
         body:JSON.stringify({audio_base64:base64,mime_type:mimeType}),
       });
+      if(!resp.ok){
+        const errText=await resp.text();
+        console.error('transcribe HTTP '+resp.status+':',errText);
+        setState('error');
+        setTimeout(()=>setState('idle'),2000);
+        return;
+      }
       const data=await resp.json();
       if(data.text){
         onTranscript(data.text+' ');
         setState('idle');
       }else{
-        console.error('Groq error:',data);
+        console.error('Groq sin texto:',data);
         setState('error');
         setTimeout(()=>setState('idle'),2000);
       }
