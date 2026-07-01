@@ -8208,6 +8208,12 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   },[ab]);
   useEffect(()=>{clearInterval(asRef.current);if(!autoSave||!started){setAsCd(AUTOSAVE);return}setAsCd(AUTOSAVE);asRef.current=setInterval(()=>setAsCd(c=>{if(c<=1){if(plainTxt!==lastSaved.current)saveNow(true);return AUTOSAVE}return c-1}),1000);return()=>clearInterval(asRef.current)},[autoSave,started,plainTxt]);
 
+  const insertVoiceText=t=>{
+    const el=edRef.current;if(!el)return;
+    el.focus();
+    document.execCommand('insertText',false,t);
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+  };
   const handleInput=(e)=>{
     const el=edRef.current;if(!el)return;
     const plain=el.innerText||'',cur=plain.length,prev=prevLen.current;const isD=cur<prev,nD=Math.max(0,prev-cur);
@@ -8291,7 +8297,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
           {done&&<div style={{padding:'7px 18px',background:'rgba(30,155,240,0.07)',borderBottom:'0.5px solid rgba(30,155,240,0.18)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
             <span style={{fontSize:13,color:'#1E9BF0',fontWeight:500}}>✓ Completado — {wc} palabras</span>
-            <div style={{display:'flex',gap:6}}><Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn><Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn></div>
+            <div style={{display:'flex',gap:6}}><Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn><Sep/><VoiceButton onTranscript={insertVoiceText}/><Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn></div>
           </div>}
           {toast&&<div style={{padding:'6px 18px',background:toast.color+'0C',borderBottom:'0.5px solid '+toast.color+'22',display:'flex',alignItems:'center',gap:8,flexShrink:0}}><span style={{fontSize:11,fontWeight:600,color:toast.color,display:'inline-flex',alignItems:'center',gap:5}}><Icon name={toast.icon} size={12}/>{toast.name}</span><span style={{fontSize:12,color:MUTED}}>{toast.full}</span></div>}
           {idleWarn&&ab==='presion'&&<div style={{padding:'6px 18px',background:'rgba(168,32,32,0.07)',borderBottom:'0.5px solid rgba(168,32,32,0.16)',fontSize:12,color:'#A82020',flexShrink:0}}>⚡ {idleLimit-idle}s antes de perder el párrafo</div>}
@@ -8421,6 +8427,7 @@ const wordUsed=(text,word)=>{
 
 const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
   const [words]=useState(()=>challenge?.words||pick5Words());
+  const insertVoiceCuento=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
   const [title,setTitle]=useState(challenge?('Para @'+(challenge.from_username||challenge.from_name)):'');
   const [sharingBack,setSharingBack]=useState(false);
   const [text,setText]=useState('');
@@ -8543,6 +8550,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
         {/* Top bar */}
         <div style={{display:'flex',alignItems:'center',padding:'0 14px',height:44,borderBottom:'0.5px solid rgba(255,255,255,0.1)'}}>
           <button onClick={()=>{if(!started||window.confirm('¿Salir? Perderás el progreso del cuento.'))onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir</button>
+          <VoiceButton onTranscript={insertVoiceCuento} dark={true} size={15}/>
           <div style={{flex:1}}/>
           <div style={{textAlign:'center'}}>
             <div style={{fontSize:28,fontWeight:200,letterSpacing:2,color:timerCol(),fontVariantNumeric:'tabular-nums',lineHeight:1}}>{fmt(timer)}</div>
@@ -11055,6 +11063,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
 /* ─── DUET EDITOR ───────────────────────────────────────────── */
 const DuetEditor=({user,duet,onClose,onUpdate})=>{
   const isA=duet.user_a===user.id;
+  const insertVoiceDuet=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
   const myLetter=isA?'a':'b';
   const otherName=isA?(duet.name_b||'?'):(duet.name_a||'?');
   const myTurn=duet.current_turn===myLetter&&duet.status==='active';
@@ -11229,7 +11238,10 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
             {/* My writing area (only if my turn) */}
             {myTurn&&(
               <div>
-                <div style={{fontSize:11,fontWeight:500,color:'#1E9BF0',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8}}>Tu turno — continúa el relato</div>
+                <div style={{fontSize:11,fontWeight:500,color:'#1E9BF0',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <span>Tu turno — continúa el relato</span>
+                    <VoiceButton onTranscript={insertVoiceDuet} size={14}/>
+                  </div>
                 <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
                   style={{minHeight:160,outline:'none',fontSize:16,lineHeight:1.85,fontFamily:'"Playfair Display",Georgia,serif',color:PROSE_TEXT,caretColor:NARANJA,padding:'4px 0'}}/>
               </div>
@@ -11433,6 +11445,7 @@ const ShareNudge=({user,library})=>{
 
 /* ─── CHAIN EDITOR (Encadenados) ───────────────────────────── */
 const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
+  const insertVoiceChain=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
   // chain=null + startingFresh=true → primer capítulo de una cadena nueva
   // chain=objeto → continuar escribiendo el siguiente capítulo de una cadena existente
   const [step,setStep]=useState('write'); // write | nominate | done
@@ -11580,9 +11593,9 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
             {chain?'Capítulo '+chapterNumber:'Capítulo 1'} · mín. {MIN_WORDS} palabras
           </div>
         </div>
-        {step==='write'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:canFinish?'rgba(241,90,36,0.3)':'rgba(255,255,255,0.1)',color:canFinish?'#FCA56A':'rgba(255,255,255,0.5)',flexShrink:0}}>
+        {step==='write'&&<><VoiceButton onTranscript={insertVoiceChain} dark={true} size={14}/><div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:canFinish?'rgba(241,90,36,0.3)':'rgba(255,255,255,0.1)',color:canFinish?'#FCA56A':'rgba(255,255,255,0.5)',flexShrink:0}}>
           {wc} / {MIN_WORDS}
-        </div>}
+        </div></>}
       </div>
 
       {/* ── PASO: escribir ── */}
@@ -11772,6 +11785,107 @@ const StartChainModal=({user,onClose})=>{
   );
 };
 
+
+
+
+/* ─── VOICE BUTTON (grabación + transcripción Groq Whisper) ─────── */
+const TRANSCRIBE_URL='https://nzvzjyoavpqtjwkwgzch.supabase.co/functions/v1/transcribe-audio';
+
+const VoiceButton=({onTranscript,dark=false,size=16})=>{
+  const [state,setState]=useState('idle'); // idle|recording|transcribing|error
+  const mediaRef=useRef(null);
+  const chunksRef=useRef([]);
+  const timerRef=useRef(null);
+  const [secs,setSecs]=useState(0);
+
+  const start=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      chunksRef.current=[];
+      const mimeType=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ?'audio/webm;codecs=opus'
+        :MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'audio/webm';
+      const mr=new MediaRecorder(stream,{mimeType});
+      mr.ondataavailable=e=>{if(e.data.size>0)chunksRef.current.push(e.data);};
+      mr.onstop=()=>stream.getTracks().forEach(t=>t.stop());
+      mr.start(250);
+      mediaRef.current=mr;
+      setSecs(0);
+      setState('recording');
+      timerRef.current=setInterval(()=>setSecs(s=>{
+        if(s>=120){stop();return s;} // límite 2 minutos
+        return s+1;
+      }),1000);
+    }catch(e){
+      console.error('getUserMedia:',e);
+      alert('No se pudo acceder al micrófono. Comprueba los permisos del navegador.');
+    }
+  };
+
+  const stop=async()=>{
+    clearInterval(timerRef.current);
+    const mr=mediaRef.current;
+    if(!mr||mr.state==='inactive')return;
+    setState('transcribing');
+    mr.stop();
+    await new Promise(r=>mr.addEventListener('stop',r,{once:true}));
+    const mimeType=mr.mimeType||'audio/webm';
+    const blob=new Blob(chunksRef.current,{type:mimeType});
+    if(blob.size<1000){setState('idle');return;} // demasiado corto, ignorar
+    try{
+      // Convertir a base64
+      const base64=await new Promise((res,rej)=>{
+        const reader=new FileReader();
+        reader.onload=()=>res(reader.result.split(',')[1]);
+        reader.onerror=rej;
+        reader.readAsDataURL(blob);
+      });
+      const resp=await fetch(TRANSCRIBE_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({audio_base64:base64,mime_type:mimeType}),
+      });
+      const data=await resp.json();
+      if(data.text){
+        onTranscript(data.text+' ');
+        setState('idle');
+      }else{
+        console.error('Groq error:',data);
+        setState('error');
+        setTimeout(()=>setState('idle'),2000);
+      }
+    }catch(e){
+      console.error('transcribe:',e);
+      setState('error');
+      setTimeout(()=>setState('idle'),2000);
+    }
+    setSecs(0);
+  };
+
+  const handleClick=()=>{
+    if(state==='idle')start();
+    else if(state==='recording')stop();
+  };
+
+  const fmtSecs=s=>(s<60?s+'s':Math.floor(s/60)+'m'+('0'+(s%60)).slice(-2)+'s');
+  const col=dark?'rgba(255,255,255,0.7)':'var(--muted,#6B6963)';
+  const colRec='#E53935';
+
+  return(
+    <button onClick={handleClick} disabled={state==='transcribing'}
+      title={state==='idle'?'Grabar y transcribir voz':state==='recording'?'Detener grabación':'Transcribiendo…'}
+      style={{display:'flex',alignItems:'center',gap:4,background:state==='recording'?'rgba(229,57,53,0.1)':'transparent',
+        border:state==='recording'?'1px solid rgba(229,57,53,0.4)':'none',borderRadius:6,
+        cursor:state==='transcribing'?'wait':'pointer',padding:'3px 6px',flexShrink:0}}>
+      {state==='transcribing'
+        ?<span style={{fontSize:10,color:col,animation:'spin 1s linear infinite',display:'inline-block'}}>⟳</span>
+        :<Icon name={state==='recording'?'stop-circle':'microphone'} size={size}
+            color={state==='recording'?colRec:state==='error'?'#E53935':col}/>}
+      {state==='recording'&&<span style={{fontSize:10,color:colRec,fontFamily:"'Source Sans 3',sans-serif",fontWeight:600,minWidth:24}}>{fmtSecs(secs)}</span>}
+      {state==='error'&&<span style={{fontSize:10,color:'#E53935'}}>Error</span>}
+    </button>
+  );
+};
 
 
 /* ─── ENCADENAR MODAL (proponer un texto existente como inicio de cadena) ── */
