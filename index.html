@@ -8297,7 +8297,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
           {done&&<div style={{padding:'7px 18px',background:'rgba(30,155,240,0.07)',borderBottom:'0.5px solid rgba(30,155,240,0.18)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
             <span style={{fontSize:13,color:'#1E9BF0',fontWeight:500}}>✓ Completado — {wc} palabras</span>
-            <div style={{display:'flex',gap:6}}><Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn><Sep/><VoiceButton onTranscript={insertVoiceText}/><Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn></div>
+            <div style={{display:'flex',gap:6}}><Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn><Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn></div>
           </div>}
           {toast&&<div style={{padding:'6px 18px',background:toast.color+'0C',borderBottom:'0.5px solid '+toast.color+'22',display:'flex',alignItems:'center',gap:8,flexShrink:0}}><span style={{fontSize:11,fontWeight:600,color:toast.color,display:'inline-flex',alignItems:'center',gap:5}}><Icon name={toast.icon} size={12}/>{toast.name}</span><span style={{fontSize:12,color:MUTED}}>{toast.full}</span></div>}
           {idleWarn&&ab==='presion'&&<div style={{padding:'6px 18px',background:'rgba(168,32,32,0.07)',borderBottom:'0.5px solid rgba(168,32,32,0.16)',fontSize:12,color:'#A82020',flexShrink:0}}>⚡ {idleLimit-idle}s antes de perder el párrafo</div>}
@@ -8314,6 +8314,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
               <Sep/>
             </div><button onClick={()=>cmd('bold')} style={{...TBTN(bold),fontSize:12,fontWeight:700,fontFamily:'Georgia,serif'}}>B</button><button onClick={()=>cmd('italic')} style={{...TBTN(italic),fontSize:12,fontStyle:'italic',fontFamily:'Georgia,serif'}}>I</button><button onClick={()=>cmd('underline')} style={{...TBTN(under),fontSize:11,textDecoration:'underline'}}>U</button>
             <Sep/>{['left','center','right'].map(d=><button key={d} onClick={()=>doAlign(d)} style={TBTN(align===d)}><AlignIcon dir={d} col={align===d?TXT:MUTED}/></button>)}
+            <div style={{width:'1px',height:14,background:BDR,margin:'0 4px',flexShrink:0}}/>
+            <VoiceButton onTranscript={insertVoiceText}/>
             <div style={{flex:1}}/>
             <div style={{display:'flex',alignItems:'center',gap:4}}>
               <span style={{width:5,height:5,borderRadius:'50%',background:si.dot,flexShrink:0}}/>
@@ -11878,11 +11880,10 @@ const VoiceButton=({onTranscript,dark=false,size=16})=>{
         border:state==='recording'?'1px solid rgba(229,57,53,0.4)':'none',borderRadius:6,
         cursor:state==='transcribing'?'wait':'pointer',padding:'3px 6px',flexShrink:0}}>
       {state==='transcribing'
-        ?<span style={{fontSize:10,color:col,animation:'spin 1s linear infinite',display:'inline-block'}}>⟳</span>
+        ?<Icon name="circle-notch" size={size} color={col} style={{animation:'spin 1s linear infinite'}}/>
         :<Icon name={state==='recording'?'stop-circle':'microphone'} size={size}
-            color={state==='recording'?colRec:state==='error'?'#E53935':col}/>}
-      {state==='recording'&&<span style={{fontSize:10,color:colRec,fontFamily:"'Source Sans 3',sans-serif",fontWeight:600,minWidth:24}}>{fmtSecs(secs)}</span>}
-      {state==='error'&&<span style={{fontSize:10,color:'#E53935'}}>Error</span>}
+            color={state==='recording'?NARANJA:state==='error'?DANGER:col}/>}
+      {state==='recording'&&<span style={{fontSize:10,color:NARANJA,fontFamily:"'Source Sans 3',sans-serif",fontWeight:600,minWidth:24}}>{fmtSecs(secs)}</span>}
     </button>
   );
 };
