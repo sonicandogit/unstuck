@@ -81,8 +81,8 @@ self.addEventListener('push', (e) => {
   const title = data.title || 'Pretexto';
   const options = {
     body: data.body || '',
-    icon: '/unstuckfavicon.png',
-    badge: '/unstuckfavicon.png',
+    icon: '/pretexto-notification-icon.png',
+    badge: '/pretexto-notification-icon.png',
     data: { type: data.type, entity_id: data.entity_id },
     tag: data.type || 'pretexto-notification', // agrupa notificaciones del mismo tipo
   };
