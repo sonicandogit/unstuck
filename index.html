@@ -9401,8 +9401,8 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
   const [readingEntry,setReadingEntry]=useState(null);
   const [showKeyPanel,setShowKeyPanel]=useState(false);
 
-  const wildcards=user?.wildcards||0;
-  const wildcard_milestone=user?.wildcard_milestone||0;
+  const [wildcards,setWildcards]=useState(user?.wildcards||0);
+  const [wildcard_milestone,setWildcardMilestone]=useState(user?.wildcard_milestone||0);
   const stats=useMemo(()=>computeStats(library,reflections,wildcards,wildcard_milestone),[library,reflections,wildcards,wildcard_milestone]);
   // Actualizar comodines cuando la racha los gana o gasta
   const wildcardUpdateRef=useRef(null);
@@ -9417,10 +9417,10 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
       newWc++;newMilestone=stats.newMilestone;
     }
     if(newWc!==wildcards||newMilestone!==wildcard_milestone){
-      // Solo actualizamos la BD — setUser no está disponible en Dashboard,
-      // el nuevo valor se leerá del perfil en la próxima carga de la app.
+      setWildcards(newWc);
+      setWildcardMilestone(newMilestone);
       getSB().from('profiles').update({wildcards:newWc,wildcard_milestone:newMilestone}).eq('id',user.id)
-        .catch(e=>console.error('wildcard update:',e));
+        .then(r=>{ if(r?.error) console.error('wildcard update:',r.error); });
     }
   },[stats.streak,stats.wildcardUsed,stats.newMilestone]);
   const em=energyMsg(energy);
