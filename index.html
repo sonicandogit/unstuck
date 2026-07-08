@@ -4555,6 +4555,13 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  getMySentNominations: async(uid)=>{
+    // Nominaciones que yo envié (nominated_by=uid) que siguen pendientes
+    const{data,error}=await getSB().from('chain_nominations')
+      .select('*').eq('nominated_by',uid).eq('status','pending');
+    if(error)throw error;
+    return data||[];
+  },
   createNomination: async (nom) => {
     const { error } = await getSB().from('chain_nominations').insert(nom);
     if (error) throw error;
@@ -9772,38 +9779,6 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
           <StatCard label="Lecciones" value={lessonsRead+'/64'} sub={lessonsPct+'% leído'} accent={lessonsRead>0?'#1E9BF0':TXT} className="desk-only"/>
         </div>
 
-
-        {/* Recent notes */}
-        {recentNotes.length>0&&<div className="fu" style={{marginBottom:16}}>
-          <div style={{fontSize:11,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>Aprendizajes recientes</div>
-          <div style={{display:'flex',flexDirection:'column',gap:7}}>
-            {recentNotes.map((r,i)=><div key={i} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,padding:'10px 14px',display:'flex',gap:10,alignItems:'flex-start'}}>
-              <div style={{width:22,height:22,borderRadius:'50%',background:r.rating>=7?'rgba(30,155,240,0.1)':'rgba(0,0,0,0.04)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:600,color:r.rating>=7?'#1E9BF0':MUTED,flexShrink:0}}>{r.rating}</div>
-              <div style={{flex:1}}><div style={{fontSize:13,color:TXT,lineHeight:1.5,fontStyle:'italic'}}>"{r.notes}"</div><div style={{fontSize:10,color:FAINT,marginTop:3}}>{fmtDate(r.date)} · {r.sessionTitle||r.sk}</div></div>
-            </div>)}
-          </div>
-        </div>}
-
-        {/* Recent texts */}
-        {library.slice(0,3).length>0&&<div className="fu">
-          <div style={{fontSize:11,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>Últimos textos</div>
-          <div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {library.filter(e=>!e.deleted).slice(0,3).map(e=>{const sc={check:AZUL,reto:NARANJA,proyecto:AZULMED,cuento:'#A82020',dueto:'#1A6B8A'}[e.sk]||MUTED;return <div key={e.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,padding:'10px 14px',display:'flex',alignItems:'center',gap:10}}>
-              <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
-              <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.title}</div><div style={{fontSize:11,color:MUTED}}>{fmtDate(e.date)} · {e.wordCount} palabras</div></div>
-              <button onClick={()=>{
-                const v=e.visibility||'privado';
-                const cycle={privado:'amigos',amigos:'abierto',abierto:'privado'};
-                onChangeVisibility&&onChangeVisibility(e.id,cycle[v]||'privado');
-              }} title="Cambiar visibilidad" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,cursor:'pointer',flexShrink:0}}>
-                <Icon name={(e.visibility||'privado')==='privado'?'lock-simple':(e.visibility==='amigos'?'users':'globe')} size={12}/>
-              </button>
-              <button onClick={()=>onEditEntry&&onEditEntry(e)} title="Editar" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>✏</button>
-              <button onClick={()=>{const ref=reflections.find(r=>r.sessionTitle===e.title&&r.date===e.date);exportDocx(e,FONTS[e.fontIdx||0].docx,e.editorSize||17,ref?.feedback||'')}} style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 8px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>↓</button>
-              <button onClick={()=>{if(window.confirm('¿Eliminar "'+e.title+'"?'))onDeleteEntry(e.id)}} style={{background:'transparent',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:6,padding:'3px 8px',fontSize:11,color:'rgba(197,34,31,0.5)',cursor:'pointer',flexShrink:0}}>✕</button>
-            </div>})}
-          </div>
-        </div>}
       </div>
     </div>
   );
@@ -10067,6 +10042,10 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
 /* ─── POST SESSION ───────────────────────────────── */
 const PostSession=({sessionData,onComplete,onBack,user})=>{
   const canPublish=(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
+  const [rating,setRating]=useState(7);
+  const [notes,setNotes]=useState('');
+  const [saveToLib,setSaveToLib]=useState(true);
+  const [chainStart,setChainStart]=useState(false); // ¿dejar como primer capítulo encadenable?
   const [pubVis,setPubVis]=useState('privado');
   const [saveFeedback,setSaveFeedback]=useState(true);
   const [fbState,setFbState]=useState(getApiKey(user.id)?'ready':'no_key');
@@ -10093,7 +10072,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 
   const save=()=>{
     const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',
-      saveToLibrary:saveToLib,visibility:saveToLib?pubVis:'ejercicio',entryId:sessionData.entryId||null};
+      saveToLibrary:saveToLib,visibility:saveToLib?pubVis:'ejercicio',chainStart:saveToLib&&chainStart,entryId:sessionData.entryId||null};
     onComplete(r);
   };
 
@@ -10185,6 +10164,17 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
                   </div>
                 )}
               </div>
+              {canPublish&&saveToLib&&(
+                <div onClick={()=>setChainStart(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',background:'rgba(0,0,0,0.02)',borderRadius:10,cursor:'pointer',border:'0.5px solid '+BDR}}>
+                  <div style={{width:18,height:18,borderRadius:4,border:'1.5px solid '+(chainStart?'#1B5FAA':BDR),background:chainStart?'#1B5FAA':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
+                    {chainStart&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:500,color:TXT}}>Hacer encadenable</div>
+                    <div style={{fontSize:11,color:MUTED}}>Otros podrán continuar este texto como un capítulo siguiente</div>
+                  </div>
+                </div>
+              )}
               {saveToLib&&(
                 <div style={{display:'flex',gap:6}}>
                   {[
@@ -11988,7 +11978,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete})=>{
                   <Icon name="pencil-simple" size={12}/>Editar
                 </button>
               )}
-              {isOwn&&(
+              {isOwn&&entry.chain_start&&(
                 <button onClick={()=>setShowEncadenar(true)} title="Proponer como inicio de un relato encadenado"
                   style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(27,95,170,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(27,95,170,0.07)',color:AZULMED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
                   <Icon name="link" size={12}/>Encadenar
@@ -12110,9 +12100,10 @@ const ChallengesHistory=({user,onClose})=>{
     const load=async()=>{
       setLoading(true);
       try{
-        const [s,r,d,noms]=await Promise.all([
+        const [s,r,d,sentNoms]=await Promise.all([
           DB.getSentChallenges(user.id),DB.getReceivedChallenges(user.id),
-          DB.getMyDuets(user.id),DB.getMyNominations(user.id),
+          DB.getMyDuets(user.id),
+          DB.getMySentNominations(user.id),
         ]);
         setSent(s);setReceived(r);
         // Duetos donde NO es mi turno (activos, esperando a la otra persona)
@@ -12120,8 +12111,7 @@ const ChallengesHistory=({user,onClose})=>{
         const waitingDuets=d.filter(dt=>['active','finish_proposed'].includes(dt.status)&&
           !((dt.current_turn==='a'&&isA(dt))||(dt.current_turn==='b'&&!isA(dt))));
         setDuets(waitingDuets);
-        // Encadenados enviados (nominación pendiente de respuesta)
-        setChains(noms.filter(n=>n.status==='pending'&&n.nominator_id===user.id));
+        setChains(sentNoms);
       }catch(e){console.error(e);}
       finally{setLoading(false);}
     };
@@ -16031,6 +16021,12 @@ const App=()=>{
             setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:'ejercicio',html:'',plain:''}:x));
           }else{
             await DB.updateVisibility(ref.entryId,ref.visibility);
+            // Marcar si es encadenable (primer capítulo disponible para continuar)
+            if(ref.chainStart){
+              getSB().from('entries').update({chain_start:true}).eq('id',ref.entryId)
+                .then(r=>{ if(r?.error) console.error('chain_start update:',r.error); });
+              setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,chain_start:true}:x));
+            }
             let htmlAppend='',plainAppend='';
             // Si hubo revisión de Claude y el texto se va a quedar guardado, se añade
             // al final del propio documento — así siempre se ve junto al texto, releyéndolo
