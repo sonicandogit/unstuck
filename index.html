@@ -9597,6 +9597,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               </div>
             </>}
           </div>
+        </div>{/* end topbar-nav */}
           <NotificationBell user={user} onNavigate={handleNotificationNavigate} onNewChallenge={onNewChallenge}/>
           <button className="hamburger-btn" onClick={()=>setShowHamburger(true)}
             style={{background:'transparent',border:'none',cursor:'pointer',padding:'4px 6px',color:MUTED,flexShrink:0}}>
@@ -9650,7 +9651,6 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
               </div>
             </>}
           </div>
-        </div>
       </div>
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
