@@ -4100,6 +4100,68 @@ const DB = {
     const { error } = await getSB().from('entries').update({ html: '', plain: '', deleted: true }).eq('id', id);
     if (error) throw error;
   },
+  getEntryTs: async (id) => {
+    const { data, error } = await getSB().from('entries').select('ts').eq('id', id).single();
+    if (error) throw error;
+    return data?.ts;
+  },
+  getEntriesByIds: async (ids) => {
+    if (!ids?.length) return [];
+    const { data, error } = await getSB().from('entries').select('*').in('id', ids);
+    if (error) throw error;
+    return data || [];
+  },
+
+  // ── Escritura compartida (colaboradores en un texto) ──
+  inviteCollaborators: async (entryId, ownerId, collaboratorIds) => {
+    const rows = collaboratorIds.map(cid => ({
+      entry_id: entryId, owner_id: ownerId, collaborator_id: cid, status: 'pendiente',
+    }));
+    const { data, error } = await getSB().from('entry_collaborators')
+      .upsert(rows, { onConflict: 'entry_id,collaborator_id' }).select();
+    if (error) throw error;
+    return data || [];
+  },
+  getCollaboratorsForEntries: async (ids) => {
+    if (!ids?.length) return {};
+    const map = {};
+    ids.forEach(id => { map[id] = []; });
+    try {
+      const { data, error } = await getSB().from('entry_collaborators').select('*').in('entry_id', ids);
+      if (error) throw error;
+      (data || []).forEach(c => { if (map[c.entry_id]) map[c.entry_id].push(c); });
+    } catch (e) { console.error('getCollaboratorsForEntries:', e); }
+    return map;
+  },
+  getPendingCollabInvites: async (uid) => {
+    const { data, error } = await getSB().from('entry_collaborators')
+      .select('*').eq('collaborator_id', uid).eq('status', 'pendiente')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  getSharedWithMeEntryIds: async (uid) => {
+    const { data, error } = await getSB().from('entry_collaborators')
+      .select('entry_id').eq('collaborator_id', uid).eq('status', 'aceptado');
+    if (error) throw error;
+    return (data || []).map(r => r.entry_id);
+  },
+  respondCollabInvite: async (id, status) => {
+    const { error } = await getSB().from('entry_collaborators')
+      .update({ status, responded_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+  },
+  removeCollaborator: async (id) => {
+    const { error } = await getSB().from('entry_collaborators').delete().eq('id', id);
+    if (error) throw error;
+  },
+  getProfilesByIds: async (ids) => {
+    if (!ids?.length) return [];
+    const { data, error } = await getSB().from('profiles')
+      .select('id,name,username,initials,accent,bg').in('id', ids);
+    if (error) throw error;
+    return data || [];
+  },
 
   // Reflections
   getReflections: async (uid) => {
@@ -9456,7 +9518,7 @@ const AuthScreen=({onAuth})=>{
 };
 
 
-const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -9654,7 +9716,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         onClose={()=>setCollectiveDetail(null)}
         onUpdate={updated=>setCollectiveDetail(updated)}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
-      {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} onClose={()=>setShowBiblioteca(false)}
+      {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
@@ -10627,6 +10689,16 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   // Si estamos reeditando un cuento contrareloj ya publicado, el tiempo original NO se toca;
   // el tiempo de esta nueva sesión se acumula aparte, en extra_elapsed.
   const originalEntryRef=useRef(sessionConfig.type==='edit'?library.find(e=>e.id===sessionConfig.entryId):null);
+  // Si este texto tiene colaboradores aceptados, el guardado final comprueba antes
+  // si alguien más ha guardado cambios mientras estaba abierto (ver handleFinishDay).
+  const [hasCollaborators,setHasCollaborators]=useState(false);
+  useEffect(()=>{
+    if(sessionConfig.type!=='edit'||!sessionConfig.entryId)return;
+    DB.getCollaboratorsForEntries([sessionConfig.entryId]).then(map=>{
+      const list=map[sessionConfig.entryId]||[];
+      setHasCollaborators(list.some(c=>c.status==='aceptado'));
+    }).catch(()=>{});
+  },[]);
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
   const tunnelWrapRef=useRef();
   const [tunnelRects,setTunnelRects]=useState([]);
@@ -10666,6 +10738,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const visibility=existing?(existing.visibility||'privado'):'privado';
     return {
       id,ts:Date.now(),sk,date:today(),
+      owner_user_id:existing?.user_id||user.id, // dueño original — nunca cambia por quien guarda
       words_added:Math.max(0,wc-initialWcRef.current), // increment only, 0 if didn't add words
       session_label:headerFamily,sessionLabel:headerFamily,
       title:headerTitle,
@@ -10836,7 +10909,29 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const siL=()=>{if(!autoSave)return{l:'off',dot:'rgba(0,0,0,0.12)',c:FAINT};if(saveStatus==='saving')return{l:'Guardando…',dot:'#1B5FAA',c:MUTED};if(saveStatus==='saved')return{l:'✓',dot:'#1E9BF0',c:'#1E9BF0'};if(!started||!plainTxt.trim())return{l:'Auto',dot:'rgba(30,155,240,0.35)',c:FAINT};return{l:asCd+'s',dot:'rgba(30,155,240,0.5)',c:FAINT}};
   const si=siL();
   const TBTN=on=>({background:on?'rgba(0,0,0,0.08)':'transparent',border:'none',borderRadius:5,cursor:'pointer',color:on?TXT:MUTED,display:'flex',alignItems:'center',justifyContent:'center',width:26,height:26,flexShrink:0});
-  const handleFinishDay=()=>{if(started)saveNow(false);onFinishDay({sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null})};
+  const handleFinishDay=async()=>{
+    const finishPayload={sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null};
+    if(started){
+      // Texto compartido: comprobamos si alguien más ha guardado mientras lo teníamos
+      // abierto, para no sobrescribirlo a lo bruto sin avisar (no hay tiempo real, así
+      // que esto es lo más parecido a detectar el conflicto en el último momento).
+      if(hasCollaborators&&originalEntryRef.current?.ts){
+        try{
+          const freshTs=await DB.getEntryTs(entryIdRef.current);
+          if(freshTs&&freshTs!==originalEntryRef.current.ts){
+            const overwrite=window.confirm('Alguien más ha guardado cambios en este texto compartido mientras lo tenías abierto.\n\nAceptar = sobrescribir con tu versión (se perderá lo que haya guardado la otra persona).\nCancelar = guardar tu versión aparte, como copia, sin tocar la suya.');
+            if(!overwrite){
+              await saveVersion();
+              onFinishDay(finishPayload);
+              return;
+            }
+          }
+        }catch(e){console.error('conflict check:',e);}
+      }
+      await saveNow(false);
+    }
+    onFinishDay(finishPayload);
+  };
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'var(--app-height,100dvh)',background:'transparent',position:'relative'}}>
@@ -12079,7 +12174,7 @@ const StatsChart=({library})=>{
     </div>
   );
 };
-const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete})=>{
+const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEdit})=>{
   const [showEncadenar,setShowEncadenar]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [deleting,setDeleting]=useState(false);
@@ -12095,6 +12190,9 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete})=>{
 
   // Can the user interact? (not their own text, and user is logged in)
   const isOwn=entry.user_id===user?.id;
+  // Colaboradores aceptados en un texto compartido también pueden editarlo y
+  // cambiar su visibilidad, aunque no sean el dueño original (isOwn=false).
+  const editAllowed=canEdit!==undefined?canEdit:isOwn;
   const canInteract=user&&!isOwn&&entry.visibility!=='privado';
 
   useEffect(()=>{
@@ -12262,14 +12360,14 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete})=>{
                 <span style={{fontSize:11,color:MUTED}}>{avgRating}/5 ({ratings.length} valoración{ratings.length!==1?'es':''})</span>
               </div>}
               <span style={{fontSize:11,color:FAINT}}>{entry.word_count||entry.wordCount||0} palabras</span>
-              {isOwn&&(
+              {editAllowed&&(
                 <button onClick={()=>setShowVisMenu(true)} title="Cambiar visibilidad"
                   style={{display:'flex',alignItems:'center',gap:5,border:'0.5px solid '+BDR,borderRadius:14,padding:'3px 10px',background:'rgba(0,0,0,0.03)',cursor:'pointer',fontSize:11,fontWeight:500}}>
                   <Icon name={vis==='privado'?'lock-simple':vis==='amigos'?'users':'globe'} size={12}/>
                   {vis==='privado'?'Privado':vis==='amigos'?'Amigos':'Público'}
                 </button>
               )}
-              {isOwn&&onEdit&&(
+              {editAllowed&&onEdit&&(
                 <button onClick={()=>{onClose();onEdit(entry);}} title="Editar este texto"
                   style={{display:'flex',alignItems:'center',gap:5,border:'none',borderRadius:14,padding:'4px 12px',background:ADVANCE_BG,color:ADVANCE_TXT,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
                   <Icon name="pencil-simple" size={12}/>Editar
@@ -12878,7 +12976,98 @@ const VisibilityPicker=({value,onChange})=>{
 };
 
 /* ─── MIS TEXTOS ─────────────────────────────────── */
-const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
+/* ─── INVITAR A ESCRIBIR JUNTOS ──────────────────── */
+const InviteCollaboratorsModal=({user,entry,onClose,onInvited})=>{
+  const [selected,setSelected]=useState([]); // [{id,name,username,initials,accent,bg}]
+  const [searchQ,setSearchQ]=useState('');
+  const [searchRes,setSearchRes]=useState([]);
+  const [searching,setSearching]=useState(false);
+  const [saving,setSaving]=useState(false);
+
+  const doSearch=async q=>{
+    if(q.trim().length<2){setSearchRes([]);return;}
+    setSearching(true);
+    try{
+      const{data}=await getSB().from('profiles').select('id,name,username,initials,accent,bg')
+        .ilike('username','%'+q.trim()+'%').neq('id',user.id).limit(6);
+      setSearchRes((data||[]).filter(p=>!selected.some(s=>s.id===p.id)));
+    }catch(e){}
+    setSearching(false);
+  };
+  useEffect(()=>{const t=setTimeout(()=>doSearch(searchQ),300);return()=>clearTimeout(t);},[searchQ,selected]);
+
+  const addPerson=p=>{
+    if(!selected.find(s=>s.id===p.id))setSelected(prev=>[...prev,p]);
+    setSearchQ('');setSearchRes([]);
+  };
+  const removePerson=id=>setSelected(prev=>prev.filter(s=>s.id!==id));
+
+  const send=async()=>{
+    if(!selected.length)return;
+    setSaving(true);
+    try{
+      await DB.inviteCollaborators(entry.id,user.id,selected.map(s=>s.id));
+      onInvited&&onInvited(selected);
+      onClose();
+    }catch(e){alert('Error al invitar: '+e.message);}
+    setSaving(false);
+  };
+
+  return(
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+      style={{position:'fixed',inset:0,zIndex:300,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:16,padding:24,width:'100%',maxWidth:400,maxHeight:'85vh',overflowY:'auto',boxSizing:'border-box',boxShadow:'0 20px 60px -16px rgba(10,27,61,0.4)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+          <Icon name="users-three" size={18} color={AZUL}/>
+          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:16,color:TXT,flex:1}}>Invitar a escribir juntos</div>
+        </div>
+        <div style={{fontSize:12,color:MUTED,marginBottom:16,lineHeight:1.55}}>
+          «{entry.title||'Sin título'}» aparecerá también en la biblioteca de quien acepte, y podrá abrirlo y editarlo igual que tú.
+        </div>
+
+        {selected.length>0&&<div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:12}}>
+          {selected.map(p=>(
+            <span key={p.id} style={{display:'flex',alignItems:'center',gap:5,background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:20,padding:'4px 6px 4px 10px',fontSize:12,color:AZULMED}}>
+              {p.name||p.username}
+              <button onClick={()=>removePerson(p.id)} style={{background:'transparent',border:'none',cursor:'pointer',color:AZULMED,display:'flex',padding:2}}>
+                <Icon name="x" size={11}/>
+              </button>
+            </span>
+          ))}
+        </div>}
+
+        <div style={{position:'relative',marginBottom:16}}>
+          <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="Buscar por nombre de usuario…"
+            style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'10px 12px',fontSize:13,color:TXT,background:INPUT_BG,boxSizing:'border-box',outline:'none'}}/>
+          {searchQ.trim().length>=2&&(
+            <div style={{marginTop:6,border:'1px solid '+BDR,borderRadius:9,overflow:'hidden'}}>
+              {searching&&<div style={{padding:'10px 12px',fontSize:12,color:MUTED}}>Buscando…</div>}
+              {!searching&&searchRes.length===0&&<div style={{padding:'10px 12px',fontSize:12,color:MUTED}}>Sin resultados.</div>}
+              {searchRes.map(p=>(
+                <button key={p.id} onClick={()=>addPerson(p)} style={{display:'flex',alignItems:'center',gap:8,width:'100%',background:'transparent',border:'none',borderBottom:'1px solid '+BDR,padding:'9px 12px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+                  <div style={{width:24,height:24,borderRadius:'50%',background:p.bg||'rgba(30,155,240,0.1)',color:p.accent||AZUL,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700,flexShrink:0}}>{p.initials||'?'}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</div>
+                    <div style={{fontSize:11,color:FAINT}}>@{p.username}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{display:'flex',gap:10}}>
+          <button onClick={onClose} style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'11px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+          <Btn variant="primary" onClick={send} disabled={!selected.length||saving} style={{flex:1}}>
+            {saving?'Invitando…':'Invitar'+(selected.length>1?' ('+selected.length+')':'')}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,onFolderChange,onEdit,onDelete,onCollabAccepted})=>{
   const [deletingEntry,setDeletingEntry]=useState(null);
   const [deleting,setDeleting]=useState(false);
   const [filter,setFilter]=useState('all');
@@ -12919,22 +13108,74 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
     });
   };
 
+  // ── Escritura compartida ──
+  const [invitingEntry,setInvitingEntry]=useState(null); // entry sobre la que se abre el modal de invitar
+  const [collabMap,setCollabMap]=useState({}); // entry_id -> [{id,collaborator_id,owner_id,status}]
+  const [collabProfiles,setCollabProfiles]=useState({}); // user_id -> {name,username,...}
+  const [pendingInvites,setPendingInvites]=useState([]); // invitaciones que ME han enviado, sin responder
+  const [respondingInvite,setRespondingInvite]=useState(null);
+
+  const loadPendingInvites=async()=>{
+    try{
+      const invites=await DB.getPendingCollabInvites(user.id);
+      if(!invites.length){setPendingInvites([]);return;}
+      const entryIds=[...new Set(invites.map(i=>i.entry_id))];
+      const ownerIds=[...new Set(invites.map(i=>i.owner_id))];
+      const [entries,owners]=await Promise.all([
+        DB.getEntriesByIds(entryIds).catch(()=>[]),
+        DB.getProfilesByIds(ownerIds).catch(()=>[]),
+      ]);
+      const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
+      const ownerMap=Object.fromEntries(owners.map(p=>[p.id,p]));
+      setPendingInvites(invites.map(i=>({...i,entryTitle:entryMap[i.entry_id]?.title,ownerName:ownerMap[i.owner_id]?.name||ownerMap[i.owner_id]?.username})));
+    }catch(e){console.error('loadPendingInvites:',e);}
+  };
+  useEffect(()=>{loadPendingInvites();},[user.id]);
+
+  const respondInvite=async(invite,status)=>{
+    setRespondingInvite(invite.id);
+    try{
+      await DB.respondCollabInvite(invite.id,status);
+      setPendingInvites(prev=>prev.filter(i=>i.id!==invite.id));
+      if(status==='aceptado'){
+        const entries=await DB.getEntriesByIds([invite.entry_id]).catch(()=>[]);
+        if(entries[0])onCollabAccepted&&onCollabAccepted(entries[0]);
+      }
+    }catch(e){alert('Error: '+e.message);}
+    setRespondingInvite(null);
+  };
+
   const DEFAULT_FOLDERS=[['retos','Retos'],['poesia','Poesía'],['relato','Relato'],['novela','Novela'],['ensayo','Ensayo']];
 
   useEffect(()=>{DB.getCustomFolders(user.id).then(setCustomFolders).catch(()=>{});},[user.id]);
 
   const allFolders=[...DEFAULT_FOLDERS,...customFolders.map(f=>[f.id,f.name])];
 
-  // library en vivo + copias offline no presentes en ella (la versión en vivo,
-  // si existe, siempre gana por ser la más reciente)
+  // library propia + compartida conmigo + copias offline no presentes en ellas
+  // (la versión en vivo, si existe, siempre gana por ser la más reciente)
   const combinedLibrary=useMemo(()=>{
     const map=new Map();
     offlineKept.forEach((v,k)=>map.set(k,v));
     library.forEach(e=>map.set(e.id,e));
+    sharedWithMe.forEach(e=>map.set(e.id,e));
     return Array.from(map.values());
-  },[library,offlineKept]);
+  },[library,offlineKept,sharedWithMe]);
 
   const myTexts=combinedLibrary.filter(e=>e.visibility!=='ejercicio'&&!e.deleted);
+
+  useEffect(()=>{
+    const ids=myTexts.map(e=>e.id);
+    if(!ids.length)return;
+    DB.getCollaboratorsForEntries(ids).then(async map=>{
+      setCollabMap(map);
+      const allIds=[...new Set(Object.values(map).flat().flatMap(c=>[c.owner_id,c.collaborator_id]))].filter(id=>id!==user.id);
+      if(allIds.length){
+        const profs=await DB.getProfilesByIds(allIds).catch(()=>[]);
+        setCollabProfiles(Object.fromEntries(profs.map(p=>[p.id,p])));
+      }
+    }).catch(()=>{});
+  },[myTexts.map(e=>e.id).join(',')]);
+
   const inFolder=e=>{
     // Los checks y retos semanales que siguen en la carpeta "Retos" por defecto
     // (es decir, nadie los ha movido a mano todavía) no aparecen en "Todos":
@@ -13001,7 +13242,8 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
-      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}/>}
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}
+        canEdit={readEntry.user_id===user.id||(collabMap[readEntry.id]||[]).some(c=>c.status==='aceptado'&&(c.collaborator_id===user.id||c.owner_id===user.id))}/>}
       {movingEntry&&<div onClick={()=>setMovingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Mover a…</div>
@@ -13068,6 +13310,31 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
         </div>
       </div>}
 
+      {/* Invitaciones a escribir juntos pendientes de responder */}
+      {pendingInvites.length>0&&<div style={{margin:'14px 16px 0',background:'rgba(30,155,240,0.06)',border:'0.5px solid rgba(30,155,240,0.22)',borderRadius:12,padding:'12px 14px',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11.5,fontWeight:600,color:AZULMED,marginBottom:8}}>
+          <Icon name="user-plus" size={13} color={AZULMED}/>
+          Invitaciones a escribir juntos ({pendingInvites.length})
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {pendingInvites.map(inv=>(
+            <div key={inv.id} style={{display:'flex',alignItems:'center',gap:8,background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:9,padding:'8px 10px'}}>
+              <div style={{flex:1,fontSize:12,color:TXT}}>
+                <strong>{inv.ownerName||'Alguien'}</strong> te invita a escribir «{inv.entryTitle||'un texto'}» junto a ella o él.
+              </div>
+              <button onClick={()=>respondInvite(inv,'aceptado')} disabled={respondingInvite===inv.id}
+                style={{background:AZUL,border:'none',borderRadius:7,padding:'6px 10px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer',flexShrink:0}}>
+                {respondingInvite===inv.id?'…':'Aceptar'}
+              </button>
+              <button onClick={()=>respondInvite(inv,'rechazado')} disabled={respondingInvite===inv.id}
+                style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'6px 10px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>
+                Rechazar
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>}
+
       {/* Carpetas */}
       <div style={{display:'flex',gap:7,padding:'14px 16px 0',flexShrink:0,flexWrap:'wrap',alignItems:'center'}}>
         {[['todos','Todos'],['sin','Sin carpeta'],...allFolders].map(([id,name])=>{
@@ -13122,6 +13389,14 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
             const excerpt=(e.plain||'').slice(0,100);
             const isPublic=vis!=='privado';
             const act=activity[e.id];
+            const isMine=e.user_id===user.id;
+            const collabs=(collabMap[e.id]||[]);
+            const acceptedCollabs=collabs.filter(c=>c.status==='aceptado');
+            const pendingCollabs=collabs.filter(c=>c.status==='pendiente');
+            const collabNames=acceptedCollabs.map(c=>{
+              const otherId=c.owner_id===user.id?c.collaborator_id:c.owner_id;
+              return collabProfiles[otherId]?.name||collabProfiles[otherId]?.username||'alguien';
+            });
             return(
               <div key={e.id} onClick={()=>setReadEntry(e)} style={{position:'relative',overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,padding:'16px',cursor:'pointer',display:'flex',flexDirection:'column',minHeight:165}}>
                 <Signo char={meta.signo} size={60} top={-12} right={10} color={meta.signoColor}/>
@@ -13139,6 +13414,11 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
                     </span>
                     <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
                       <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT,whiteSpace:'nowrap'}}>{relTime(e.date)}</span>
+                      {isMine&&<button onClick={e2=>{e2.stopPropagation();setInvitingEntry(e);}}
+                        title="Invitar a escribir juntos"
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:acceptedCollabs.length?AZUL:FAINT,padding:0,display:'flex',flexShrink:0}}>
+                        <Icon name="user-plus" size={13}/>
+                      </button>}
                       <button onClick={e2=>{e2.stopPropagation();toggleOfflineKeep(e);}}
                         title={offlineKept.has(e.id)?'Disponible sin conexión · quitar':'Mantener offline'}
                         style={{background:'transparent',border:'none',cursor:'pointer',color:offlineKept.has(e.id)?AZUL:FAINT,padding:0,display:'flex',flexShrink:0}}>
@@ -13148,14 +13428,25 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
                         style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
                         <Icon name="folder-simple" size={13}/>
                       </button>
-                      <button onClick={e2=>{e2.stopPropagation();setDeletingEntry(e);}} title="Eliminar"
+                      {isMine&&<button onClick={e2=>{e2.stopPropagation();setDeletingEntry(e);}} title="Eliminar"
                         style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
                         <Icon name="trash" size={13}/>
-                      </button>
+                      </button>}
                     </div>
                   </div>
 
                   <div style={{fontFamily:'"Playfair Display",serif',fontWeight:600,fontSize:16,lineHeight:1.28,color:TXT,marginBottom:6}}>{e.title||'Sin título'}</div>
+
+                  {(acceptedCollabs.length>0||pendingCollabs.length>0||!isMine)&&<div style={{display:'flex',alignItems:'center',gap:4,fontSize:10.5,color:AZULMED,marginBottom:8}}>
+                    <Icon name="users" size={11} color={AZULMED}/>
+                    <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {!isMine
+                        ? 'Compartido por '+(collabProfiles[e.user_id]?.name||collabProfiles[e.user_id]?.username||'otra persona')
+                        : collabNames.length
+                          ? 'Compartido con '+collabNames.join(', ')
+                          : 'Invitación enviada, sin responder'}
+                    </span>
+                  </div>}
 
                   {excerpt&&<div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10,flex:1,display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{excerpt}</div>}
                   {!excerpt&&<div style={{flex:1}}/>}
@@ -13170,6 +13461,8 @@ const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onE
           })}
         </div>
       </div>
+      {invitingEntry&&<InviteCollaboratorsModal user={user} entry={invitingEntry} onClose={()=>setInvitingEntry(null)}
+        onInvited={()=>{DB.getCollaboratorsForEntries(myTexts.map(e=>e.id)).then(setCollabMap).catch(()=>{});}}/>}
     </div>
   );
 };
@@ -13226,7 +13519,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,projects=[],onClose,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
+const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
   const [tab,setTab]=useState('explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
@@ -13296,7 +13589,7 @@ const BibliotecaScreen=({user,library,projects=[],onClose,onVisibilityChange,onF
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
     {id:'buscar',label:'Buscar',count:0},
-    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted).length},
+    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted).length+sharedWithMe.length},
   ];
 
   return(
@@ -13412,7 +13705,7 @@ const BibliotecaScreen=({user,library,projects=[],onClose,onVisibilityChange,onF
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
-        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete}/>}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete}/>}
       </div>
     </div>
   );
@@ -16163,6 +16456,10 @@ const App=()=>{
   const [showPasswordReset,setShowPasswordReset]=useState(false);
   const [followers,setFollowers]=useState([]);
   const [following,setFollowing]=useState([]);
+  // Textos de otras personas donde soy colaborador aceptado — separado de `library`
+  // a propósito, para que NUNCA cuenten en mis propias estadísticas/racha (computeStats
+  // solo debe ver lo que yo he escrito como dueño).
+  const [sharedWithMe,setSharedWithMe]=useState([]);
 
   // Reintenta subir cualquier entrada que se cacheó localmente porque su guardado
   // en la nube falló (red caída, error temporal, etc.). saveEntry() siempre deja
@@ -16250,6 +16547,16 @@ const App=()=>{
   const loadUserData=async(uid)=>{
     if(!uid)return;
     setSyncStatus('syncing');
+    const normalizeEntry=e=>({
+      ...e,
+      ts:e.ts||new Date(e.created_at||e.date||0).getTime()||Date.now(),
+      date:e.date?.slice(0,10)||e.created_at?.slice(0,10)||'',
+      word_count:e.word_count||e.wordCount||0,
+      wordCount:e.word_count||e.wordCount||0,
+      elapsed:e.elapsed||0,
+      plain:e.plain||'',
+      html:e.html||'',
+    });
     try{
       const [entries,refs,projs,lessons]=await Promise.all([
         DB.getEntries(uid),
@@ -16257,16 +16564,7 @@ const App=()=>{
         DB.getProjects(uid),
         DB.getLessonsRead(uid),
       ]);
-      const lib=entries.map(e=>({
-        ...e,
-        ts:e.ts||new Date(e.created_at||e.date||0).getTime()||Date.now(),
-        date:e.date?.slice(0,10)||e.created_at?.slice(0,10)||'',
-        word_count:e.word_count||e.wordCount||0,
-        wordCount:e.word_count||e.wordCount||0,
-        elapsed:e.elapsed||0,
-        plain:e.plain||'',
-        html:e.html||'',
-      })).sort((a,b)=>b.ts-a.ts);
+      const lib=entries.map(normalizeEntry).sort((a,b)=>b.ts-a.ts);
       setLibrary(lib);
       setReflections(refs.map(r=>({...r,
         sessionTitle:r.session_title||r.sessionTitle||'',
@@ -16283,6 +16581,13 @@ const App=()=>{
         setFollowers(fwersList);
         setFollowing(fwingIds);
       }catch(e){console.error('followers error:',e);}
+      // Textos de otras personas donde soy colaborador aceptado. Aparte de `library`
+      // a propósito: no debe contar en mis propias estadísticas ni racha.
+      try{
+        const sharedIds=await DB.getSharedWithMeEntryIds(uid);
+        const sharedEntries=sharedIds.length?await DB.getEntriesByIds(sharedIds):[];
+        setSharedWithMe(sharedEntries.map(normalizeEntry).sort((a,b)=>b.ts-a.ts));
+      }catch(e){console.error('sharedWithMe error:',e);}
       setSyncStatus('ok');
       setTimeout(()=>setSyncStatus(s=>s==='ok'?null:s),2000);
       return{lib,refs};
@@ -16451,9 +16756,20 @@ const App=()=>{
 
   const saveEntry=async(entry)=>{
     if(!user)return;
-    const e={...entry,user_id:user.id};
+    // Si es un texto compartido y quien guarda no es el dueño original, hay que
+    // preservar el user_id del dueño (entry.owner_user_id, puesto por buildEntry()
+    // en el Editor). Sin esto, el guardado de un colaborador "robaría" en
+    // silencio la propiedad del texto y probablemente rompería su acceso.
+    const ownerId=entry.owner_user_id||entry.user_id||user.id;
+    const {owner_user_id,...rest}=entry; // no es una columna real de `entries`
+    const e={...rest,user_id:ownerId};
+    const isMine=ownerId===user.id;
     S.set('flujo:cache:'+user.id+':'+e.id,e);
-    setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
+    if(isMine){
+      setLibrary(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
+    }else{
+      setSharedWithMe(prev=>[e,...prev.filter(x=>x.id!==e.id)]);
+    }
     const dbEntry={
       id:e.id,user_id:e.user_id,sk:e.sk||null,title:e.title||null,
       session_label:e.session_label||e.sessionLabel||null,
@@ -16560,6 +16876,8 @@ const App=()=>{
     {showWelcome&&<WelcomeCarousel onClose={()=>setShowWelcome(false)}/>}
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} writingMode={writingMode} setReadingEntry={undefined}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
+      sharedWithMe={sharedWithMe}
+      onCollabAccepted={entry=>setSharedWithMe(prev=>[entry,...prev.filter(x=>x.id!==entry.id)])}
       isOffline={isOffline} pendingCount={pendingCount}
       onNewChallenge={async()=>{
         try{
