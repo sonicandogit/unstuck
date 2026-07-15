@@ -8804,6 +8804,42 @@ const oqAdd=entry=>{const q=oqGet();const i=q.findIndex(e=>e.id===entry.id);if(i
 const oqRemove=id=>{oqSet(oqGet().filter(e=>e.id!==id));};
 const oqClear=()=>{try{localStorage.removeItem(OQ_KEY);}catch(e){}};
 
+// ─── TEXTOS "MANTENER OFFLINE" ────────────────────────────────────
+// Copia de lectura/edición de textos concretos que el usuario ha marcado
+// a mano en la Biblioteca para poder abrirlos y seguir escribiéndolos sin
+// conexión — a diferencia de la cola de arriba (que guarda lo pendiente de
+// subir), esto es una selección deliberada de qué se queda en el dispositivo,
+// para no intentar guardar toda la biblioteca offline.
+const OFFLINE_KEEP_PREFIX='pretexto:offline_kept:';
+const offlineKeepIsKept=id=>!!S.get(OFFLINE_KEEP_PREFIX+id);
+const offlineKeepSave=entry=>{
+  S.set(OFFLINE_KEEP_PREFIX+entry.id,{
+    id:entry.id,user_id:entry.user_id,sk:entry.sk,title:entry.title,
+    session_label:entry.session_label||entry.sessionLabel,
+    html:entry.html||'',plain:entry.plain||'',
+    word_count:entry.word_count||entry.wordCount||0,
+    elapsed:entry.elapsed||0,date:entry.date,ts:entry.ts,
+    visibility:entry.visibility,project_id:entry.project_id||entry.projectId,
+    folder:entry.folder,meta_words:entry.meta_words,
+    font_idx:entry.font_idx,editor_size:entry.editor_size,align_dir:entry.align_dir,
+  });
+};
+const offlineKeepRemove=id=>S.del(OFFLINE_KEEP_PREFIX+id);
+const offlineKeepGetAll=()=>S.list(OFFLINE_KEEP_PREFIX).map(k=>S.get(k)).filter(Boolean);
+
+// Proyecto (título/tipo/objetivo) asociado a un texto mantenido offline — sin esto,
+// "Continuar «Proyecto»" no puede mostrarse ni resolverse sin conexión, aunque el
+// texto en sí ya esté disponible.
+const OFFLINE_KEEP_PROJECT_PREFIX='pretexto:offline_kept_project:';
+const offlineKeepProjectSave=project=>{
+  S.set(OFFLINE_KEEP_PROJECT_PREFIX+project.id,{
+    id:project.id,title:project.title,type:project.type,goal:project.goal,
+    created_at:project.created_at,word_count:project.word_count,
+  });
+};
+const offlineKeepProjectRemove=id=>S.del(OFFLINE_KEEP_PROJECT_PREFIX+id);
+const offlineKeepProjectsGetAll=()=>S.list(OFFLINE_KEEP_PROJECT_PREFIX).map(k=>S.get(k)).filter(Boolean);
+
 // ─── RELATO COLECTIVO ─────────────────────────────────────────────
 // 20 frases de apertura para el botón "Al azar"
 const COLLECTIVE_OPENERS=[
@@ -8956,7 +8992,6 @@ const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
 const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return days[d.getDay()].charAt(0).toUpperCase()+days[d.getDay()].slice(1)+', '+d.getDate()};
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
-const ratingMsg=v=>{if(v<=2)return'fue duro';if(v<=4)return'costó arrancar';if(v<=6)return'razonable';if(v<=8)return'bien';return'en el flujo ✦'};
 const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
   // totalWords = sum of words_added across all entries
   // words_added stores the INCREMENT per session (new words only)
@@ -8984,7 +9019,6 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
   }
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
   const thisWeek=new Set(activeDayEntries.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).map(e=>e.date?.slice(0,10))).size;
-  const avgRating=reflections.length?Math.round(reflections.reduce((s,r)=>s+r.rating,0)/reflections.length*10)/10:null;
   const _firstDay=library.length?library[library.length-1].date?.slice(0,10)||today():today();const last7=Array.from({length:7},(_,i)=>{const d=new Date(_firstDay+'T12:00:00');d.setDate(d.getDate()+i);return d.toISOString().slice(0,10)});
   const activeDates=new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean));
   // Comodín: activeDates debe estar definido antes de usarlo
@@ -8997,7 +9031,53 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
   const weekWords=weekEntries.reduce((s,e)=>{const wa=e.words_added;return s+(wa!=null?wa:(e.word_count||e.wordCount||0));},0);
   const weekSessions=weekEntries.length;
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
-  return{totalWords,streak,thisWeek,avgRating,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newMilestone,todayActive};
+  return{totalWords,streak,thisWeek,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newMilestone,todayActive};
+};
+
+// Hash simple y determinista (mismo input → mismo resultado siempre) para elegir
+// una variante de mensaje de racha. Con esto el mensaje no cambia en cada
+// re-render (usa la fecha de hoy + la racha como semilla), pero sí varía de un
+// día a otro en vez de repetir siempre la misma frase para el mismo tramo.
+const _hashStr=s=>{let h=0;for(let i=0;i<s.length;i++){h=(h<<5)-h+s.charCodeAt(i);h|=0;}return Math.abs(h);};
+const streakMessage=(streak,todayActive=true)=>{
+  const pick=list=>list[_hashStr(today()+'|'+streak)%list.length];
+  if(streak<=0)return{icon:'pencil-line',color:FAINT,text:pick([
+    'Hoy es un buen día para empezar.',
+    'Escribe algo, aunque sea poco. Así empiezan las rachas.',
+    '¿Empezamos hoy?',
+  ])};
+  if(streak===1)return{icon:'star',color:NARANJA,text:pick([
+    '¡Primer día! El más difícil ya pasó.',
+    'Ya has empezado. Eso es lo que más cuesta.',
+    'Día 1. Todo lo demás es seguir.',
+  ])};
+  if(streak%7===0&&todayActive)return{icon:'gift',color:AZUL,text:pick([
+    '¡Semana completa! Has ganado un comodín.',
+    '7 días más. Comodín nuevo en el bolsillo.',
+    'Otra semana redonda. Comodín conseguido.',
+  ])};
+  if(streak<7)return{icon:'trend-up',color:AZUL,text:pick([
+    `Llevas ${streak} días. Completa 7 para ganar un comodín.`,
+    `${streak} días seguidos. Vas cogiendo ritmo.`,
+    `${streak} días. El hábito se está formando.`,
+  ])};
+  if(streak<14)return{icon:'trend-up',color:AZUL,text:pick([
+    `¡${streak} días! Vas a por las dos semanas.`,
+    `${streak} días seguidos. No se rompe la cadena.`,
+    `¡${streak} días! Cada día cuenta más.`,
+  ])};
+  if(streak<30)return{icon:'lightning',color:NARANJA,text:pick([
+    `¡${streak} días! Increíble constancia.`,
+    `${streak} días seguidos. Esto ya es un hábito de verdad.`,
+    `¡${streak} días! Pocas personas llegan tan lejos.`,
+    `${streak} días. Tu yo del futuro te lo agradece.`,
+  ])};
+  return{icon:'trophy',color:NARANJA,text:pick([
+    `¡${streak} días seguidos! Eres imparable.`,
+    `${streak} días. Esto ya es parte de quién eres.`,
+    `¡${streak} días seguidos! Esta racha no es casualidad.`,
+    `${streak} días. Sigues aquí, sigues escribiendo.`,
+  ])};
 };
 
 /* ─── CLAUDE API ─────────────────────────────────── */
@@ -9394,6 +9474,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
     S.set('pretexto:writing_mode',nm);
     setWritingMode(nm);
   };
+  const [confirmModeChange,setConfirmModeChange]=useState(false);
   const [showCollectives,setShowCollectives]=useState(false);
   const [showHamburger,setShowHamburger]=useState(false);
   const [collectiveDetail,setCollectiveDetail]=useState(null); // collective being edited/read // perfil abierto desde una notificación
@@ -9460,6 +9541,42 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
     <div style={{height:'var(--app-height,100dvh)',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
 
 
+      {/* ── MODO ESCRITURA: confirmación de cambio ───────── */}
+      {confirmModeChange&&(
+        <div onClick={()=>setConfirmModeChange(false)}
+          style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:16,padding:'28px 24px',maxWidth:380,width:'100%',boxShadow:'0 20px 60px -12px rgba(10,27,61,0.35)'}}>
+            {/* Icono modo destino */}
+            <div style={{display:'flex',justifyContent:'center',marginBottom:16}}>
+              <div style={{width:52,height:52,borderRadius:14,background:writingMode==='literatura'?'rgba(241,90,36,0.1)':'rgba(30,155,240,0.1)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <Icon name={writingMode==='literatura'?'film-script':'book-open'} size={26} color={writingMode==='literatura'?NARANJA:AZUL}/>
+              </div>
+            </div>
+            <div style={{textAlign:'center',marginBottom:8}}>
+              <div style={{fontFamily:'"Playfair Display",serif',fontSize:17,fontWeight:700,color:TXT,marginBottom:6}}>
+                Cambiar a modo {writingMode==='literatura'?'Guión cine':'Literatura'}
+              </div>
+              <div style={{fontSize:13,color:MUTED,lineHeight:1.6}}>
+                {writingMode==='literatura'
+                  ?'Los checks y retos pasarán a ser ejercicios de guión cinematográfico. Tus textos y proyectos actuales no se borran.'
+                  :'Los checks y retos volverán a ser ejercicios de escritura narrativa. Tus guiones y proyectos actuales no se borran.'
+                }
+              </div>
+            </div>
+            <div style={{display:'flex',gap:10,marginTop:22}}>
+              <button onClick={()=>setConfirmModeChange(false)}
+                style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'11px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                Cancelar
+              </button>
+              <button onClick={()=>{toggleWritingMode();setConfirmModeChange(false);}}
+                style={{flex:1,background:writingMode==='literatura'?NARANJA:AZUL,border:'none',borderRadius:9,padding:'11px',fontSize:13,fontWeight:700,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                Cambiar a {writingMode==='literatura'?'Guión':'Literatura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── HAMBURGER MENU (mobile) ───────────────────────────── */}
       {showHamburger&&(
         <div onClick={()=>setShowHamburger(false)}
@@ -9537,7 +9654,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         onClose={()=>setCollectiveDetail(null)}
         onUpdate={updated=>setCollectiveDetail(updated)}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
-      {showBiblioteca&&<BibliotecaScreen user={user} library={library} onClose={()=>setShowBiblioteca(false)}
+      {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
@@ -9626,7 +9743,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
                 {[
                   {icon:'sliders-horizontal',label:'Editar perfil',action:()=>{setShowProfileSettings(true);setShowUserMenu(false);}},
                   {icon:'chart-bar',label:'Estadísticas',action:()=>{setShowStats(true);setShowUserMenu(false);}},
-                  {icon:'film-script',label:writingMode==='literatura'?'Modo: Literatura':'Modo: Guión cine',action:()=>{toggleWritingMode();setShowUserMenu(false);},dot:writingMode==='guion'?NARANJA:AZUL},
+                  {icon:'film-script',label:writingMode==='literatura'?'Modo: Literatura':'Modo: Guión cine',action:()=>{setConfirmModeChange(true);setShowUserMenu(false);},dot:writingMode==='guion'?NARANJA:AZUL},
                   {icon:'tray',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
                   {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);},dot:getApiKey(user.id)?AZUL:null},
                   {icon:'download-simple',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
@@ -9765,13 +9882,7 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
             </div>
             {/* Mensaje contextual debajo */}
             <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:MUTED,lineHeight:1.4,marginTop:10}}>
-              {stats.streak===0&&<><Icon name="pencil-line" size={13} color={FAINT}/><span>Hoy es un buen día para empezar.</span></>}
-              {stats.streak===1&&<><Icon name="star" size={13} color={NARANJA}/><span>¡Primer día! El más difícil ya pasó.</span></>}
-              {stats.streak>1&&stats.streak<7&&<><Icon name="trend-up" size={13} color={AZUL}/><span>Llevas {stats.streak} días. Completa 7 para ganar un comodín.</span></>}
-              {stats.streak>0&&stats.streak%7===0&&stats.todayActive&&<><Icon name="gift" size={13} color={AZUL}/><span>¡Semana completa! Has ganado un comodín.</span></>}
-              {stats.streak>0&&stats.streak%7!==0&&stats.streak>=7&&stats.streak<14&&<><Icon name="trend-up" size={13} color={AZUL}/><span>¡{stats.streak} días! Vas a por las dos semanas.</span></>}
-              {stats.streak>=14&&stats.streak<30&&<><Icon name="lightning" size={13} color={NARANJA}/><span>¡{stats.streak} días! Increíble constancia.</span></>}
-              {stats.streak>=30&&<><Icon name="trophy" size={13} color={NARANJA}/><span>¡{stats.streak} días seguidos! Eres imparable.</span></>}
+              {(()=>{const m=streakMessage(stats.streak,stats.todayActive);return<><Icon name={m.icon} size={13} color={m.color}/><span>{m.text}</span></>;})()}
             </div>
           </div>
         </div>
@@ -9842,10 +9953,9 @@ const Dashboard=({user,library,reflections,projects,onContinue,onLogout,onDelete
         {library.length>=3&&<StatsChart library={library}/>}
 
         {/* Stats */}
-        <div className="fu resp-3col" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:8}}>
+        <div className="fu resp-3col" style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8,marginBottom:8}}>
           <StatCard label="Palabras" value={stats.totalWords>=1000?(stats.totalWords/1000).toFixed(1)+'k':stats.totalWords||0} sub="escritas"/>
           <StatCard label="Esta semana" value={stats.thisWeek||0} sub="sesiones"/>
-          <StatCard label="Valoración" value={stats.avgRating?stats.avgRating+'/10':'—'} sub="media" accent={stats.avgRating>=7?'#1E9BF0':TXT} className="desk-only"/>
         </div>
         <div className="fu resp-3col" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:12}}>
           <StatCard label="Esta semana" value={fmtTime(stats.weekElapsed)||'—'} sub="tiempo escrito"/>
@@ -9893,12 +10003,27 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
   const retoPct=reto.goal>0?Math.min(100,Math.round(retoWc/reto.goal*100)):0;
   const saveReto=()=>{const updated={...reto,...retoEdit};setReto(updated);S.set('flujo:'+user.id+':reto:'+defaultChallenge.id,updated);setEditingReto(false)};
 
-  // projects comes from props
+  // projects/library en vivo + copias que el usuario marcó "mantener offline" en la
+  // Biblioteca. Así "Continuar «Proyecto»" también se puede resolver sin conexión,
+  // en vez de depender solo de lo que ya se haya descargado de Supabase.
+  const combinedProjects=useMemo(()=>{
+    const map=new Map();
+    offlineKeepProjectsGetAll().forEach(p=>map.set(p.id,p));
+    projects.forEach(p=>map.set(p.id,p));
+    return Array.from(map.values());
+  },[projects]);
+  const combinedLibraryForProjects=useMemo(()=>{
+    const map=new Map();
+    offlineKeepGetAll().forEach(e=>map.set(e.id,e));
+    library.forEach(e=>map.set(e.id,e));
+    return Array.from(map.values());
+  },[library]);
+
   // Último proyecto = el que tiene la entrada más reciente en library
-  const lastWrittenEntry=library.filter(e=>e.project_id&&!e.deleted).sort((a,b)=>b.ts-a.ts)[0];
+  const lastWrittenEntry=combinedLibraryForProjects.filter(e=>e.project_id&&!e.deleted).sort((a,b)=>b.ts-a.ts)[0];
   const lastProject=lastWrittenEntry
-    ?projects.find(p=>p.id===lastWrittenEntry.project_id)||projects[0]||null
-    :projects[0]||null;
+    ?combinedProjects.find(p=>p.id===lastWrittenEntry.project_id)||combinedProjects[0]||null
+    :combinedProjects[0]||null;
   const [showOtherProjects,setShowOtherProjects]=useState(false);
   const [creatingProject,setCreatingProject]=useState(false);
   const [newProj,setNewProj]=useState({title:'',type:'Novela',goal:50000});
@@ -9910,7 +10035,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
     await saveProject(p);
     onStart({type:'proyecto',project:p});
   };
-  const selectProject=p=>{const lastEntry=library.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});};
+  const selectProject=p=>{const lastEntry=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});};
 
   // SectionCard defined outside — see below
 
@@ -9991,15 +10116,15 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
             <div style={{width:4,height:36,background:'#A82020',borderRadius:2,flexShrink:0}}/>
             <div style={{minWidth:0}}>
               <div style={{font:"600 9.5px/1 'Source Sans 3'",letterSpacing:'.14em',textTransform:'uppercase',color:'#A82020',marginBottom:4}}>Reto especial · 1 hora</div>
-              <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif',lineHeight:1.3}}>Cuento contrareloj</div>
+              <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif',lineHeight:1.3}}>{writingMode==='guion'?'Escena contrarreloj':'Cuento contrareloj'}</div>
             </div>
           </div>
           <div style={{padding:'14px 16px'}}>
-            <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:14}}>Escribe un cuento usando 5 palabras al azar antes de que se agote 1 hora. Solo puedes publicar si usas las 5 palabras y superas los 2.500 caracteres.</p>
+            <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:14}}>{writingMode==='guion'?'Escribe una escena de guión usando 5 elementos al azar antes de que se agote 1 hora. El editor de guión estará activo con todos sus bloques.':'Escribe un cuento usando 5 palabras al azar antes de que se agote 1 hora. Solo puedes publicar si usas las 5 palabras y superas los 2.500 caracteres.'}</p>
             <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:16}}>
               {[['timer','1 hora'],[null,'5 palabras obligatorias'],[null,'2.500 car. mínimo'],[null,'Solo se puede publicar si completas todo']].map(([ic,t])=><span key={t} style={{fontSize:11,background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:5,padding:'2px 8px',color:'#A82020',display:'inline-flex',alignItems:'center',gap:4}}>{ic&&<Icon name={ic} size={11}/>}{t}</span>)}
             </div>
-            <button onClick={()=>onStart({type:'cuento'})} style={{width:'100%',height:42,background:SESSION_BTN_BG,border:'none',borderRadius:9,fontSize:13.5,fontWeight:600,color:SESSION_BTN_TXT,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Empezar cuento →</button>
+            <button onClick={()=>onStart({type:'cuento',writingMode})} style={{width:'100%',height:42,background:SESSION_BTN_BG,border:'none',borderRadius:9,fontSize:13.5,fontWeight:600,color:SESSION_BTN_TXT,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{writingMode==='guion'?'Empezar escena →':'Empezar cuento →'}</button>
           </div>
         </div>
 
@@ -10018,7 +10143,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
                   {emoji:'video-camera',label:'Película',types:['Película']},
                   {emoji:'video',label:'Cortometraje',   types:['Cortometraje']},
                 ].map(({emoji,label,types})=>{
-                  const projs=projects.filter(p=>types.includes(p.type));
+                  const projs=combinedProjects.filter(p=>types.includes(p.type));
                   return(
                     <button key={label} onClick={()=>{
                       if(projs.length===0){
@@ -10051,7 +10176,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
             {/* ── VIEW 2: Projects list for selected genre ─ */}
             {selectedGenre&&!creatingProject&&(()=>{
               const genreTypes={Poesía:['Poemario'],Relato:['Relato corto','Microrrelatos'],Novela:['Novela'],Ensayo:['Ensayo','Diario creativo'],Película:['Película'],Cortometraje:['Cortometraje']}[selectedGenre]||[];
-              const genreProjs=projects.filter(p=>genreTypes.includes(p.type));
+              const genreProjs=combinedProjects.filter(p=>genreTypes.includes(p.type));
               const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo',Película:'Película',Cortometraje:'Cortometraje'}[selectedGenre]||'Novela';
               return(
                 <>
@@ -10060,7 +10185,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
                   </button>
                   <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
                     {genreProjs.map(p=>{
-                      const _projEntries=library.filter(e=>(e.project_id||e.projectId)===p.id&&!e.deleted).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
+                      const _projEntries=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id&&!e.deleted).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
                       return(
                         <div key={p.id} style={{background:'#F8F7F4',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
                           <div style={{flex:1,minWidth:0}}>
@@ -10116,8 +10241,6 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
 /* ─── POST SESSION ───────────────────────────────── */
 const PostSession=({sessionData,onComplete,onBack,user})=>{
   const canPublish=(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
-  const [rating,setRating]=useState(7);
-  const [notes,setNotes]=useState('');
   const [saveToLib,setSaveToLib]=useState(true);
   const [chainStart,setChainStart]=useState(false); // ¿dejar como primer capítulo encadenable?
   const [pubVis,setPubVis]=useState('privado');
@@ -10126,8 +10249,6 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   const [fbError,setFbError]=useState('');
   const [feedback,setFeedback]=useState('');
   const [showKey,setShowKey]=useState(false);
-  const rm=ratingMsg(rating);
-  const rCol=rating<=3?'#A82020':rating<=6?'#1B5FAA':'#1E9BF0';
 
   const runFeedback=async()=>{
     if(!sessionData.text?.trim()){setFbState('no_text');return}
@@ -10145,7 +10266,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   // feedback is manual — no auto-trigger
 
   const save=()=>{
-    const r={id:uid(),ts:Date.now(),date:today(),rating,notes:notes.trim(),sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',
+    const r={id:uid(),ts:Date.now(),date:today(),rating:null,notes:'',sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,wordsAdded:sessionData.wordsAdded??sessionData.wordCount??0,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',
       saveToLibrary:saveToLib,visibility:saveToLib?pubVis:'ejercicio',chainStart:saveToLib&&chainStart,entryId:sessionData.entryId||null};
     onComplete(r);
   };
@@ -10200,21 +10321,8 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
               <Btn onClick={()=>{setFbState('loading');runFeedback()}} small>Reintentar</Btn>
             </div>}
           </div>
-          {/* Rating + notes */}
+          {/* Guardar y visibilidad */}
           <div style={{padding:'20px 24px',display:'flex',flexDirection:'column',gap:18}}>
-            <div>
-              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:10}}>
-                <div style={{fontSize:14,fontWeight:500,color:TXT}}>¿Cómo ha ido?</div>
-                <div style={{display:'flex',alignItems:'baseline',gap:6}}><span style={{fontSize:24,fontWeight:700,color:rCol,transition:'color 0.3s'}}>{rating}</span><span style={{fontSize:12,color:rCol,fontWeight:500}}>{rm}</span></div>
-              </div>
-              <input type="range" min={0} max={10} step={1} value={rating} onChange={e=>setRating(+e.target.value)} style={{accentColor:rCol}}/>
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:FAINT,marginTop:4}}><span>duro</span><span>en el flujo</span></div>
-            </div>
-            <div>
-              <div style={{fontSize:14,fontWeight:500,color:TXT,marginBottom:6}}>¿Qué te llevas hoy?</div>
-              <div style={{fontSize:12,color:MUTED,marginBottom:9,lineHeight:1.6}}>Aprendizajes, patrones, lo que mejor te ha funcionado…</div>
-              <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder={'"Escribo mejor con música de fondo"\n"El modo Río me ayuda a soltar el texto"\n"Me cuesta arrancar, pero luego fluye"'} rows={4} style={{width:'100%',resize:'vertical',fontSize:13,lineHeight:1.7,color:TXT}}/>
-            </div>
             <div style={{display:'flex',flexDirection:'column',gap:10}}>
               <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
                 <div onClick={()=>setSaveToLib(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
@@ -10265,13 +10373,55 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
                   ))}
                 </div>
               )}
-              <div style={{display:'flex',justifyContent:'flex-end',gap:10}}>
-                <Btn variant="ghost" onClick={()=>onComplete(null)} small>Saltar</Btn>
-                <Btn variant="primary" onClick={save} style={{height:42,fontSize:14,paddingLeft:24,paddingRight:24}}>Guardar reflexión →</Btn>
+              <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
+                {fbState==='loading'&&<div style={{fontSize:11,color:MUTED}}>Esperando la revisión de Claude…</div>}
+                <Btn variant="primary" onClick={save} disabled={fbState==='loading'} style={{height:42,fontSize:14,paddingLeft:24,paddingRight:24}}>Terminar</Btn>
               </div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── SESSION COMPLETE (pantalla de enhorabuena) ──── */
+const SessionCompleteModal=({summary,onClose})=>{
+  if(!summary)return null;
+  const{wordsAdded=0,elapsed=0,streak=0}=summary;
+  const sm=streakMessage(streak);
+  return(
+    <div style={{height:'var(--app-height,100dvh)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:PAGE_BG,padding:32,position:'relative',overflow:'hidden'}}>
+      <Signo char="✦" size={220} top={-40} left={-30} color="azul"/>
+      <Signo char="✱" size={170} bottom={-30} right={-20} color="naranja"/>
+      <div className="fu" style={{position:'relative',zIndex:1,display:'flex',flexDirection:'column',alignItems:'center',maxWidth:360,width:'100%',textAlign:'center'}}>
+        <div style={{width:60,height:60,borderRadius:18,background:NAVY,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:20}}>
+          <Icon name="check" size={28} color="#fff"/>
+        </div>
+        <div style={{fontSize:12,fontWeight:500,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>Sesión guardada</div>
+        <div style={{fontSize:26,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',marginBottom:26}}>¡Enhorabuena!</div>
+
+        <div style={{display:'flex',alignItems:'center',gap:26,marginBottom:24,background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 28px',boxShadow:'0 12px 40px -18px rgba(10,27,61,0.2)'}}>
+          <div>
+            <div style={{fontSize:22,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>{wordsAdded.toLocaleString()}</div>
+            <div style={{fontSize:10.5,color:MUTED}}>palabras</div>
+          </div>
+          <div style={{width:1,height:30,background:BDR}}/>
+          <div>
+            <div style={{fontSize:22,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>{fmt(elapsed)}</div>
+            <div style={{fontSize:10.5,color:MUTED}}>escritos</div>
+          </div>
+        </div>
+
+        <div style={{display:'flex',alignItems:'center',gap:12,background:sm.color+'0E',border:'0.5px solid '+sm.color+'28',borderRadius:12,padding:'13px 18px',marginBottom:28,width:'100%',textAlign:'left'}}>
+          <Icon name="fire" size={28} color={streak>0?NARANJA:FAINT}/>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:TXT}}>{streak} día{streak!==1?'s':''} de racha</div>
+            <div style={{fontSize:11.5,color:MUTED,display:'flex',alignItems:'center',gap:4,marginTop:2}}><Icon name={sm.icon} size={12} color={sm.color}/>{sm.text}</div>
+          </div>
+        </div>
+
+        <Btn variant="primary" onClick={onClose} style={{height:44,fontSize:14,paddingLeft:30,paddingRight:30}}>Ir al Dashboard →</Btn>
       </div>
     </div>
   );
@@ -10802,7 +10952,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             <span style={{fontSize:11,color:started?headerAccent:FAINT}}>{started?fmt(elapsed):'—'}</span>
             <div style={{flex:1}}/>
             {lockedMode?<ModeBadge modeId={lockedMode} small/>
-              :<div style={{display:'flex',gap:2}}>{MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} title={m.full} style={{background:ab===m.id?m.color+'12':'transparent',border:'0.5px solid',borderColor:ab===m.id?m.color+'38':BDR,color:ab===m.id?m.color:FAINT,fontSize:11,padding:'4px 7px',borderRadius:4,cursor:'pointer',fontWeight:ab===m.id?500:400}}>{m.name}</button>)}</div>}
+              :<div className="desk-only" style={{display:'flex',gap:2}}>{MODES.filter(m=>!allowedModes||allowedModes.includes(m.id)).map(m=><button key={m.id} onClick={()=>switchMode(m.id)} title={m.full} style={{background:ab===m.id?m.color+'12':'transparent',border:'0.5px solid',borderColor:ab===m.id?m.color+'38':BDR,color:ab===m.id?m.color:FAINT,fontSize:11,padding:'4px 7px',borderRadius:4,cursor:'pointer',fontWeight:ab===m.id?500:400}}>{m.name}</button>)}</div>}
           </div>
         </div>
 
@@ -10876,8 +11026,13 @@ const wordUsed=(text,word)=>{
   return re.test(t);
 };
 
-const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
+const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='literatura'})=>{
   const [words]=useState(()=>challenge?.words||pick5Words());
+  // Bloques para modo guión (sin depender de edRef)
+  const [scBlocks,setScBlocks]=useState(()=>[{id:uid(),type:'heading',text:''},{id:uid(),type:'action',text:''}]);
+  const scRefs=useRef({});
+  const scFocusRef=useRef(null);
+  const [scActiveType,setScActiveType]=useState('heading');
   const insertVoiceCuento=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
   const [title,setTitle]=useState(challenge?('Para @'+(challenge.from_username||challenge.from_name)):'');
   const [sharingBack,setSharingBack]=useState(false);
@@ -10927,8 +11082,8 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
     const entry={
       id:'cuento_'+Date.now(),
       sk:'cuento',
-      title:title.trim()||('Cuento contrareloj · '+new Date().toLocaleDateString('es-ES',{day:'numeric',month:'short'})),
-      session_label:'Cuento contrareloj',
+      title:title.trim()||(writingMode==='guion'?'Escena contrarreloj · ':'Cuento contrareloj · '+new Date().toLocaleDateString('es-ES',{day:'numeric',month:'short'})),
+      session_label:writingMode==='guion'?'Escena contrarreloj':'Cuento contrareloj',
       html:edRef.current?.innerHTML||'',
       plain:text,
       word_count:text.trim().split(/\s+/).filter(Boolean).length,
@@ -10969,7 +11124,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
   if(published)return(
     <div style={{height:'var(--app-height,100dvh)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#FBF8F0',padding:32,textAlign:'center'}}>
       <div style={{fontSize:48,marginBottom:16}}>✦</div>
-      <div style={{fontSize:24,fontWeight:600,color:'#1E9BF0',fontFamily:'"Playfair Display",Georgia,serif',marginBottom:8}}>¡Cuento publicado!</div>
+      <div style={{fontSize:24,fontWeight:600,color:'#1E9BF0',fontFamily:'"Playfair Display",Georgia,serif',marginBottom:8}}>{writingMode==='guion'?'¡Escena publicada!':'¡Cuento publicado!'}</div>
       <div style={{fontSize:14,color:MUTED,marginBottom:6}}>{chars.toLocaleString()} caracteres · {fmt(elapsed)} de escritura</div>
       <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginBottom:24}}>
         {words.map(w=><span key={w} style={{background:'rgba(30,155,240,0.1)',border:'0.5px solid rgba(30,155,240,0.3)',borderRadius:20,padding:'3px 12px',fontSize:12,color:'#1E9BF0',fontWeight:500,textDecoration:'line-through'}}>✓ {w}</span>)}
@@ -10981,7 +11136,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
         </Btn>}
       </div>
       {challenge&&<div style={{fontSize:11,color:FAINT,marginTop:14,maxWidth:300}}>
-        "Devolver relato" avisa a @{challenge.from_username||challenge.from_name} de que ya puede leer tu cuento.
+        "Devolver relato" avisa a @{challenge.from_username||challenge.from_name} de que ya puede leer tu {writingMode==='guion'?'escena':'cuento'}.
       </div>}
     </div>
   );
@@ -10995,12 +11150,12 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
         </div>}
         {/* Título */}
         <div style={{padding:'8px 14px 0'}}>
-          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ponle un título a tu cuento…"
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder={writingMode==='guion'?'Ponle un título a tu escena…':'Ponle un título a tu cuento…'}
             style={{width:'100%',background:'transparent',border:'none',outline:'none',color:'#fff',fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",serif',padding:'4px 0'}}/>
         </div>
         {/* Top bar */}
         <div style={{display:'flex',alignItems:'center',padding:'0 14px',height:44,borderBottom:'0.5px solid rgba(255,255,255,0.1)'}}>
-          <button onClick={()=>{if(!started||window.confirm('¿Salir? Perderás el progreso del cuento.'))onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir</button>
+          <button onClick={()=>{if(!started||window.confirm('¿Salir? Perderás el progreso ' + (writingMode==='guion'?'de la escena.':'del cuento.')))onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir</button>
           <VoiceButton onTranscript={insertVoiceCuento} dark={true} size={15}/>
           <div style={{flex:1}}/>
           <div style={{textAlign:'center'}}>
@@ -11042,13 +11197,81 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
       </div>
 
       {/* Editor */}
+      {writingMode==='guion'&&(
+        <ScriptTypeBar
+          typeOrder={['heading','action','character','parenthetical','dialogue','transition']}
+          activeType={scActiveType}
+          format="literario"
+          onChangeType={t=>{
+            const id=scFocusRef.current;
+            if(id)setScBlocks(prev=>prev.map(b=>b.id===id?{...b,type:t}:b));
+            setScActiveType(t);
+          }}
+          onToggleFormat={()=>{}}
+        />
+      )}
       <div style={{flex:1,position:'relative',overflow:'hidden'}}>
-        {!started&&<div style={{position:'absolute',top:24,left:36,pointerEvents:'none',zIndex:2,fontSize:17,color:'rgba(26,25,22,0.3)',fontFamily:'"Playfair Display",Georgia,serif',lineHeight:1.85}}>
+        {!started&&writingMode!=='guion'&&<div style={{position:'absolute',top:24,left:36,pointerEvents:'none',zIndex:2,fontSize:17,color:'rgba(26,25,22,0.3)',fontFamily:'"Playfair Display",Georgia,serif',lineHeight:1.85}}>
           Empieza a escribir y arranca el contador…
         </div>}
-        <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+        {writingMode!=='guion'&&<div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
           style={{position:'absolute',inset:0,overflowY:'auto',padding:'24px 36px 100px',outline:'none',
-            fontFamily:'"Playfair Display",Georgia,serif',fontSize:'18px',lineHeight:1.85,color:PROSE_TEXT,caretColor:NARANJA}}/>
+            fontFamily:'"Playfair Display",Georgia,serif',fontSize:'18px',lineHeight:1.85,color:PROSE_TEXT,caretColor:NARANJA}}/>}
+                {writingMode==='guion'&&(
+          <div style={{position:'absolute',inset:0,overflowY:'auto',padding:'8px 0 100px'}}>
+            <div style={{maxWidth:680,margin:'0 auto',padding:'16px 36px'}}>
+              {!started&&scBlocks.every(b=>!b.text)&&(
+                <div style={{pointerEvents:'none',fontSize:14,color:'rgba(26,25,22,0.3)',fontFamily:'Courier New, monospace',lineHeight:1.85,marginBottom:8}}>
+                  <div>INT. LUGAR - DÍA</div>
+                  <div style={{marginTop:8}}>Empieza a escribir y arranca el contador…</div>
+                </div>
+              )}
+              {scBlocks.map(block=>(
+                <div key={block.id} style={{position:'relative'}}>
+                  <div
+                    ref={el=>{if(el)scRefs.current[block.id]=el;else delete scRefs.current[block.id];}}
+                    contentEditable suppressContentEditableWarning
+                    data-ph={SBLOCK[block.type]?.ph||''}
+                    onFocus={()=>{scFocusRef.current=block.id;setScActiveType(block.type);}}
+                    onKeyDown={e=>{
+                      if(e.key==='Tab'){
+                        e.preventDefault();
+                        const nt=SBLOCK[block.type]?.tabNext||'action';
+                        setScBlocks(prev=>prev.map(b=>b.id===block.id?{...b,type:nt}:b));
+                        setScActiveType(nt);
+                      }else if(e.key==='Enter'&&!e.shiftKey){
+                        e.preventDefault();
+                        const nb={id:uid(),type:SBLOCK[block.type]?.enterNext||'action',text:''};
+                        setScBlocks(prev=>{const i=prev.findIndex(b=>b.id===block.id);const n=[...prev];n.splice(i+1,0,nb);return n;});
+                        setTimeout(()=>{scRefs.current[nb.id]?.focus();},10);
+                      }else if(e.key==='Backspace'&&!e.currentTarget.innerText.trim()&&scBlocks.length>1){
+                        e.preventDefault();
+                        setScBlocks(prev=>{const i=prev.findIndex(b=>b.id===block.id);const pid=i>0?prev[i-1].id:prev[1].id;setTimeout(()=>scRefs.current[pid]?.focus(),10);return prev.filter(b=>b.id!==block.id);});
+                      }
+                    }}
+                    onInput={e=>{
+                      const rawTxt=e.currentTarget.innerText||'';
+                      if(['heading','character','transition'].includes(block.type)&&rawTxt!==rawTxt.toUpperCase()){
+                        const sel=window.getSelection();const off=sel?.getRangeAt(0)?.startOffset||0;
+                        e.currentTarget.innerText=rawTxt.toUpperCase();
+                        try{const r=document.createRange();r.setStart(e.currentTarget.firstChild||e.currentTarget,Math.min(off,rawTxt.length));r.collapse(true);sel.removeAllRanges();sel.addRange(r);}catch(er){}
+                      }
+                      setScBlocks(prev=>prev.map(b=>b.id===block.id?{...b,text:e.currentTarget.innerText||''}:b));
+                      const all=Object.values(scRefs.current).map(el=>el?.innerText||'').join(' ');
+                      setText(all);setChars(all.length);
+                      if(!started){setStarted(true);setRunning(true);}
+                    }}
+                    style={{...SBLOCK_STYLE(block.type),outline:'none',minHeight:'1.6em',display:'block'}}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {writingMode!=='guion'&&<div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+          style={{position:'absolute',inset:0,overflowY:'auto',padding:'24px 36px 100px',outline:'none',
+            fontFamily:'"Playfair Display",Georgia,serif',fontSize:'18px',lineHeight:1.85,color:PROSE_TEXT,caretColor:NARANJA}}/>}
+        
       </div>
 
       {/* Bottom publish bar */}
@@ -11070,7 +11293,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge})=>{
           flexShrink:0,
           boxShadow:canPublish?'0 2px 12px rgba(0,0,0,0.2)':'none',
         }}>
-          {saveStatus==='saving'?'Guardando…':'Publicar cuento'}
+          {saveStatus==='saving'?'Guardando…':(writingMode==='guion'?'Publicar escena':'Publicar cuento')}
         </button>
       </div>
     </div>
@@ -12655,7 +12878,7 @@ const VisibilityPicker=({value,onChange})=>{
 };
 
 /* ─── MIS TEXTOS ─────────────────────────────────── */
-const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
+const MisTextos=({user,library,projects=[],onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
   const [deletingEntry,setDeletingEntry]=useState(null);
   const [deleting,setDeleting]=useState(false);
   const [filter,setFilter]=useState('all');
@@ -12668,6 +12891,33 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete
   const [updating,setUpdating]=useState(null);
   const [readEntry,setReadEntry]=useState(null);
   const [activity,setActivity]=useState({});
+  // Textos marcados "mantener offline": Map id -> copia guardada en localStorage.
+  // Se fusionan con `library` para que sigan siendo visibles y editables aunque
+  // la biblioteca en vivo esté vacía (p. ej. sesión restaurada sin conexión).
+  const [offlineKept,setOfflineKept]=useState(()=>new Map(offlineKeepGetAll().map(e=>[e.id,e])));
+  const toggleOfflineKeep=entry=>{
+    setOfflineKept(prev=>{
+      const next=new Map(prev);
+      const pid=entry.project_id||entry.projectId;
+      if(next.has(entry.id)){
+        offlineKeepRemove(entry.id);
+        next.delete(entry.id);
+        // Si ya no queda ningún texto offline de este proyecto, también soltamos
+        // la copia del proyecto — ya no hace falta para resolver "Continuar".
+        if(pid&&![...next.values()].some(e=>(e.project_id||e.projectId)===pid)){
+          offlineKeepProjectRemove(pid);
+        }
+      }else{
+        offlineKeepSave(entry);
+        next.set(entry.id,entry);
+        if(pid){
+          const proj=projects.find(p=>p.id===pid);
+          if(proj)offlineKeepProjectSave(proj);
+        }
+      }
+      return next;
+    });
+  };
 
   const DEFAULT_FOLDERS=[['retos','Retos'],['poesia','Poesía'],['relato','Relato'],['novela','Novela'],['ensayo','Ensayo']];
 
@@ -12675,7 +12925,16 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete
 
   const allFolders=[...DEFAULT_FOLDERS,...customFolders.map(f=>[f.id,f.name])];
 
-  const myTexts=library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted);
+  // library en vivo + copias offline no presentes en ella (la versión en vivo,
+  // si existe, siempre gana por ser la más reciente)
+  const combinedLibrary=useMemo(()=>{
+    const map=new Map();
+    offlineKept.forEach((v,k)=>map.set(k,v));
+    library.forEach(e=>map.set(e.id,e));
+    return Array.from(map.values());
+  },[library,offlineKept]);
+
+  const myTexts=combinedLibrary.filter(e=>e.visibility!=='ejercicio'&&!e.deleted);
   const inFolder=e=>{
     // Los checks y retos semanales que siguen en la carpeta "Retos" por defecto
     // (es decir, nadie los ha movido a mano todavía) no aparecen en "Todos":
@@ -12687,6 +12946,7 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete
     return e.folder===folder;
   };
   const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado')));
+
 
   useEffect(()=>{
     const publicIds=myTexts.filter(e=>e.visibility&&e.visibility!=='privado').map(e=>e.id);
@@ -12879,6 +13139,11 @@ const MisTextos=({user,library,onVisibilityChange,onFolderChange,onEdit,onDelete
                     </span>
                     <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
                       <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT,whiteSpace:'nowrap'}}>{relTime(e.date)}</span>
+                      <button onClick={e2=>{e2.stopPropagation();toggleOfflineKeep(e);}}
+                        title={offlineKept.has(e.id)?'Disponible sin conexión · quitar':'Mantener offline'}
+                        style={{background:'transparent',border:'none',cursor:'pointer',color:offlineKept.has(e.id)?AZUL:FAINT,padding:0,display:'flex',flexShrink:0}}>
+                        <Icon name={offlineKept.has(e.id)?'cloud-check':'cloud-arrow-down'} size={13}/>
+                      </button>
                       <button onClick={e2=>{e2.stopPropagation();setMovingEntry(e);}} title="Mover a carpeta"
                         style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
                         <Icon name="folder-simple" size={13}/>
@@ -12961,7 +13226,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
+const BibliotecaScreen=({user,library,projects=[],onClose,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
   const [tab,setTab]=useState('explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
@@ -13147,7 +13412,7 @@ const BibliotecaScreen=({user,library,onClose,onVisibilityChange,onFolderChange,
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
-        {tab==='mis_textos'&&<MisTextos user={user} library={library} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete}/>}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete}/>}
       </div>
     </div>
   );
@@ -13353,7 +13618,7 @@ const AmigosScreen=({user,onClose})=>{
 
 
 const EstadísticasScreen=({library,reflections,onClose,stats})=>{
-  const {totalWords,totalSessions,totalElapsed,weekWords,weekSessions,avgRating}=stats;
+  const {totalWords,totalSessions,totalElapsed,weekWords,weekSessions}=stats;
 
   // Words per week (last 12 weeks) — same as StatsChart
   const weekBars=useMemo(()=>{
@@ -13431,7 +13696,6 @@ const k=e.sk==='dueto'?'A dos manos':e.sk==='cuento'&&_sl.toLowerCase().includes
           <StatCard label="Tiempo escrito" value={totalElapsed>0?Math.round(totalElapsed/60)+'min':'—'} accent={AZUL}/>
           <StatCard label="Palabras esta semana" value={(weekWords||0).toLocaleString()} accent={NAVY}/>
           <StatCard label="Sesiones esta semana" value={weekSessions||0} accent={AZUL}/>
-          <StatCard label="Valoración media" value={avgRating?avgRating+'/10':'—'} accent={NARANJA}/>
         </div>
 
         {/* Words per week chart */}
@@ -15885,6 +16149,7 @@ const App=()=>{
   const [projects,setProjects]=useState([]);
   const [sessionConfig,setSessionConfig]=useState(null);
   const [sessionData,setSessionData]=useState(null);
+  const [sessionSummary,setSessionSummary]=useState(null);
   const [showExLibrary,setShowExLibrary]=useState(false);
   const [syncStatus,setSyncStatus]=useState(null);
   const [isOffline,setIsOffline]=useState(!navigator.onLine);
@@ -15892,6 +16157,7 @@ const App=()=>{
   const [driveRefresh,setDriveRefresh]=useState(0);
   const [receivedChallenges,setReceivedChallenges]=useState([]);
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
+  const [cuentoWritingMode,setCuentoWritingMode]=useState('literatura');
   const [editingEntry,setEditingEntry]=useState(null);
   const [showWelcome,setShowWelcome]=useState(false);
   const [showPasswordReset,setShowPasswordReset]=useState(false);
@@ -15939,27 +16205,29 @@ const App=()=>{
   const syncPendingEntries=async()=>{
     const queue=oqGet();
     if(!queue.length)return;
-    let synced=0;
     for(const entry of queue){
       try{
         await DB.upsertEntry(entry);
         oqRemove(entry.id);
-        synced++;
       }catch(err){
+        const isNetErr=!navigator.onLine||err?.message?.includes('fetch')||err?.message?.includes('network');
         console.error('Sync offline entry failed:',err?.message||err);
-        break; // si sigue sin red, paramos
+        if(isNetErr)break; // seguimos sin red de verdad: paramos y reintentamos en el próximo 'online'
+        // Error real (no de red): dejamos esa entrada en la cola pero seguimos con el resto,
+        // para que un solo dato problemático no bloquee la sincronización de los demás.
       }
     }
     const remaining=oqGet().length;
     setPendingCount(remaining);
-    if(remaining===0){
-      setSyncStatus('ok');
-      // Refrescar biblioteca con los datos ya en BD
-      if(user?.id)loadUserData(user.id);
-    }
+    setSyncStatus(remaining===0?'ok':'error');
+    // Refrescar biblioteca con los datos ya en BD (haya terminado la cola o no)
+    if(user?.id)loadUserData(user.id);
   };
 
-  // Detectar cambios de conexión
+  // Detectar cambios de conexión y sincronizar automáticamente al recuperar red.
+  // Depende de [user] para que, al iniciar sesión (incluida la restauración de
+  // sesión sin red), la sincronización y el refresco de biblioteca usen el
+  // usuario actual y no una referencia obsoleta capturada en el primer render.
   useEffect(()=>{
     const goOffline=()=>{setIsOffline(true);setSyncStatus('offline');};
     const goOnline=()=>{
@@ -15967,17 +16235,17 @@ const App=()=>{
       if(oqGet().length>0){
         setSyncStatus('syncing');
         syncPendingEntries();
-      }else{setSyncStatus('ok');}
+      }else{setSyncStatus('ok');if(user?.id)loadUserData(user.id);}
     };
     window.addEventListener('offline',goOffline);
     window.addEventListener('online',goOnline);
-    // Sincronizar al arrancar si hay pendientes y hay red
+    // Sincronizar si hay pendientes y hay red — al arrancar o justo tras iniciar sesión
     if(navigator.onLine&&oqGet().length>0)syncPendingEntries();
     return()=>{
       window.removeEventListener('offline',goOffline);
       window.removeEventListener('online',goOnline);
     };
-  },[]);
+  },[user?.id]);
 
   const loadUserData=async(uid)=>{
     if(!uid)return;
@@ -16017,11 +16285,13 @@ const App=()=>{
       }catch(e){console.error('followers error:',e);}
       setSyncStatus('ok');
       setTimeout(()=>setSyncStatus(s=>s==='ok'?null:s),2000);
+      return{lib,refs};
     }catch(e){
       console.error('loadUserData error:',e?.message||e);
       setSyncStatus('error');
       const cached=S.list('flujo:cache:'+uid+':').map(k=>S.get(k)).filter(Boolean).sort((a,b)=>b.ts-a.ts);
       if(cached.length>0){setLibrary(cached);}
+      return null;
     }
   };
 
@@ -16045,10 +16315,22 @@ const App=()=>{
           // Show app immediately, load profile + data in background
           clearTimeout(timeout);
           setLoading(false);
-          const profile=await DB.getProfile(session.user.id);
-          const resolvedProfile=profile||{id:session.user.id,name:session.user.email?.split('@')[0]||'Usuario',initials:'U',accent:'#1E9BF0',bg:'#EEEDFE',text_col:'#3C3489'};
+          let resolvedProfile;
+          try{
+            const profile=await DB.getProfile(session.user.id);
+            resolvedProfile=profile||{id:session.user.id,name:session.user.email?.split('@')[0]||'Usuario',initials:'U',accent:'#1E9BF0',bg:'#EEEDFE',text_col:'#3C3489'};
+            if(profile)S.set('pretexto:profile_cache:'+session.user.id,profile);
+          }catch(profileErr){
+            // Sin red: DB.getProfile falla. En vez de dejar a la persona fuera,
+            // entramos con el último perfil que se guardó en caché la vez anterior
+            // que la app cargó con conexión — así el login sobrevive a estar offline.
+            console.error('getProfile sin red, usando perfil cacheado:',profileErr?.message||profileErr);
+            const cachedProfile=S.get('pretexto:profile_cache:'+session.user.id);
+            resolvedProfile=cachedProfile||{id:session.user.id,name:session.user.email?.split('@')[0]||'Usuario',initials:'U',accent:'#1E9BF0',bg:'#EEEDFE',text_col:'#3C3489'};
+          }
+          S.set('pretexto:last_user_id',session.user.id);
           setUser({...session.user,...resolvedProfile});
-          recoverPendingEntries(session.user.id).then(()=>loadUserData(session.user.id)); // non-blocking
+          recoverPendingEntries(session.user.id).then(()=>loadUserData(session.user.id)).catch(()=>{}); // non-blocking
         }else{
           clearTimeout(timeout);
           setLoading(false);
@@ -16061,6 +16343,15 @@ const App=()=>{
     }).catch(e=>{
       console.error('getSession error:',e);
       clearTimeout(timeout);
+      // Ni siquiera Supabase pudo confirmar la sesión (sin red y sin nada cacheado
+      // por el propio SDK). Último recurso: si esta persona ya inició sesión antes
+      // en este dispositivo, entramos en modo offline con su último perfil conocido.
+      const lastUid=S.get('pretexto:last_user_id');
+      const cachedProfile=lastUid?S.get('pretexto:profile_cache:'+lastUid):null;
+      if(lastUid&&cachedProfile&&!navigator.onLine){
+        setUser({id:lastUid,...cachedProfile});
+        loadUserData(lastUid).catch(()=>{});
+      }
       setLoading(false);
     });
     const {data:{subscription}}=DB.onAuthChange(async(event,session)=>{
@@ -16075,6 +16366,8 @@ const App=()=>{
     const session=await DB.getSession();
     if(session?.user){
       setUser({...session.user,...profile});
+      if(profile)S.set('pretexto:profile_cache:'+session.user.id,profile);
+      S.set('pretexto:last_user_id',session.user.id);
       await recoverPendingEntries(session.user.id);
       await loadUserData(session.user.id);
       setView('dashboard');
@@ -16085,7 +16378,7 @@ const App=()=>{
   const goToBriefing=e=>{setEnergy(e);setView('briefing');};
   const startCuentoWithChallenge=ch=>{setCuentoChallenge(ch);setView('cuento');};
   const startSession=cfg=>{
-    if(cfg.type==='cuento'){setView('cuento');}
+    if(cfg.type==='cuento'){setCuentoWritingMode(cfg.writingMode||'literatura');setView('cuento');}
     else{setSessionConfig(cfg);setView('editor');}
   };
   const finishDay=data=>{setSessionData(data);setView('postSession');};
@@ -16094,7 +16387,7 @@ const App=()=>{
     if(ref&&user){
       setReflections(prev=>[ref,...prev.filter(r=>r.id!==ref.id)]);
       const dbRef={
-        id:ref.id,user_id:user.id,rating:ref.rating||0,notes:ref.notes||null,
+        id:ref.id,user_id:user.id,rating:ref.rating||null,notes:ref.notes||null,
         feedback:ref.feedback||null,sk:ref.sk||null,
         session_title:ref.session_title||ref.sessionTitle||null,
         word_count:ref.word_count||ref.wordCount||0,
@@ -16142,8 +16435,18 @@ const App=()=>{
     }
     // Cargar datos frescos de Supabase ANTES de ir al dashboard
     // para que racha, estadísticas y palabras aparezcan actualizados sin recargar
-    await loadUserData(user.id).catch(()=>{});
-    setView('dashboard');
+    const fresh=await loadUserData(user.id).catch(()=>null);
+    if(ref&&user){
+      const freshStats=fresh?computeStats(fresh.lib,fresh.refs,user?.wildcards||0,user?.wildcard_milestone||0):null;
+      setSessionSummary({
+        wordsAdded:ref.wordsAdded??ref.word_count??ref.wordCount??0,
+        elapsed:ref.elapsed||0,
+        streak:freshStats?.streak??0,
+      });
+      setView('sessionComplete');
+    }else{
+      setView('dashboard');
+    }
   };
 
   const saveEntry=async(entry)=>{
@@ -16220,7 +16523,7 @@ const App=()=>{
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
   // Edit existing entry
-  if(editingEntry)return<Editor user={user} library={library} saveEntry={saveEntry} saveProject={saveProject}
+  if(editingEntry)return<Editor user={user} library={library.some(e=>e.id===editingEntry.id)?library:[...library,editingEntry]} saveEntry={saveEntry} saveProject={saveProject}
     onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
     onBack={()=>setEditingEntry(null)}
     driveData={driveData}
@@ -16230,7 +16533,9 @@ const App=()=>{
 
   if(view==='postSession')return<PostSession sessionData={sessionData} onComplete={completeReflection} onBack={()=>{setView('dashboard');loadUserData(user.id);}} user={user}/>;
 
-  if(view==='cuento')return<CuentoContrareloj user={user} saveEntry={saveEntry}
+  if(view==='sessionComplete')return<SessionCompleteModal summary={sessionSummary} onClose={()=>{setSessionSummary(null);setView('dashboard');}}/>;
+
+  if(view==='cuento')return<CuentoContrareloj user={user} saveEntry={saveEntry} writingMode={cuentoWritingMode}
     challenge={cuentoChallenge}
     onFinish={async(entryId)=>{
       if(cuentoChallenge){await DB.markChallengeCompleted(cuentoChallenge.id,entryId).catch(()=>{});}
