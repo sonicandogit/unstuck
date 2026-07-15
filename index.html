@@ -281,6 +281,12 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 @media(max-width:640px){
   .topbar-nav{display:none !important;}
   .hamburger-btn{display:flex !important;}
+  /* AmigosScreen: dos columnas lado a lado no caben en móvil (nombre + badge +
+     botones se apelotonan y se solapan) — se apilan una encima de otra, y se
+     desplazan como una sola página en vez de dos cajas con scroll anidado. */
+  .amigos-cols{flex-direction:column !important;overflow-y:auto !important;}
+  .amigos-col{overflow-y:visible !important;}
+  .amigos-col-left{border-right:none !important;border-bottom:1px solid var(--border);}
 }
 @media(min-width:641px){
   .hamburger-btn{display:none !important;}
@@ -4161,6 +4167,23 @@ const DB = {
       .select('id,name,username,initials,accent,bg').in('id', ids);
     if (error) throw error;
     return data || [];
+  },
+  pingPresence: async (entryId, userId) => {
+    const { error } = await getSB().from('entry_presence')
+      .upsert({ entry_id: entryId, user_id: userId, last_seen: new Date().toISOString() });
+    if (error) throw error;
+  },
+  getActivePresence: async (entryId, excludeUserId) => {
+    // "Activo" = ha dejado señal en el último minuto (2x el intervalo de ping)
+    const since = new Date(Date.now() - 60000).toISOString();
+    const { data, error } = await getSB().from('entry_presence')
+      .select('user_id,last_seen').eq('entry_id', entryId).neq('user_id', excludeUserId).gte('last_seen', since);
+    if (error) throw error;
+    return data || [];
+  },
+  clearPresence: async (entryId, userId) => {
+    const { error } = await getSB().from('entry_presence').delete().eq('entry_id', entryId).eq('user_id', userId);
+    if (error) throw error;
   },
 
   // Reflections
@@ -10661,6 +10684,32 @@ const DrivePanel=({user,driveState,onUpdate})=>{
 };
 
 /* ─── EDITOR ─────────────────────────────────────── */
+// Aviso temprano de "alguien más tiene esto abierto" en textos compartidos.
+// No es tiempo real: cada quien deja una marca con la hora cada 25s mientras
+// tiene el texto abierto; al entrar, se mira si hay una marca reciente de
+// otra persona. Sirve para disuadir de escribir a la vez, no para bloquearlo.
+const usePresenceWarning=(entryId,userId,hasCollaborators)=>{
+  const [activeOthers,setActiveOthers]=useState([]); // [{id,name,username}]
+  const [dismissed,setDismissed]=useState(false);
+  useEffect(()=>{
+    if(!hasCollaborators||!entryId)return;
+    let cancelled=false;
+    DB.getActivePresence(entryId,userId).then(async rows=>{
+      if(cancelled||!rows.length)return;
+      const profs=await DB.getProfilesByIds(rows.map(r=>r.user_id)).catch(()=>[]);
+      if(!cancelled)setActiveOthers(profs);
+    }).catch(()=>{});
+    DB.pingPresence(entryId,userId).catch(()=>{});
+    const hb=setInterval(()=>{DB.pingPresence(entryId,userId).catch(()=>{});},25000);
+    return()=>{
+      cancelled=true;
+      clearInterval(hb);
+      DB.clearPresence(entryId,userId).catch(()=>{});
+    };
+  },[entryId,hasCollaborators]);
+  return{activeOthers,dismissed,dismiss:()=>setDismissed(true)};
+};
+
 const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,sessionConfig})=>{
   const sk=sessionConfig.sk||(sessionConfig.type==='reto'?'reto':sessionConfig.type==='proyecto'?'proyecto':'check');
   const customExercise=sessionConfig.exercise||null;
@@ -10699,6 +10748,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       setHasCollaborators(list.some(c=>c.status==='aceptado'));
     }).catch(()=>{});
   },[]);
+  const{activeOthers,dismissed:presenceDismissed,dismiss:dismissPresence}=usePresenceWarning(
+    sessionConfig.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators);
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
   const tunnelWrapRef=useRef();
   const [tunnelRects,setTunnelRects]=useState([]);
@@ -10960,6 +11011,18 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         </div>
 
       </div>
+
+      {activeOthers.length>0&&!presenceDismissed&&(
+        <div style={{display:'flex',alignItems:'center',gap:9,padding:'9px 14px',background:'rgba(241,90,36,0.08)',borderBottom:'0.5px solid rgba(241,90,36,0.25)',flexShrink:0}}>
+          <Icon name="warning-circle" size={15} color={NARANJA}/>
+          <div style={{flex:1,fontSize:12,color:TXT,lineHeight:1.4}}>
+            <strong>{activeOthers.map(p=>p.name||p.username).join(', ')}</strong> tiene{activeOthers.length>1?'n':''} este texto abierto ahora mismo. Si escribís los dos a la vez, es fácil que se pierda algún cambio.
+          </div>
+          <button onClick={dismissPresence} style={{background:'transparent',border:'none',cursor:'pointer',color:NARANJA,flexShrink:0,display:'flex',padding:2}}>
+            <Icon name="x" size={14}/>
+          </button>
+        </div>
+      )}
 
       <div style={{display:'flex',flex:1,minHeight:0}}>
         <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0,background:CARD_BG}}>
@@ -13873,13 +13936,13 @@ const AmigosScreen=({user,onClose})=>{
         </div>
 
         {/* Two columns */}
-        <div style={{flex:1,overflow:'hidden',display:'flex'}}>
+        <div className="amigos-cols" style={{flex:1,overflow:'hidden',display:'flex'}}>
           {loading?(
             <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',color:MUTED,fontSize:13}}>Cargando…</div>
           ):(
             <>
               {/* LEFT: Seguidos */}
-              <div style={{flex:1,overflowY:'auto',padding:'16px 16px 16px 20px',borderRight:'1px solid '+BDR}}>
+              <div className="amigos-col amigos-col-left" style={{flex:1,overflowY:'auto',padding:'16px 16px 16px 20px',borderRight:'1px solid '+BDR}}>
                 <div style={{fontSize:11,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',marginBottom:12}}>
                   Seguidos · {following.length}
                 </div>
@@ -13890,7 +13953,7 @@ const AmigosScreen=({user,onClose})=>{
               </div>
 
               {/* RIGHT: Seguidores */}
-              <div style={{flex:1,overflowY:'auto',padding:'16px 20px 16px 16px'}}>
+              <div className="amigos-col" style={{flex:1,overflowY:'auto',padding:'16px 20px 16px 16px'}}>
                 <div style={{fontSize:11,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',marginBottom:12}}>
                   Seguidores · {followers.length}
                 </div>
@@ -14306,6 +14369,18 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
   const focusedBlockIdRef=useRef(null); // tracks last focused block (survives button click stealing focus)
   const entryId=useRef(sessionConfig?.entryId||uid());
   const lastSaved=useRef('');
+  // Si este texto tiene colaboradores aceptados, el guardado final comprueba antes
+  // si alguien más ha guardado cambios mientras estaba abierto (ver handleFinish).
+  const [hasCollaborators,setHasCollaborators]=useState(false);
+  useEffect(()=>{
+    if(sessionConfig?.type!=='edit'||!sessionConfig?.entryId)return;
+    DB.getCollaboratorsForEntries([sessionConfig.entryId]).then(map=>{
+      const list=map[sessionConfig.entryId]||[];
+      setHasCollaborators(list.some(c=>c.status==='aceptado'));
+    }).catch(()=>{});
+  },[]);
+  const{activeOthers,dismissed:presenceDismissed,dismiss:dismissPresence}=usePresenceWarning(
+    sessionConfig?.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators);
 
   useEffect(()=>{
     if(!started)return;
@@ -14328,11 +14403,14 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
     try{
       const sk=sessionConfig?.type||'proyecto';
       await saveEntry({
-        id:entryId.current,user_id:user.id,sk,
+        id:entryId.current,
+        owner_user_id:sessionConfig?.ownerUserId||user.id, // dueño original — nunca cambia por quien guarda
+        sk,
         project_id:project?.id||null,
         title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',
         html,plain,word_count:wordCount,elapsed,meta_words:format,
-        date:today(),ts:Date.now(),visibility:'privado',
+        date:today(),ts:Date.now(),
+        visibility:sessionConfig?.existingVisibility||'privado', // preserva la visibilidad ya elegida
         folder:sk==='reto'?'retos':null,deleted:false,
       });
       if(!silent)setToast({msg:'Guardado',col:AZUL});
@@ -14441,13 +14519,45 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
     setSuggestions([]);setSuggestBlock(null);focusBlock(id);
   },[focusBlock]);
 
+  const saveAsVersion=async()=>{
+    const html=blocksToHTML(blocks,format);
+    const plain=blocksToPlain(blocks);
+    const newId=uid();
+    await saveEntry({
+      id:newId,owner_user_id:user.id,sk:sessionConfig?.type||'proyecto',
+      project_id:project?.id||null,
+      title:(headings[0]?.text||project?.title||'Guión')+' (copia)',
+      html,plain,word_count:wordCount,elapsed,meta_words:format,
+      date:today(),ts:Date.now(),visibility:'privado',
+      folder:null,deleted:false,
+    });
+    return newId;
+  };
+
   const handleFinish=async()=>{
+    let finishEntryId=entryId.current;
+    // Texto compartido: comprobamos si alguien más ha guardado mientras lo teníamos
+    // abierto, para no sobrescribirlo a lo bruto sin avisar (no hay tiempo real, así
+    // que esto es lo más parecido a detectar el conflicto en el último momento).
+    if(hasCollaborators&&sessionConfig?.existingTs){
+      try{
+        const freshTs=await DB.getEntryTs(entryId.current);
+        if(freshTs&&freshTs!==sessionConfig.existingTs){
+          const overwrite=window.confirm('Alguien más ha guardado cambios en este texto compartido mientras lo tenías abierto.\n\nAceptar = sobrescribir con tu versión (se perderá lo que haya guardado la otra persona).\nCancelar = guardar tu versión aparte, como copia, sin tocar la suya.');
+          if(!overwrite){
+            finishEntryId=await saveAsVersion();
+            onFinishDay({wordCount,elapsed,title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',sk:sessionConfig?.type||'proyecto',mode:'normal',entryId:finishEntryId});
+            return;
+          }
+        }
+      }catch(e){console.error('conflict check:',e);}
+    }
     await doSave(true);
     onFinishDay({
       wordCount,elapsed,
       title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',
       sk:sessionConfig?.type||'proyecto',mode:'normal',
-      entryId:entryId.current,
+      entryId:finishEntryId,
     });
   };
 
@@ -14486,6 +14596,18 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
           </button>
         </div>
       </div>
+
+      {activeOthers.length>0&&!presenceDismissed&&(
+        <div style={{display:'flex',alignItems:'center',gap:9,padding:'9px 14px',background:'rgba(241,90,36,0.1)',borderBottom:'0.5px solid rgba(241,90,36,0.3)',flexShrink:0}}>
+          <Icon name="warning-circle" size={15} color={NARANJA}/>
+          <div style={{flex:1,fontSize:12,color:'#fff',lineHeight:1.4}}>
+            <strong>{activeOthers.map(p=>p.name||p.username).join(', ')}</strong> tiene{activeOthers.length>1?'n':''} este guión abierto ahora mismo. Si escribís los dos a la vez, es fácil que se pierda algún cambio.
+          </div>
+          <button onClick={dismissPresence} style={{background:'transparent',border:'none',cursor:'pointer',color:NARANJA,flexShrink:0,display:'flex',padding:2}}>
+            <Icon name="x" size={14}/>
+          </button>
+        </div>
+      )}
 
       {/* FORMAT TOGGLE (literario/técnico) + BLOCK TYPE BAR
            En móvil esta barra se pega al fondo de la pantalla visible (encima del teclado)
@@ -16838,14 +16960,28 @@ const App=()=>{
 
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
-  // Edit existing entry
-  if(editingEntry)return<Editor user={user} library={library.some(e=>e.id===editingEntry.id)?library:[...library,editingEntry]} saveEntry={saveEntry} saveProject={saveProject}
-    onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
-    onBack={()=>setEditingEntry(null)}
-    driveData={driveData}
-    sessionConfig={{type:'edit',sk:editingEntry.sk||'check',
-      initialHtml:editingEntry.html||'',initialPlain:editingEntry.plain||'',
-      entryId:editingEntry.id}}/>;
+  // Edit existing entry — abre el mismo editor con el que se creó: si el HTML
+  // guardado lleva el marcador de bloques de guión, se reconstruye en ScriptEditor;
+  // si no, es prosa normal y va al Editor de siempre.
+  if(editingEntry){
+    const isScriptEntry=/<!--screenplay:/.test(editingEntry.html||'');
+    if(isScriptEntry){
+      const editingProject=editingEntry.project_id?projects.find(p=>p.id===editingEntry.project_id)||null:null;
+      return<ScriptEditor user={user} project={editingProject} saveEntry={saveEntry}
+        onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
+        onBack={()=>setEditingEntry(null)}
+        sessionConfig={{type:'edit',entryId:editingEntry.id,initialHtml:editingEntry.html||'',
+          ownerUserId:editingEntry.user_id,existingVisibility:editingEntry.visibility,
+          existingElapsed:editingEntry.elapsed||0,existingTs:editingEntry.ts}}/>;
+    }
+    return<Editor user={user} library={library.some(e=>e.id===editingEntry.id)?library:[...library,editingEntry]} saveEntry={saveEntry} saveProject={saveProject}
+      onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
+      onBack={()=>setEditingEntry(null)}
+      driveData={driveData}
+      sessionConfig={{type:'edit',sk:editingEntry.sk||'check',
+        initialHtml:editingEntry.html||'',initialPlain:editingEntry.plain||'',
+        entryId:editingEntry.id}}/>;
+  }
 
   if(view==='postSession')return<PostSession sessionData={sessionData} onComplete={completeReflection} onBack={()=>{setView('dashboard');loadUserData(user.id);}} user={user}/>;
 
