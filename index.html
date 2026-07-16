@@ -10366,6 +10366,11 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
 /* ─── POST SESSION ───────────────────────────────── */
 const PostSession=({sessionData,onComplete,onBack,user})=>{
   const canPublish=(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
+  // Si quien termina es colaborador (no el dueño del texto), no le corresponde
+  // decidir si se guarda en "su" biblioteca ni qué visibilidad tiene — eso ya lo
+  // decidió el autor. Solo le queda pedir feedback y que su aportación cuente
+  // para sus propias estadísticas (eso lo hace completeReflection aparte).
+  const isCollabContribution=!!sessionData?.isCollabContribution;
   const [saveToLib,setSaveToLib]=useState(true);
   const [chainStart,setChainStart]=useState(false); // ¿dejar como primer capítulo encadenable?
   const [pubVis,setPubVis]=useState('privado');
@@ -10392,7 +10397,8 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 
   const save=()=>{
     const r={id:uid(),ts:Date.now(),date:today(),rating:null,notes:'',sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,wordsAdded:sessionData.wordsAdded??sessionData.wordCount??0,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',
-      saveToLibrary:saveToLib,visibility:saveToLib?pubVis:'ejercicio',chainStart:saveToLib&&chainStart,entryId:sessionData.entryId||null};
+      saveToLibrary:isCollabContribution?false:saveToLib,visibility:isCollabContribution?null:(saveToLib?pubVis:'ejercicio'),chainStart:!isCollabContribution&&saveToLib&&chainStart,
+      entryId:sessionData.entryId||null,isCollabContribution};
     onComplete(r);
   };
 
@@ -10446,11 +10452,17 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
               <Btn onClick={()=>{setFbState('loading');runFeedback()}} small>Reintentar</Btn>
             </div>}
           </div>
-          {/* Guardar y visibilidad */}
+          {/* Guardar y visibilidad — no aplica si quien termina es colaborador, no dueño */}
           <div style={{padding:'20px 24px',display:'flex',flexDirection:'column',gap:18}}>
+            {isCollabContribution&&(
+              <div style={{display:'flex',alignItems:'center',gap:9,background:'rgba(30,155,240,0.06)',border:'0.5px solid rgba(30,155,240,0.22)',borderRadius:10,padding:'12px 14px'}}>
+                <Icon name="users" size={16} color={AZULMED}/>
+                <div style={{fontSize:12,color:TXT,lineHeight:1.5}}>Este texto es de otra persona — ya está guardado con su visibilidad tal cual la dejó. Lo que sí se apunta es tu aportación de hoy, para tus propias estadísticas y racha.</div>
+              </div>
+            )}
             <div style={{display:'flex',flexDirection:'column',gap:10}}>
               <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                <div onClick={()=>setSaveToLib(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
+                {!isCollabContribution&&<div onClick={()=>setSaveToLib(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
                   <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveToLib?"#1E9BF0":BDR),background:saveToLib?"#1E9BF0":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
                     {saveToLib&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                   </div>
@@ -10458,7 +10470,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
                     <div style={{fontSize:13,fontWeight:500,color:TXT}}>Guardar en mi biblioteca</div>
                     <div style={{fontSize:11,color:MUTED}}>{saveToLib?"Visible en Mis textos":"Solo cuenta para las estadísticas"}</div>
                   </div>
-                </div>
+                </div>}
                 {fbState==='done'&&(
                   <div onClick={()=>setSaveFeedback(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
                     <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveFeedback?"#1B5FAA":BDR),background:saveFeedback?"#1B5FAA":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
@@ -10471,7 +10483,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
                   </div>
                 )}
               </div>
-              {canPublish&&saveToLib&&(
+              {!isCollabContribution&&canPublish&&saveToLib&&(
                 <div onClick={()=>setChainStart(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',background:'rgba(0,0,0,0.02)',borderRadius:10,cursor:'pointer',border:'0.5px solid '+BDR}}>
                   <div style={{width:18,height:18,borderRadius:4,border:'1.5px solid '+(chainStart?'#1B5FAA':BDR),background:chainStart?'#1B5FAA':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
                     {chainStart&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -10482,7 +10494,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
                   </div>
                 </div>
               )}
-              {saveToLib&&(
+              {!isCollabContribution&&saveToLib&&(
                 <div style={{display:'flex',gap:6}}>
                   {[
                     {v:'privado',icon:'lock-simple',label:'Privado',hint:'Solo tú'},
@@ -14554,6 +14566,11 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
   const allLocs=useMemo(()=>[...new Set(blocks.filter(b=>b.type==='heading'&&b.text.trim()).map(b=>b.text.trim().toUpperCase()))],[blocks]);
   const wordCount=useMemo(()=>blocksToPlain(blocks).split(/\s+/).filter(Boolean).length,[blocks]);
   const pageCount=Math.max(1,Math.round(wordCount/200));
+  // Recuento de palabras al abrir (antes de que esta sesión añada nada) — para
+  // saber cuánto se ha escrito de nuevo en handleFinish, igual que ya hace el
+  // Editor de prosa con initialWcRef.
+  const initialWcRef=useRef(0);
+  useEffect(()=>{initialWcRef.current=wordCount;},[]);
 
   const doSave=useCallback(async(silent=false)=>{
     const html=blocksToHTML(blocks,format);
@@ -14697,6 +14714,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
 
   const handleFinish=async()=>{
     let finishEntryId=entryId.current;
+    const wordsAdded=Math.max(0,wordCount-initialWcRef.current);
     // Texto compartido: comprobamos si alguien más ha guardado mientras lo teníamos
     // abierto, para no sobrescribirlo a lo bruto sin avisar (no hay tiempo real, así
     // que esto es lo más parecido a detectar el conflicto en el último momento).
@@ -14707,7 +14725,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
           const overwrite=window.confirm('Alguien más ha guardado cambios en este texto compartido mientras lo tenías abierto.\n\nAceptar = sobrescribir con tu versión (se perderá lo que haya guardado la otra persona).\nCancelar = guardar tu versión aparte, como copia, sin tocar la suya.');
           if(!overwrite){
             finishEntryId=await saveAsVersion();
-            onFinishDay({wordCount,elapsed,title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',sk:sessionConfig?.type||'proyecto',mode:'normal',entryId:finishEntryId});
+            onFinishDay({wordCount,elapsed,wordsAdded,title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',sk:sessionConfig?.type||'proyecto',mode:'normal',entryId:finishEntryId});
             return;
           }
         }
@@ -14715,7 +14733,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
     }
     await doSave(true);
     onFinishDay({
-      wordCount,elapsed,
+      wordCount,elapsed,wordsAdded,
       title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',
       sk:sessionConfig?.type||'proyecto',mode:'normal',
       entryId:finishEntryId,
@@ -17059,6 +17077,26 @@ const App=()=>{
     else{setSessionConfig(cfg);setView('editor');}
   };
   const finishDay=data=>{setSessionData(data);setView('postSession');};
+  // Al reeditar un texto existente (incluida la escritura compartida, que siempre
+  // entra por "Editar"): si de verdad se escribió algo nuevo en esta sesión
+  // (wordsAdded>0), cuenta como una sesión más — pasa por PostSession igual que
+  // una sesión nueva, para que la racha, las palabras y la pantalla de
+  // "¡Enhorabuena!" no se salten solo por haber entrado desde la Biblioteca.
+  // Si solo se abrió para mirar o corregir un detalle sin añadir texto, va
+  // directo al Dashboard como hasta ahora, sin interrumpir con preguntas.
+  const finishEditSession=data=>{
+    // editingEntry.user_id es el dueño ORIGINAL del texto (nunca cambia por quien
+    // edita) — si no coincide conmigo, esta sesión es una aportación a un texto
+    // compartido, no una edición de algo mío.
+    const isCollabContribution=!!(editingEntry&&editingEntry.user_id!==user.id);
+    setEditingEntry(null);
+    if((data.wordsAdded||0)>0){
+      setSessionData({...data,isCollabContribution});
+      setView('postSession');
+    }else{
+      setView('dashboard');
+    }
+  };
 
   const completeReflection=async(ref)=>{
     if(ref&&user){
@@ -17072,12 +17110,57 @@ const App=()=>{
         date:ref.date||null,ts:ref.ts||Date.now(),
       };
       try{await DB.upsertReflection(dbRef);}catch(e){console.error('save reflection',e);}
-      // Apply chosen visibility to the saved entry.
-      // Si el usuario NO eligió guardarlo en su biblioteca ('ejercicio'), borramos el
-      // contenido (html/plain) de la base de datos: las palabras y el tiempo ya quedaron
-      // registrados en la reflexión de arriba, así que las estadísticas no se ven afectadas,
-      // pero el texto en sí no se almacena — evitando ruido y reduciendo el almacenamiento.
-      if(ref.entryId&&ref.visibility){
+
+      const buildFeedbackAppend=()=>{
+        const fbParas=ref.feedback.trim().split(/\n+/).map(l=>l.trim()).filter(Boolean);
+        return{
+          plainAppend:'\n\n— — —\n\n✦ Revisión de Claude\n\n'+fbParas.join('\n'),
+          htmlAppend:'<div style="margin-top:2em;padding-top:1.2em;border-top:1px solid rgba(10,27,61,0.12)">'
+            +'<div style="font-family:\'Playfair Display\',serif;font-style:italic;font-weight:600;font-size:0.95em;color:#1B5FAA;margin-bottom:0.6em">✦ Revisión de Claude</div>'
+            +fbParas.map(p=>'<p style="color:#5B6478;font-size:0.92em;line-height:1.65;margin:0 0 0.6em">'+p.replace(/^(\d)\.\s*/,'<strong>$1.</strong> ')+'</p>').join('')
+            +'</div>',
+        };
+      };
+
+      if(ref.isCollabContribution&&ref.entryId){
+        // No es mi texto: no toco su visibilidad ni "hacer encadenable" — eso es
+        // decisión del autor. Si pedí revisión de Claude y quise guardarla, sí se
+        // añade al documento (es una edición de contenido más, como cualquier otra
+        // que ya puedo hacer al colaborar).
+        if(ref.feedback&&ref.feedback.trim()){
+          try{
+            const{htmlAppend,plainAppend}=buildFeedbackAppend();
+            await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);
+          }catch(e){console.error('append feedback (colaboración)',e);}
+        }
+        // Mi aportación de hoy no vive en `entries` (el texto es de otra persona),
+        // así que se registra aparte como una entrada propia de tipo "colaboracion"
+        // — invisible en Mis textos (visibility:'ejercicio', igual que un check),
+        // pero cuenta para MI racha y MIS palabras porque computeStats solo mira
+        // mi `library`, nunca `sharedWithMe`.
+        const contribWords=ref.wordsAdded??ref.word_count??ref.wordCount??0;
+        if(contribWords>0){
+          try{
+            const contribId='collab_contrib_'+ref.entryId+'_'+user.id+'_'+today();
+            const existingContrib=library.find(e=>e.id===contribId);
+            await saveEntry({
+              id:contribId,sk:'colaboracion',
+              date:today(),ts:Date.now(),
+              title:'Colaboración: '+(ref.session_title||ref.sessionTitle||'texto compartido'),
+              html:'',plain:'',
+              word_count:(existingContrib?.word_count||0)+contribWords,
+              words_added:(existingContrib?.word_count||0)+contribWords,
+              elapsed:(existingContrib?.elapsed||0)+(ref.elapsed||0),
+              visibility:'ejercicio',folder:null,
+            });
+          }catch(e){console.error('registrar contribución de colaboración:',e);}
+        }
+      }else if(ref.entryId&&ref.visibility){
+        // Dueño del texto: aplicar la visibilidad elegida.
+        // Si el usuario NO eligió guardarlo en su biblioteca ('ejercicio'), borramos el
+        // contenido (html/plain) de la base de datos: las palabras y el tiempo ya quedaron
+        // registrados en la reflexión de arriba, así que las estadísticas no se ven afectadas,
+        // pero el texto en sí no se almacena — evitando ruido y reduciendo el almacenamiento.
         try{
           if(ref.visibility==='ejercicio'){
             await DB.stripEntryContent(ref.entryId);
@@ -17095,12 +17178,7 @@ const App=()=>{
             // al final del propio documento — así siempre se ve junto al texto, releyéndolo
             // en la biblioteca, sin tener que buscarla por separado.
             if(ref.feedback&&ref.feedback.trim()){
-              const fbParas=ref.feedback.trim().split(/\n+/).map(l=>l.trim()).filter(Boolean);
-              plainAppend='\n\n— — —\n\n✦ Revisión de Claude\n\n'+fbParas.join('\n');
-              htmlAppend='<div style="margin-top:2em;padding-top:1.2em;border-top:1px solid rgba(10,27,61,0.12)">'
-                +'<div style="font-family:\'Playfair Display\',serif;font-style:italic;font-weight:600;font-size:0.95em;color:#1B5FAA;margin-bottom:0.6em">✦ Revisión de Claude</div>'
-                +fbParas.map(p=>'<p style="color:#5B6478;font-size:0.92em;line-height:1.65;margin:0 0 0.6em">'+p.replace(/^(\d)\.\s*/,'<strong>$1.</strong> ')+'</p>').join('')
-                +'</div>';
+              ({htmlAppend,plainAppend}=buildFeedbackAppend());
               try{
                 await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);
               }catch(e){console.error('append feedback',e);}
@@ -17218,14 +17296,14 @@ const App=()=>{
     if(isScriptEntry){
       const editingProject=editingEntry.project_id?projects.find(p=>p.id===editingEntry.project_id)||null:null;
       return<ScriptEditor user={user} project={editingProject} saveEntry={saveEntry}
-        onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
+        onFinishDay={finishEditSession}
         onBack={()=>setEditingEntry(null)}
         sessionConfig={{type:'edit',entryId:editingEntry.id,initialHtml:editingEntry.html||'',
           ownerUserId:editingEntry.user_id,existingVisibility:editingEntry.visibility,
           existingElapsed:editingEntry.elapsed||0,existingTs:editingEntry.ts}}/>;
     }
     return<Editor user={user} library={library.some(e=>e.id===editingEntry.id)?library:[...library,editingEntry]} saveEntry={saveEntry} saveProject={saveProject}
-      onFinishDay={()=>{setEditingEntry(null);setView('dashboard');}}
+      onFinishDay={finishEditSession}
       onBack={()=>setEditingEntry(null)}
       driveData={driveData}
       sessionConfig={{type:'edit',sk:editingEntry.sk||'check',
