@@ -10728,26 +10728,47 @@ const DrivePanel=({user,driveState,onUpdate})=>{
 // No es tiempo real: cada quien deja una marca con la hora cada 25s mientras
 // tiene el texto abierto; al entrar, se mira si hay una marca reciente de
 // otra persona. Sirve para disuadir de escribir a la vez, no para bloquearlo.
-const usePresenceWarning=(entryId,userId,hasCollaborators)=>{
+const usePresenceWarning=(entryId,userId,hasCollaborators,initialTs)=>{
   const [activeOthers,setActiveOthers]=useState([]); // [{id,name,username}]
   const [dismissed,setDismissed]=useState(false);
+  // Sin tiempo real no hay forma de que el cambio del otro "aparezca solo" —
+  // esto comprueba cada 25s (mismo pulso que la presencia) si el ts guardado en
+  // el servidor es distinto del que teníamos al abrir, y si es así ofrece
+  // recargar en vez de forzarlo (para no pisar lo que estés escribiendo tú).
+  const [remoteUpdateAvailable,setRemoteUpdateAvailable]=useState(false);
+  const knownTsRef=useRef(initialTs);
   useEffect(()=>{
     if(!hasCollaborators||!entryId)return;
     let cancelled=false;
-    DB.getActivePresence(entryId,userId).then(async rows=>{
-      if(cancelled||!rows.length)return;
-      const profs=await DB.getProfilesByIds(rows.map(r=>r.user_id)).catch(()=>[]);
-      if(!cancelled)setActiveOthers(profs);
-    }).catch(e=>console.error('presence check falló — ¿se ejecutó entry_presence_sql.sql en Supabase?',e?.message||e));
+    const checkOnce=()=>{
+      DB.getActivePresence(entryId,userId).then(async rows=>{
+        if(cancelled||!rows.length)return;
+        const profs=await DB.getProfilesByIds(rows.map(r=>r.user_id)).catch(()=>[]);
+        if(!cancelled)setActiveOthers(profs);
+      }).catch(e=>console.error('presence check falló — ¿se ejecutó entry_presence_sql.sql en Supabase?',e?.message||e));
+      DB.getEntryTs(entryId).then(freshTs=>{
+        if(!cancelled&&freshTs&&knownTsRef.current&&freshTs!==knownTsRef.current){
+          setRemoteUpdateAvailable(true);
+        }
+      }).catch(e=>console.error('comprobación de cambios remotos falló:',e?.message||e));
+    };
+    checkOnce();
     DB.pingPresence(entryId,userId).catch(e=>console.error('presence ping falló:',e?.message||e));
-    const hb=setInterval(()=>{DB.pingPresence(entryId,userId).catch(()=>{});},25000);
+    const hb=setInterval(()=>{
+      DB.pingPresence(entryId,userId).catch(()=>{});
+      checkOnce();
+    },25000);
     return()=>{
       cancelled=true;
       clearInterval(hb);
       DB.clearPresence(entryId,userId).catch(()=>{});
     };
   },[entryId,hasCollaborators]);
-  return{activeOthers,dismissed,dismiss:()=>setDismissed(true)};
+  return{
+    activeOthers,dismissed,dismiss:()=>setDismissed(true),
+    remoteUpdateAvailable,
+    acknowledgeReload:newTs=>{knownTsRef.current=newTs;setRemoteUpdateAvailable(false);},
+  };
 };
 
 const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,sessionConfig})=>{
@@ -10788,8 +10809,25 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       setHasCollaborators(list.some(c=>c.status==='aceptado'));
     }).catch(()=>{});
   },[]);
-  const{activeOthers,dismissed:presenceDismissed,dismiss:dismissPresence}=usePresenceWarning(
-    sessionConfig.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators);
+  const{activeOthers,dismissed:presenceDismissed,dismiss:dismissPresence,remoteUpdateAvailable,acknowledgeReload}=usePresenceWarning(
+    sessionConfig.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators,originalEntryRef.current?.ts);
+  const reloadFromServer=async()=>{
+    if(plainTxt.trim()&&plainTxt!==lastSaved.current){
+      if(!window.confirm('Tienes cambios sin guardar en este texto. Si recargas la versión del otro, se perderán.\n\n¿Recargar de todas formas?'))return;
+    }
+    try{
+      const fresh=await DB.getEntryById(entryIdRef.current);
+      if(fresh&&edRef.current){
+        edRef.current.innerHTML=fresh.html||'';
+        const txt=edRef.current.innerText||'';
+        setPlainTxt(txt);
+        const freshWc=txt.trim().split(/\s+/).filter(Boolean).length;
+        setWc(freshWc);
+        lastSaved.current=txt;
+        acknowledgeReload(fresh.ts);
+      }
+    }catch(e){alert('No se pudo recargar: '+e.message);}
+  };
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
   const tunnelWrapRef=useRef();
   const [tunnelRects,setTunnelRects]=useState([]);
@@ -10825,8 +10863,9 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const finalElapsed=isReeditingCuento?(originalEntryRef.current.elapsed||0):elapsed;
     const finalExtraElapsed=isReeditingCuento?((originalEntryRef.current.extra_elapsed||0)+elapsed):(existing?.extra_elapsed||0);
     // La visibilidad se preserva siempre que la entrada ya existiera (p.ej. al reeditar un texto
-    // ya publicado como "amigos"/"abierto"). Solo las entradas nuevas nacen como "privado".
-    const visibility=existing?(existing.visibility||'privado'):'privado';
+    // ya publicado como "amigos"/"abierto"). Solo las entradas nuevas nacen como "privado"
+    // (más abajo en saveEntry, que aplica ese valor por defecto si llega undefined).
+    const visibility=existing?.visibility;
     return {
       id,ts:Date.now(),sk,date:today(),
       owner_user_id:existing?.user_id||user.id, // dueño original — nunca cambia por quien guarda
@@ -10846,7 +10885,6 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       week_id:sessionConfig.weekId||null,weekId:sessionConfig.weekId||null,
       project_id:currentProject?.id||null,projectId:currentProject?.id||null,
       folder,
-      visibility:existing?.visibility, // preserva la visibilidad ya elegida; si es una entrada nueva, queda undefined y cae al valor por defecto ('privado') más abajo en saveEntry
     };
   };
 
@@ -11060,6 +11098,18 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           </div>
           <button onClick={dismissPresence} style={{background:'transparent',border:'none',cursor:'pointer',color:NARANJA,flexShrink:0,display:'flex',padding:2}}>
             <Icon name="x" size={14}/>
+          </button>
+        </div>
+      )}
+
+      {remoteUpdateAvailable&&(
+        <div style={{display:'flex',alignItems:'center',gap:9,padding:'9px 14px',background:'rgba(30,155,240,0.08)',borderBottom:'0.5px solid rgba(30,155,240,0.25)',flexShrink:0}}>
+          <Icon name="arrows-clockwise" size={15} color={AZUL}/>
+          <div style={{flex:1,fontSize:12,color:TXT,lineHeight:1.4}}>
+            Hay cambios nuevos guardados por la otra persona. No se cargan solos para no interrumpirte mientras escribes.
+          </div>
+          <button onClick={reloadFromServer} style={{background:AZUL,border:'none',borderRadius:7,padding:'6px 12px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>
+            Recargar
           </button>
         </div>
       )}
@@ -11717,9 +11767,12 @@ const CollabInviteBanner=({user,onAccepted})=>{
       const entryIds=[...new Set(raw.map(i=>i.entry_id))];
       const ownerIds=[...new Set(raw.map(i=>i.owner_id))];
       const [entries,owners]=await Promise.all([
-        DB.getEntriesByIds(entryIds).catch(()=>[]),
-        DB.getProfilesByIds(ownerIds).catch(()=>[]),
+        DB.getEntriesByIds(entryIds).catch(e=>{console.error('CollabInviteBanner: getEntriesByIds falló:',e?.message||e);return[];}),
+        DB.getProfilesByIds(ownerIds).catch(e=>{console.error('CollabInviteBanner: getProfilesByIds falló:',e?.message||e);return[];}),
       ]);
+      if(entries.length<entryIds.length){
+        console.error('CollabInviteBanner: se pidieron '+entryIds.length+' textos y solo llegaron '+entries.length+' — probable bloqueo de RLS.',{entryIds,entriesRecibidos:entries.map(e=>e.id)});
+      }
       const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
       const ownerMap=Object.fromEntries(owners.map(p=>[p.id,p]));
       setInvites(raw.map(i=>({...i,entryTitle:entryMap[i.entry_id]?.title,ownerName:ownerMap[i.owner_id]?.name||ownerMap[i.owner_id]?.username})));
@@ -13303,9 +13356,12 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
       const entryIds=[...new Set(invites.map(i=>i.entry_id))];
       const ownerIds=[...new Set(invites.map(i=>i.owner_id))];
       const [entries,owners]=await Promise.all([
-        DB.getEntriesByIds(entryIds).catch(()=>[]),
-        DB.getProfilesByIds(ownerIds).catch(()=>[]),
+        DB.getEntriesByIds(entryIds).catch(e=>{console.error('loadPendingInvites: getEntriesByIds falló:',e?.message||e);return[];}),
+        DB.getProfilesByIds(ownerIds).catch(e=>{console.error('loadPendingInvites: getProfilesByIds falló:',e?.message||e);return[];}),
       ]);
+      if(entries.length<entryIds.length){
+        console.error('loadPendingInvites: se pidieron '+entryIds.length+' textos y solo llegaron '+entries.length+' — probable bloqueo de RLS.',{entryIds,entriesRecibidos:entries.map(e=>e.id)});
+      }
       const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
       const ownerMap=Object.fromEntries(owners.map(p=>[p.id,p]));
       setPendingInvites(invites.map(i=>({...i,entryTitle:entryMap[i.entry_id]?.title,ownerName:ownerMap[i.owner_id]?.name||ownerMap[i.owner_id]?.username})));
@@ -14469,8 +14525,23 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
       setHasCollaborators(list.some(c=>c.status==='aceptado'));
     }).catch(()=>{});
   },[]);
-  const{activeOthers,dismissed:presenceDismissed,dismiss:dismissPresence}=usePresenceWarning(
-    sessionConfig?.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators);
+  const{activeOthers,dismissed:presenceDismissed,dismiss:dismissPresence,remoteUpdateAvailable,acknowledgeReload}=usePresenceWarning(
+    sessionConfig?.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators,sessionConfig?.existingTs);
+  const reloadFromServer=async()=>{
+    const currentPlain=blocksToPlain(blocks);
+    if(currentPlain.trim()&&currentPlain!==lastSaved.current){
+      if(!window.confirm('Tienes cambios sin guardar en este guión. Si recargas la versión del otro, se perderán.\n\n¿Recargar de todas formas?'))return;
+    }
+    try{
+      const fresh=await DB.getEntryById(entryId.current);
+      if(fresh){
+        const parsed=parseBlocks(fresh.html);
+        setBlocks(parsed?.length?parsed:[{id:uid(),type:'transition',text:'ABRE DE NEGRO.'},{id:uid(),type:'heading',text:''}]);
+        lastSaved.current=fresh.plain||'';
+        acknowledgeReload(fresh.ts);
+      }
+    }catch(e){alert('No se pudo recargar: '+e.message);}
+  };
 
   useEffect(()=>{
     if(!started)return;
@@ -14695,6 +14766,18 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
           </div>
           <button onClick={dismissPresence} style={{background:'transparent',border:'none',cursor:'pointer',color:NARANJA,flexShrink:0,display:'flex',padding:2}}>
             <Icon name="x" size={14}/>
+          </button>
+        </div>
+      )}
+
+      {remoteUpdateAvailable&&(
+        <div style={{display:'flex',alignItems:'center',gap:9,padding:'9px 14px',background:'rgba(30,155,240,0.12)',borderBottom:'0.5px solid rgba(30,155,240,0.3)',flexShrink:0}}>
+          <Icon name="arrows-clockwise" size={15} color="#1E9BF0"/>
+          <div style={{flex:1,fontSize:12,color:'#fff',lineHeight:1.4}}>
+            Hay cambios nuevos guardados por la otra persona. No se cargan solos para no interrumpirte mientras escribes.
+          </div>
+          <button onClick={reloadFromServer} style={{background:'#1E9BF0',border:'none',borderRadius:7,padding:'6px 12px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap'}}>
+            Recargar
           </button>
         </div>
       )}
@@ -16230,16 +16313,19 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
       const seen=collabNotifSeenGet(user.id);
       const since=new Date(Date.now()-30*24*3600*1000).toISOString(); // últimos 30 días
       const [pending,accepted]=await Promise.all([
-        DB.getPendingCollabInvites(user.id).catch(()=>[]),
-        DB.getRecentlyAcceptedCollabs(user.id,since).catch(()=>[]),
+        DB.getPendingCollabInvites(user.id).catch(e=>{console.error('collab notif: getPendingCollabInvites falló:',e?.message||e);return[];}),
+        DB.getRecentlyAcceptedCollabs(user.id,since).catch(e=>{console.error('collab notif: getRecentlyAcceptedCollabs falló:',e?.message||e);return[];}),
       ]);
       if(!pending.length&&!accepted.length)return[];
       const entryIds=[...new Set([...pending.map(i=>i.entry_id),...accepted.map(i=>i.entry_id)])];
       const peopleIds=[...new Set([...pending.map(i=>i.owner_id),...accepted.map(i=>i.collaborator_id)])];
       const [entries,people]=await Promise.all([
-        DB.getEntriesByIds(entryIds).catch(()=>[]),
-        DB.getProfilesByIds(peopleIds).catch(()=>[]),
+        DB.getEntriesByIds(entryIds).catch(e=>{console.error('collab notif: getEntriesByIds falló:',e?.message||e);return[];}),
+        DB.getProfilesByIds(peopleIds).catch(e=>{console.error('collab notif: getProfilesByIds falló:',e?.message||e);return[];}),
       ]);
+      if(entries.length<entryIds.length){
+        console.error('collab notif: se pidieron '+entryIds.length+' textos y solo llegaron '+entries.length+' — probable bloqueo de RLS en la lectura de entries, o el/los id no existen.',{entryIds,entriesRecibidos:entries.map(e=>e.id)});
+      }
       const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
       const peopleMap=Object.fromEntries(people.map(p=>[p.id,p]));
       const invItems=pending.map(i=>{
@@ -16864,6 +16950,27 @@ const App=()=>{
       return null;
     }
   };
+
+  // Refrescar biblioteca/proyectos/reflexiones al volver a la app tras tenerla en
+  // segundo plano (cambiar de pestaña, minimizar, volver de otra app en móvil…).
+  // Sin esto, si alguien más edita un texto compartido mientras tienes la PWA
+  // abierta, no te enteras hasta cerrarla y volver a abrirla del todo.
+  const lastFocusRefreshRef=useRef(0);
+  useEffect(()=>{
+    const onVisible=()=>{
+      if(document.visibilityState!=='visible'||!user?.id)return;
+      const now=Date.now();
+      if(now-lastFocusRefreshRef.current<8000)return; // evita ráfagas si cambia de pestaña varias veces seguidas
+      lastFocusRefreshRef.current=now;
+      loadUserData(user.id);
+    };
+    document.addEventListener('visibilitychange',onVisible);
+    window.addEventListener('focus',onVisible);
+    return()=>{
+      document.removeEventListener('visibilitychange',onVisible);
+      window.removeEventListener('focus',onVisible);
+    };
+  },[user?.id]);
 
   // Team invite URL check
   useEffect(()=>{
