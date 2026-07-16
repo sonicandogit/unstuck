@@ -4097,8 +4097,21 @@ const DB = {
     return Math.round(ratings.reduce((s,r) => s + r.rating, 0) / ratings.length * 10) / 10;
   },
   upsertEntry: async (entry) => {
-    const { error } = await getSB().from('entries').upsert(entry);
-    if (error) throw error;
+    // OJO: nunca usar .upsert() aquí. .upsert() es INSERT ... ON CONFLICT DO UPDATE,
+    // y Postgres comprueba la política de INSERT sobre la fila propuesta ANTES de
+    // resolver el conflicto. En un texto compartido, un colaborador guarda con
+    // user_id = dueño original (no el suyo) para no robar la propiedad — eso hace
+    // que la política de INSERT (auth.uid()=user_id) rechace la operación entera,
+    // aunque debería caer en UPDATE. Por eso: intentar UPDATE primero (solo depende
+    // de la política de UPDATE, que sí contempla a colaboradores aceptados), y
+    // recurrir a INSERT solo si de verdad no existía la fila.
+    const { data: updated, error: updErr } = await getSB().from('entries')
+      .update(entry).eq('id', entry.id).select('id');
+    if (updErr) throw updErr;
+    if (!updated || updated.length === 0) {
+      const { error: insErr } = await getSB().from('entries').insert(entry);
+      if (insErr) throw insErr;
+    }
   },
   deleteEntry: async (id) => {
     // Borrado "suave": se vacía el contenido (privacidad) pero se conservan
@@ -4143,6 +4156,13 @@ const DB = {
     const { data, error } = await getSB().from('entry_collaborators')
       .select('*').eq('collaborator_id', uid).eq('status', 'pendiente')
       .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  getRecentlyAcceptedCollabs: async (uid, sinceISO) => {
+    const { data, error } = await getSB().from('entry_collaborators')
+      .select('*').eq('owner_id', uid).eq('status', 'aceptado').gte('responded_at', sinceISO)
+      .order('responded_at', { ascending: false });
     if (error) throw error;
     return data || [];
   },
@@ -8925,6 +8945,17 @@ const offlineKeepProjectSave=project=>{
 const offlineKeepProjectRemove=id=>S.del(OFFLINE_KEEP_PROJECT_PREFIX+id);
 const offlineKeepProjectsGetAll=()=>S.list(OFFLINE_KEEP_PROJECT_PREFIX).map(k=>S.get(k)).filter(Boolean);
 
+// La campana de notificaciones muestra invitaciones/aceptaciones de escritura
+// compartida SIN pasar por la tabla `notifications` (que no tiene un trigger para
+// esto todavía) — se leen directamente de entry_collaborators. Como no hay fila
+// real que marcar como leída, el estado "leído" se guarda en localStorage.
+const collabNotifSeenGet=uid=>new Set(S.get('pretexto:collab_notif_seen:'+uid)||[]);
+const collabNotifSeenAdd=(uid,id)=>{
+  const s=collabNotifSeenGet(uid);
+  s.add(id);
+  S.set('pretexto:collab_notif_seen:'+uid,[...s]);
+};
+
 // ─── RELATO COLECTIVO ─────────────────────────────────────────────
 // 20 frases de apertura para el botón "Al azar"
 const COLLECTIVE_OPENERS=[
@@ -9573,6 +9604,14 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         if(profile)setNotifProfile(profile);
       }else if(n.type==='challenge_received'||n.type==='challenge_returned'){
         setShowChallengesHistory(true);
+      }else if(n.type==='collab_invite'){
+        // Todavía no ha aceptado — no tiene acceso de lectura a la entrada aún,
+        // así que la aceptación se hace desde la propia Biblioteca.
+        setShowBiblioteca(true);
+      }else if(n.type==='collab_accepted'){
+        // El dueño ya tiene acceso de sobra: abrir el texto directamente.
+        const entry=await DB.getEntryById(n.entity_id);
+        if(entry)setReadingEntry(entry);
       }
       // duet_your_turn y chain_nomination: ya están visibles en los widgets
       // DuetsHub/ChainsHub del propio Dashboard, no hace falta navegar a ningún sitio.
@@ -9858,6 +9897,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onDismiss={onDismissChallenge}/>
         <SharedBackBanner user={user}/>
+        <CollabInviteBanner user={user} onAccepted={onCollabAccepted}/>
         <DuetsHub user={user}/>
         <ChainsHub user={user}/>
         <FeedbackWidget user={user} library={library}/>
@@ -10698,8 +10738,8 @@ const usePresenceWarning=(entryId,userId,hasCollaborators)=>{
       if(cancelled||!rows.length)return;
       const profs=await DB.getProfilesByIds(rows.map(r=>r.user_id)).catch(()=>[]);
       if(!cancelled)setActiveOthers(profs);
-    }).catch(()=>{});
-    DB.pingPresence(entryId,userId).catch(()=>{});
+    }).catch(e=>console.error('presence check falló — ¿se ejecutó entry_presence_sql.sql en Supabase?',e?.message||e));
+    DB.pingPresence(entryId,userId).catch(e=>console.error('presence ping falló:',e?.message||e));
     const hb=setInterval(()=>{DB.pingPresence(entryId,userId).catch(()=>{});},25000);
     return()=>{
       cancelled=true;
@@ -11665,6 +11705,68 @@ const SharedBackBanner=({user})=>{
 };
 
 
+/* ─── COLLAB INVITE BANNER (te han invitado a escribir un texto juntos) ── */
+const CollabInviteBanner=({user,onAccepted})=>{
+  const [invites,setInvites]=useState([]);
+  const [responding,setResponding]=useState(null);
+
+  const load=async()=>{
+    try{
+      const raw=await DB.getPendingCollabInvites(user.id);
+      if(!raw.length){setInvites([]);return;}
+      const entryIds=[...new Set(raw.map(i=>i.entry_id))];
+      const ownerIds=[...new Set(raw.map(i=>i.owner_id))];
+      const [entries,owners]=await Promise.all([
+        DB.getEntriesByIds(entryIds).catch(()=>[]),
+        DB.getProfilesByIds(ownerIds).catch(()=>[]),
+      ]);
+      const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
+      const ownerMap=Object.fromEntries(owners.map(p=>[p.id,p]));
+      setInvites(raw.map(i=>({...i,entryTitle:entryMap[i.entry_id]?.title,ownerName:ownerMap[i.owner_id]?.name||ownerMap[i.owner_id]?.username})));
+    }catch(e){console.error('CollabInviteBanner load:',e);}
+  };
+  useEffect(()=>{load();},[user.id]);
+
+  if(!invites.length)return null;
+  const inv=invites[0];
+
+  const respond=async(status)=>{
+    setResponding(inv.id);
+    try{
+      await DB.respondCollabInvite(inv.id,status);
+      setInvites(prev=>prev.filter(i=>i.id!==inv.id));
+      if(status==='aceptado'){
+        const entries=await DB.getEntriesByIds([inv.entry_id]).catch(()=>[]);
+        if(entries[0])onAccepted&&onAccepted(entries[0]);
+      }
+    }catch(e){alert('Error: '+e.message);}
+    setResponding(null);
+  };
+
+  return(
+    <div className="fu" style={{background:HEADER_NAVY_BG,borderRadius:13,padding:'14px 18px',marginBottom:14,display:'flex',gap:12,alignItems:'flex-start',position:'relative',overflow:'hidden',boxShadow:'0 8px 24px -10px rgba(10,27,61,0.35)'}}>
+      <Signo char="✎" size={90} top={-22} right={-6} color="azul"/>
+      <div style={{flex:1}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:500,color:'rgba(255,255,255,0.4)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>
+          <Icon name="user-plus" size={12} color="#1E9BF0"/>
+          Invitación a escribir juntos
+          {invites.length>1&&<span style={{marginLeft:6,background:'rgba(255,255,255,0.1)',borderRadius:10,padding:'1px 7px',fontSize:9}}>+{invites.length-1} más</span>}
+        </div>
+        <div style={{fontSize:13,color:'rgba(255,255,255,0.85)'}}>
+          <strong>{inv.ownerName||'Alguien'}</strong> te invita a escribir «{inv.entryTitle||'un texto'}» junto a ella o él.
+        </div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
+        <button onClick={()=>respond('aceptado')} disabled={responding===inv.id} style={{background:'#1E9BF0',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+          {responding===inv.id?'…':'Aceptar →'}
+        </button>
+        <button onClick={()=>respond('rechazado')} disabled={responding===inv.id} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'4px 14px',fontSize:11,color:'rgba(255,255,255,0.4)',cursor:'pointer'}}>Rechazar</button>
+      </div>
+    </div>
+  );
+};
+
+
 /* ─── USERNAME SETTINGS ──────────────────────────── */
 const UsernamePanel=({user,onClose,onSave})=>{
   const [username,setUsername]=useState(user.username||'');
@@ -12237,7 +12339,7 @@ const StatsChart=({library})=>{
     </div>
   );
 };
-const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEdit})=>{
+const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEdit,onToggleOffline,isOfflineKept,onMoveFolder,onInvite,isOwnerForInvite})=>{
   const [showEncadenar,setShowEncadenar]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [deleting,setDeleting]=useState(false);
@@ -12434,6 +12536,24 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
                 <button onClick={()=>{onClose();onEdit(entry);}} title="Editar este texto"
                   style={{display:'flex',alignItems:'center',gap:5,border:'none',borderRadius:14,padding:'4px 12px',background:ADVANCE_BG,color:ADVANCE_TXT,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
                   <Icon name="pencil-simple" size={12}/>Editar
+                </button>
+              )}
+              {onToggleOffline&&(
+                <button onClick={()=>onToggleOffline(entry)} title={isOfflineKept?'Disponible sin conexión · quitar':'Mantener disponible sin conexión'}
+                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+(isOfflineKept?'rgba(30,155,240,0.3)':BDR),borderRadius:14,padding:'4px 12px',background:isOfflineKept?'rgba(30,155,240,0.07)':'rgba(0,0,0,0.03)',color:isOfflineKept?AZUL:MUTED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                  <Icon name={isOfflineKept?'cloud-check':'cloud-arrow-down'} size={12}/>{isOfflineKept?'Offline':'Mantener offline'}
+                </button>
+              )}
+              {onMoveFolder&&editAllowed&&(
+                <button onClick={()=>{onClose();onMoveFolder(entry);}} title="Mover a carpeta"
+                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:14,padding:'4px 12px',background:'rgba(0,0,0,0.03)',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                  <Icon name="folder-simple" size={12}/>Mover
+                </button>
+              )}
+              {onInvite&&isOwnerForInvite&&(
+                <button onClick={()=>{onClose();onInvite(entry);}} title="Invitar a escribir juntos"
+                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(30,155,240,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(30,155,240,0.07)',color:AZUL,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                  <Icon name="user-plus" size={12}/>Invitar
                 </button>
               )}
               {isOwn&&entry.chain_start&&(
@@ -13131,8 +13251,6 @@ const InviteCollaboratorsModal=({user,entry,onClose,onInvited})=>{
 };
 
 const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,onFolderChange,onEdit,onDelete,onCollabAccepted})=>{
-  const [deletingEntry,setDeletingEntry]=useState(null);
-  const [deleting,setDeleting]=useState(false);
   const [filter,setFilter]=useState('all');
   const [folder,setFolder]=useState('todos'); // 'todos' | 'sin' | slug de carpeta por defecto | id de carpeta personalizada
   const [customFolders,setCustomFolders]=useState([]);
@@ -13245,9 +13363,10 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     // son ejercicios de calentamiento, no piezas que el usuario haya curado.
     // En cuanto se mueven a otra carpeta, se comportan como cualquier otro texto.
     const isUncuratedExercise=e.folder==='retos'&&(e.sk==='check'||e.sk==='reto');
-    if(folder==='todos')return !isUncuratedExercise;
-    if(folder==='sin')return !e.folder;
-    return e.folder===folder;
+    if(folder==='compartidos')return e.user_id!==user.id; // autor distinto a mí — siempre aquí, no depende de e.folder
+    if(folder==='todos')return !isUncuratedExercise&&e.user_id===user.id;
+    if(folder==='sin')return !e.folder&&e.user_id===user.id;
+    return e.folder===folder&&e.user_id===user.id;
   };
   const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado')));
 
@@ -13306,7 +13425,9 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
       {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}
-        canEdit={readEntry.user_id===user.id||(collabMap[readEntry.id]||[]).some(c=>c.status==='aceptado'&&(c.collaborator_id===user.id||c.owner_id===user.id))}/>}
+        canEdit={readEntry.user_id===user.id||(collabMap[readEntry.id]||[]).some(c=>c.status==='aceptado'&&(c.collaborator_id===user.id||c.owner_id===user.id))}
+        onToggleOffline={toggleOfflineKeep} isOfflineKept={offlineKept.has(readEntry.id)}
+        onMoveFolder={e2=>setMovingEntry(e2)} onInvite={e2=>setInvitingEntry(e2)} isOwnerForInvite={readEntry.user_id===user.id}/>}
       {movingEntry&&<div onClick={()=>setMovingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Mover a…</div>
@@ -13322,30 +13443,6 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
             ))}
           </div>
           <button onClick={()=>setMovingEntry(null)} style={{width:'100%',marginTop:12,background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'8px',fontSize:12,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
-        </div>
-      </div>}
-
-      {deletingEntry&&<div onClick={()=>!deleting&&setDeletingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.45)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
-        <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'20px',width:'100%',maxWidth:320,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-            <Icon name="warning-circle" size={18} color={DANGER}/>
-            <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT}}>Eliminar texto</div>
-          </div>
-          <p style={{fontSize:12.5,color:MUTED,lineHeight:1.55,marginBottom:18}}>
-            ¿Seguro que quieres eliminar «{deletingEntry.title||'Sin título'}»? Esta acción no se puede deshacer.
-          </p>
-          <div style={{display:'flex',gap:10}}>
-            <button onClick={()=>setDeletingEntry(null)} disabled={deleting} style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
-            <button onClick={async()=>{
-                setDeleting(true);
-                try{await onDelete(deletingEntry.id);setDeletingEntry(null);}
-                catch(e){alert('Error al eliminar: '+e.message);}
-                setDeleting(false);
-              }} disabled={deleting}
-              style={{flex:1,background:DANGER,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",opacity:deleting?0.6:1}}>
-              {deleting?'Eliminando…':'Eliminar'}
-            </button>
-          </div>
         </div>
       </div>}
 
@@ -13400,15 +13497,18 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
 
       {/* Carpetas */}
       <div style={{display:'flex',gap:7,padding:'14px 16px 0',flexShrink:0,flexWrap:'wrap',alignItems:'center'}}>
-        {[['todos','Todos'],['sin','Sin carpeta'],...allFolders].map(([id,name])=>{
+        {[['todos','Todos'],['compartidos','Compartidos'],['sin','Sin carpeta'],...allFolders].map(([id,name])=>{
           const active=folder===id;
+          const sharedCount=id==='compartidos'?combinedLibrary.filter(e=>e.user_id!==user.id&&e.visibility!=='ejercicio'&&!e.deleted).length:0;
           return(
             <button key={id} onClick={()=>setFolder(id)} style={{
               background:active?AZUL:'rgba(30,155,240,0.06)',color:active?'#fff':AZULMED,
               border:'none',borderRadius:8,padding:'6px 12px',fontSize:11,fontWeight:600,cursor:'pointer',
               fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5,
             }}>
-              {id!=='todos'&&id!=='sin'&&<Icon name="folder-simple" size={11}/>}{name}
+              {id==='compartidos'&&<Icon name="users" size={11}/>}
+              {id!=='todos'&&id!=='sin'&&id!=='compartidos'&&<Icon name="folder-simple" size={11}/>}
+              {name}{id==='compartidos'&&sharedCount>0&&<span style={{opacity:active?0.75:0.6,fontSize:10}}>({sharedCount})</span>}
             </button>
           );
         })}
@@ -13475,26 +13575,16 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
                       style={{font:"600 9px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:meta.color,background:meta.bg,padding:'4px 7px',borderRadius:5,whiteSpace:'nowrap',cursor:'pointer',flexShrink:0}}>
                       {isUpdating?'…':meta.label}
                     </span>
-                    <div style={{display:'flex',alignItems:'center',gap:7,flexShrink:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:9,flexShrink:0}}>
                       <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT,whiteSpace:'nowrap'}}>{relTime(e.date)}</span>
-                      {isMine&&<button onClick={e2=>{e2.stopPropagation();setInvitingEntry(e);}}
-                        title="Invitar a escribir juntos"
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:acceptedCollabs.length?AZUL:FAINT,padding:0,display:'flex',flexShrink:0}}>
-                        <Icon name="user-plus" size={13}/>
-                      </button>}
-                      <button onClick={e2=>{e2.stopPropagation();toggleOfflineKeep(e);}}
-                        title={offlineKept.has(e.id)?'Disponible sin conexión · quitar':'Mantener offline'}
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:offlineKept.has(e.id)?AZUL:FAINT,padding:0,display:'flex',flexShrink:0}}>
-                        <Icon name={offlineKept.has(e.id)?'cloud-check':'cloud-arrow-down'} size={13}/>
-                      </button>
-                      <button onClick={e2=>{e2.stopPropagation();setMovingEntry(e);}} title="Mover a carpeta"
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
-                        <Icon name="folder-simple" size={13}/>
-                      </button>
-                      {isMine&&<button onClick={e2=>{e2.stopPropagation();setDeletingEntry(e);}} title="Eliminar"
-                        style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:0,display:'flex',flexShrink:0}}>
-                        <Icon name="trash" size={13}/>
-                      </button>}
+                      <span title={offlineKept.has(e.id)?'Disponible sin conexión':'No disponible sin conexión'}
+                        style={{display:'flex',color:offlineKept.has(e.id)?AZUL:'rgba(0,0,0,0.14)',flexShrink:0}}>
+                        <Icon name={offlineKept.has(e.id)?'cloud-check':'cloud-arrow-down'} size={14}/>
+                      </span>
+                      <span title={acceptedCollabs.length||pendingCollabs.length||!isMine?'Texto compartido':'Solo para ti'}
+                        style={{display:'flex',color:(acceptedCollabs.length||pendingCollabs.length||!isMine)?AZULMED:'rgba(0,0,0,0.14)',flexShrink:0}}>
+                        <Icon name="users" size={14}/>
+                      </span>
                     </div>
                   </div>
 
@@ -16102,11 +16192,13 @@ const NOTIF_ICON={
   new_follower:'user-plus', new_friend_text:'book-open', challenge_received:'timer',
   challenge_returned:'check-circle', duet_your_turn:'hands-clapping', chain_nomination:'link',
   new_comment:'chat-circle', collective_your_turn:'users-three', collective_update:'scroll',
+  collab_invite:'user-plus', collab_accepted:'check-circle',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
   challenge_returned:AZUL, duet_your_turn:AZUL, chain_nomination:'#1A6B8A',
   new_comment:AZUL, collective_your_turn:AZUL, collective_update:MUTED,
+  collab_invite:AZUL, collab_accepted:AZUL,
 };
 
 const relNotifTime=iso=>{
@@ -16129,11 +16221,56 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
   const [loaded,setLoaded]=useState(false);
 
   const seenChallengeIdsRef=useRef(new Set());
+
+  const loadCollabItems=async()=>{
+    // No hay trigger SQL todavía que meta esto en `notifications`, así que se
+    // arma aquí mismo a partir de entry_collaborators — mismo aspecto visual,
+    // pero el estado de "leído" vive en localStorage en vez de en la BD.
+    try{
+      const seen=collabNotifSeenGet(user.id);
+      const since=new Date(Date.now()-30*24*3600*1000).toISOString(); // últimos 30 días
+      const [pending,accepted]=await Promise.all([
+        DB.getPendingCollabInvites(user.id).catch(()=>[]),
+        DB.getRecentlyAcceptedCollabs(user.id,since).catch(()=>[]),
+      ]);
+      if(!pending.length&&!accepted.length)return[];
+      const entryIds=[...new Set([...pending.map(i=>i.entry_id),...accepted.map(i=>i.entry_id)])];
+      const peopleIds=[...new Set([...pending.map(i=>i.owner_id),...accepted.map(i=>i.collaborator_id)])];
+      const [entries,people]=await Promise.all([
+        DB.getEntriesByIds(entryIds).catch(()=>[]),
+        DB.getProfilesByIds(peopleIds).catch(()=>[]),
+      ]);
+      const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
+      const peopleMap=Object.fromEntries(people.map(p=>[p.id,p]));
+      const invItems=pending.map(i=>{
+        const nid='collab_invite_'+i.id;
+        return{
+          id:nid,type:'collab_invite',
+          title:(peopleMap[i.owner_id]?.name||peopleMap[i.owner_id]?.username||'Alguien')+' te invita a escribir «'+(entryMap[i.entry_id]?.title||'un texto')+'»',
+          read:seen.has(nid),created_at:i.created_at,entity_id:i.entry_id,
+        };
+      });
+      const accItems=accepted.map(i=>{
+        const nid='collab_accepted_'+i.id;
+        return{
+          id:nid,type:'collab_accepted',
+          title:(peopleMap[i.collaborator_id]?.name||peopleMap[i.collaborator_id]?.username||'Alguien')+' aceptó escribir «'+(entryMap[i.entry_id]?.title||'tu texto')+'» contigo',
+          read:seen.has(nid),created_at:i.responded_at,entity_id:i.entry_id,
+        };
+      });
+      return[...invItems,...accItems];
+    }catch(e){console.error('collab notif items:',e);return[];}
+  };
+
   const load=async()=>{
     try{
-      const data=await DB.getNotifications(user.id,20);
-      setItems(data);
-      setUnread(data.filter(n=>!n.read).length);
+      const [data,collabItems]=await Promise.all([
+        DB.getNotifications(user.id,20),
+        loadCollabItems(),
+      ]);
+      const merged=[...data,...collabItems].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+      setItems(merged);
+      setUnread(merged.filter(n=>!n.read).length);
       // Detectar retos nuevos para avisar a App sin recargar toda la página
       if(onNewChallenge){
         const newChallengeNotifs=data.filter(n=>
@@ -16158,8 +16295,13 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
   const handleClick=async(n)=>{
     setOpen(false);
+    const isSynthetic=n.type==='collab_invite'||n.type==='collab_accepted';
     if(!n.read){
-      try{await DB.markNotificationRead(n.id);}catch(e){}
+      if(isSynthetic){
+        collabNotifSeenAdd(user.id,n.id);
+      }else{
+        try{await DB.markNotificationRead(n.id);}catch(e){}
+      }
       setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
       setUnread(prev=>Math.max(0,prev-1));
     }
@@ -16168,6 +16310,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
   const markAllRead=async()=>{
     try{await DB.markAllNotificationsRead(user.id);}catch(e){}
+    items.filter(n=>n.type==='collab_invite'||n.type==='collab_accepted').forEach(n=>collabNotifSeenAdd(user.id,n.id));
     setItems(prev=>prev.map(x=>({...x,read:true})));
     setUnread(0);
   };
