@@ -310,6 +310,7 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 <div id="root"><div style="height:100vh;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6B6963">Cargando Pretexto…</div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <script type="module">import*as d from'https://esm.sh/docx@8.5.0';window.__docx=d;window.dispatchEvent(new Event('docxReady'));</script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -1797,6 +1798,33 @@ const getRetoPorSemana=(mode='literatura')=>{const bank=mode==='guion'?SCREENPLA
 const getRetoById=(id,mode='literatura')=>{const bank=mode==='guion'?SCREENPLAY_WEEKLY_CHALLENGES:WEEKLY_CHALLENGES_64;return bank.find(r=>r.id===id)||bank[0];};
 </script>
 <script>
+// ── Sanitización de HTML de usuario (defensa contra stored XSS) ──
+// Todo el contenido creado en los editores contentEditable se guarda como
+// HTML crudo y se pinta con dangerouslySetInnerHTML. Esta función lo limpia
+// en el punto de render. Se aplica SIEMPRE al leer, de modo que cubre también
+// el contenido ya guardado sin limpiar en la base de datos.
+// Permite el marcador <!--screenplay:...--> que usa ScriptEditor (los
+// comentarios HTML no son ejecutables y DOMPurify los conserva por defecto).
+function sanitizeHtml(dirty){
+  if(dirty==null) return '';
+  var s=String(dirty);
+  if(window.DOMPurify&&typeof window.DOMPurify.sanitize==='function'){
+    return window.DOMPurify.sanitize(s,{
+      USE_PROFILES:{html:true},
+      ADD_ATTR:['style'],
+      FORBID_TAGS:['style','iframe','form','object','embed','link','base'],
+      FORBID_ATTR:['srcset']
+    });
+  }
+  // Fallback defensivo si DOMPurify no cargó: neutraliza lo más peligroso.
+  return s
+    .replace(/<\s*script/gi,'&lt;script')
+    .replace(/<\s*\/\s*script/gi,'&lt;/script')
+    .replace(/ on[a-z]+\s*=/gi,' data-x=')
+    .replace(/javascript:/gi,'');
+}
+if(typeof window!=='undefined') window.sanitizeHtml=sanitizeHtml;
+
 // Supabase client
 const _SB_URL = 'https://nzvzjyoavpqtjwkwgzch.supabase.co';
 const _SB_KEY = 'sb_publishable_MZita6X22w8fd8dAw9Cr_g_RSXTYACO';
@@ -4551,10 +4579,26 @@ const DB = {
     return data;
   },
   getReceivedChallenges: async (uid) => {
+    // Solo lo que todavía necesita una decisión: ni visto/guardado, ni ignorado,
+    // ni completado. Esto es lo que se muestra como aviso en el Dashboard.
     const { data, error } = await getSB().from('direct_challenges')
-      .select('*').eq('to_user_id', uid).eq('completed', false).order('created_at', { ascending: false });
+      .select('*').eq('to_user_id', uid).eq('completed', false).eq('declined', false).eq('seen', false)
+      .order('created_at', { ascending: false });
     if (error) throw error;
     return data || [];
+  },
+  getInboxReceivedChallenges: async (uid) => {
+    // Todo lo recibido que sigue accionable (visto/guardado o no), para el buzón —
+    // ahí se puede aceptar o ignorar aunque ya se hubiera guardado para después.
+    const { data, error } = await getSB().from('direct_challenges')
+      .select('*').eq('to_user_id', uid).eq('completed', false).eq('declined', false)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  declineChallenge: async (id) => {
+    const { error } = await getSB().from('direct_challenges').update({ declined: true, seen: true }).eq('id', id);
+    if (error) throw error;
   },
   getSentChallenges: async (uid) => {
     const { data, error } = await getSB().from('direct_challenges')
@@ -4683,27 +4727,46 @@ const DB = {
       .eq('chain_id', chainId).eq('chapter_number', chapterNumber).eq('status', 'pending');
     if (error) throw error;
   },
-  getMyNominations: async (uid) => {
+  _getMyNominationsRaw: async (uid, onlyUnseen) => {
     // Nominaciones específicas a mí
-    const { data: direct, error: e1 } = await getSB().from('chain_nominations')
-      .select('*')
+    let directQuery = getSB().from('chain_nominations').select('*')
       .eq('nominated_user_id', uid).eq('status', 'pending');
+    if (onlyUnseen) directQuery = directQuery.eq('seen', false);
+    const { data: direct, error: e1 } = await directQuery;
     if (e1) throw e1;
     // + nominaciones a cualquier grupo del que sea miembro
     const { data: myGroups } = await getSB().from('group_members').select('group_id').eq('user_id', uid);
     const groupIds = (myGroups || []).map(g => g.group_id);
     let viaGroup = [];
     if (groupIds.length) {
-      const { data: g, error: e2 } = await getSB().from('chain_nominations')
-        .select('*')
+      let groupQuery = getSB().from('chain_nominations').select('*')
         .in('nominated_group_id', groupIds).eq('status', 'pending');
+      if (onlyUnseen) groupQuery = groupQuery.eq('seen', false);
+      const { data: g, error: e2 } = await groupQuery;
       if (e2) throw e2;
       viaGroup = g || [];
     }
     const all = [...(direct || []), ...viaGroup];
-    const seen = new Set();
-    const unique = all.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; });
+    const seenIds = new Set();
+    const unique = all.filter(n => { if (seenIds.has(n.id)) return false; seenIds.add(n.id); return true; });
     return await DB._attachChains(unique);
+  },
+  getMyNominations: async (uid) => {
+    // Solo lo que todavía necesita una decisión — lo que se avisa en el Dashboard.
+    return await DB._getMyNominationsRaw(uid, true);
+  },
+  getMyInboxNominations: async (uid) => {
+    // Todo lo pendiente, visto/guardado o no — para el buzón, donde se puede
+    // aceptar o ignorar aunque ya se hubiera guardado para después.
+    return await DB._getMyNominationsRaw(uid, false);
+  },
+  saveNominationForLater: async (id) => {
+    const { error } = await getSB().from('chain_nominations').update({ seen: true }).eq('id', id);
+    if (error) throw error;
+  },
+  declineNomination: async (id) => {
+    const { error } = await getSB().from('chain_nominations').update({ status: 'declined' }).eq('id', id);
+    if (error) throw error;
   },
   getOpenNominations: async () => {
     // Nominaciones abiertas a cualquiera (para Biblioteca > Encadenados)
@@ -9572,7 +9635,7 @@ const AuthScreen=({onAuth})=>{
 };
 
 
-const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onDismissChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -9780,7 +9843,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
-      {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)}/>}
+      {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
@@ -9895,7 +9958,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       </div>
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
-        <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onDismiss={onDismissChallenge}/>
+        <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onSave={onSaveChallenge} onDecline={onDeclineChallenge}/>
         <SharedBackBanner user={user}/>
         <CollabInviteBanner user={user} onAccepted={onCollabAccepted}/>
         <DuetsHub user={user}/>
@@ -11693,7 +11756,7 @@ const SendChallengeModal=({user,onClose})=>{
 };
 
 /* ─── RECEIVED CHALLENGES BANNER ─────────────────── */
-const ReceivedChallengesBanner=({challenges,onAccept,onDismiss})=>{
+const ReceivedChallengesBanner=({challenges,onAccept,onSave,onDecline})=>{
   if(!challenges||challenges.length===0)return null;
   const ch=challenges[0]; // show most recent
   return(
@@ -11710,9 +11773,10 @@ const ReceivedChallengesBanner=({challenges,onAccept,onDismiss})=>{
           {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(255,255,255,0.1)',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:20,padding:'3px 10px',fontSize:11,color:'rgba(255,255,255,0.85)'}}>{w}</span>)}
         </div>
       </div>
-      <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
-        <button onClick={()=>onAccept(ch)} style={{background:'#F15A24',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Aceptar reto →</button>
-        <button onClick={()=>onDismiss(ch.id)} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'4px 14px',fontSize:11,color:'rgba(255,255,255,0.4)',cursor:'pointer'}}>Ignorar</button>
+      <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0,alignItems:'flex-end'}}>
+        <button onClick={()=>onAccept(ch)} style={{background:'#F15A24',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer',whiteSpace:'nowrap'}}>Hacerlo ahora →</button>
+        <button onClick={()=>onSave(ch.id)} title="Se queda en tu buzón de retos, puedes decidir más tarde" style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.25)',borderRadius:7,padding:'4px 12px',fontSize:11,color:'rgba(255,255,255,0.65)',cursor:'pointer',whiteSpace:'nowrap'}}>Guardar para después</button>
+        <button onClick={()=>onDecline(ch.id)} style={{background:'transparent',border:'none',padding:'2px 12px',fontSize:11,color:'rgba(255,255,255,0.35)',cursor:'pointer',whiteSpace:'nowrap'}}>Ignorar</button>
       </div>
     </div>
   );
@@ -12639,7 +12703,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
 
         {/* Text content */}
         <div style={{fontSize:15,lineHeight:1.75,color:TXT,fontFamily:`${FONTS[entry.font_idx||entry.fontIdx||0]?.value||'inherit'}`,marginBottom:24,borderTop:'0.5px solid '+BDR,paddingTop:20}}
-          dangerouslySetInnerHTML={{__html:entry.html||entry.plain?.replace(/\n/g,'<br>')||''}}/> 
+          dangerouslySetInnerHTML={{__html:sanitizeHtml(entry.html||entry.plain?.replace(/\n/g,'<br>')||'')}}/> 
 
         {/* Reactions row */}
         {(canInteract||reactions.length>0)&&(
@@ -12728,61 +12792,83 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
 
 
 /* ─── SENT CHALLENGES HISTORY ─────────────────────── */
-const ChallengesHistory=({user,onClose})=>{
+const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
   const [sent,setSent]=useState([]);
   const [received,setReceived]=useState([]);
+  const [receivedNoms,setReceivedNoms]=useState([]);
   const [tab,setTab]=useState('sent');
   const [loading,setLoading]=useState(true);
+  const [responding,setResponding]=useState(null);
 
   const [duets,setDuets]=useState([]);
   const [chains,setChains]=useState([]);
   const [openDuet,setOpenDuet]=useState(null);
   const [openChain,setOpenChain]=useState(null);
 
-  useEffect(()=>{
-    const load=async()=>{
-      setLoading(true);
-      try{
-        const [s,r,d,sentNoms]=await Promise.all([
-          DB.getSentChallenges(user.id),DB.getReceivedChallenges(user.id),
-          DB.getMyDuets(user.id),
-          DB.getMySentNominations(user.id),
-        ]);
-        setSent(s);setReceived(r);
-        // Duetos donde NO es mi turno (activos, esperando a la otra persona)
-        const isA=dt=>dt.user_a===user.id;
-        const waitingDuets=d.filter(dt=>['active','finish_proposed'].includes(dt.status)&&
-          !((dt.current_turn==='a'&&isA(dt))||(dt.current_turn==='b'&&!isA(dt))));
-        setDuets(waitingDuets);
-        setChains(sentNoms);
-      }catch(e){console.error(e);}
-      finally{setLoading(false);}
-    };
-    load();
-  },[]);
+  const load=async()=>{
+    setLoading(true);
+    try{
+      const [s,r,rn,d,sentNoms]=await Promise.all([
+        DB.getSentChallenges(user.id),DB.getInboxReceivedChallenges(user.id),
+        DB.getMyInboxNominations(user.id),
+        DB.getMyDuets(user.id),
+        DB.getMySentNominations(user.id),
+      ]);
+      setSent(s);setReceived(r);setReceivedNoms(rn);
+      // Duetos donde NO es mi turno (activos, esperando a la otra persona)
+      const isA=dt=>dt.user_a===user.id;
+      const waitingDuets=d.filter(dt=>['active','finish_proposed'].includes(dt.status)&&
+        !((dt.current_turn==='a'&&isA(dt))||(dt.current_turn==='b'&&!isA(dt))));
+      setDuets(waitingDuets);
+      setChains(sentNoms);
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
+  useEffect(()=>{load();},[]);
 
-  const items=tab==='sent'?sent:tab==='received'?received:[];
+  const declineChallenge=async id=>{
+    setResponding('ch_'+id);
+    try{await onDeclineChallenge(id);setReceived(prev=>prev.filter(c=>c.id!==id));}
+    catch(e){alert('Error: '+e.message);}
+    setResponding(null);
+  };
+  const saveNomForLater=async id=>{
+    setResponding('nom_'+id);
+    try{await DB.saveNominationForLater(id);}catch(e){}
+    setResponding(null);
+  };
+  const declineNom=async id=>{
+    setResponding('nom_'+id);
+    try{await DB.declineNomination(id);setReceivedNoms(prev=>prev.filter(n=>n.id!==id));}
+    catch(e){alert('Error: '+e.message);}
+    setResponding(null);
+  };
+
+  const items=tab==='sent'?sent:[];
+  const receivedCount=received.length+receivedNoms.length;
   const enCurso=duets.length+chains.length;
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:200,overflowY:'auto',display:'flex',justifyContent:'center',alignItems:'flex-start',padding:'24px 16px'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
       <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:640,display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 -8px 50px -8px rgba(10,27,61,0.25)'}}>
+        {openChain&&<ChainEditor user={user} chain={openChain} startingFresh={false} onClose={()=>setOpenChain(null)} onUpdate={load}/>}
         <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT}}>Retos contrareloj</div>
           <div style={{flex:1}}/><button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
         </div>
         <div style={{display:'flex',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,padding:'0 20px',flexShrink:0}}>
-          {[['sent','Enviados ('+sent.length+')'],['received','Recibidos ('+received.length+')'],['encurso','En curso'+(enCurso>0?' ('+enCurso+')':'')]].map(([t,l])=>(
+          {[['sent','Enviados ('+sent.length+')'],['received','Recibidos ('+receivedCount+')'],['encurso','En curso'+(enCurso>0?' ('+enCurso+')':'')]].map(([t,l])=>(
             <button key={t} onClick={()=>setTab(t)} style={{background:'transparent',border:'none',borderBottom:tab===t?'2px solid '+NAVY:'2px solid transparent',padding:'10px 14px',fontSize:13,fontWeight:tab===t?600:400,color:tab===t?TXT:MUTED,cursor:'pointer',marginBottom:-1,fontFamily:"'Source Sans 3',sans-serif"}}>{l}</button>
           ))}
         </div>
         <div style={{flex:1,overflowY:'auto',padding:'12px 16px',display:'flex',flexDirection:'column',gap:8}}>
           {loading&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Cargando…</div>}
-          {/* Tab: retos enviados / recibidos */}
-          {tab!=='encurso'&&!loading&&items.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay retos aquí todavía.</div>}
-          {tab!=='encurso'&&items.map(ch=>(
+
+          {/* Tab: Enviados */}
+          {tab==='sent'&&!loading&&items.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay retos aquí todavía.</div>}
+          {tab==='sent'&&items.map(ch=>(
             <div key={ch.id} style={{background:CARD_BG,border:'1px solid '+(ch.completed?'rgba(30,155,240,0.3)':BDR),borderRadius:11,padding:'12px 16px'}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:500,color:TXT}}>{tab==='sent'?'→ '+ch.from_name:'← '+ch.from_name}</div>
+                <div style={{fontSize:11,fontWeight:500,color:TXT}}>→ {ch.to_name||ch.to_username}</div>
                 <div style={{flex:1}}/>
                 {ch.completed&&<span style={{fontSize:10,color:'#1E9BF0',fontWeight:500,background:'rgba(30,155,240,0.1)',borderRadius:10,padding:'2px 8px'}}>✓ Completado</span>}
                 {!ch.completed&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Pendiente</span>}
@@ -12794,6 +12880,45 @@ const ChallengesHistory=({user,onClose})=>{
               <div style={{fontSize:10,color:FAINT,marginTop:6}}>{fmtDate(ch.created_at?.slice?.(0,10)||'')}</div>
             </div>
           ))}
+
+          {/* Tab: Recibidos — retos directos + encadenados, siempre se puede aceptar o ignorar */}
+          {tab==='received'&&(
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {!loading&&receivedCount===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay retos aquí todavía.</div>}
+              {received.map(ch=>(
+                <div key={ch.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:11,padding:'12px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                    <Icon name="timer" size={14} color={NARANJA}/>
+                    <div style={{fontSize:11,fontWeight:500,color:TXT}}>← {ch.from_name||ch.from_username}</div>
+                    {ch.seen&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Guardado</span>}
+                  </div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:8}}>
+                    {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
+                  </div>
+                  {ch.message&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"{ch.message}"</div>}
+                  <div style={{display:'flex',gap:8}}>
+                    <button onClick={()=>onAcceptChallenge(ch)} style={{background:NARANJA,border:'none',borderRadius:7,padding:'6px 14px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer'}}>Hacerlo ahora →</button>
+                    <button onClick={()=>declineChallenge(ch.id)} disabled={responding==='ch_'+ch.id} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'6px 12px',fontSize:11,color:MUTED,cursor:'pointer'}}>Ignorar</button>
+                  </div>
+                </div>
+              ))}
+              {receivedNoms.map(n=>(
+                <div key={n.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:11,padding:'12px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                    <Icon name="link" size={14} color="#1A6B8A"/>
+                    <div style={{fontSize:11,fontWeight:500,color:TXT}}>Continuar «{n.chains?.title}» · capítulo {n.chapter_number}</div>
+                    {n.seen&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Guardado</span>}
+                  </div>
+                  {n.chains?.last_sentence&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"…{n.chains.last_sentence}"</div>}
+                  <div style={{display:'flex',gap:8}}>
+                    <button onClick={()=>setOpenChain(n.chains)} style={{background:'#1A6B8A',border:'none',borderRadius:7,padding:'6px 14px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer'}}>Escribir capítulo →</button>
+                    <button onClick={()=>declineNom(n.id)} disabled={responding==='nom_'+n.id} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'6px 12px',fontSize:11,color:MUTED,cursor:'pointer'}}>Ignorar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Tab: En curso */}
           {tab==='encurso'&&(
             <div>
@@ -15060,7 +15185,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
             {/* Previous text (read-only) */}
             {duet.full_html
               ?<div style={{fontSize:16,lineHeight:1.85,color:'rgba(26,25,22,0.75)',fontFamily:'"Playfair Display",Georgia,serif',marginBottom:20,paddingBottom:20,borderBottom:myTurn?'1px dashed rgba(30,155,240,0.3)':'none'}}
-                dangerouslySetInnerHTML={{__html:duet.full_html}}/>
+                dangerouslySetInnerHTML={{__html:sanitizeHtml(duet.full_html)}}/>
               :<div style={{fontSize:13,color:FAINT,marginBottom:20,fontStyle:'italic'}}>El relato está en blanco. {myTurn?'Tú lo empiezas.':''}</div>}
 
             {/* My writing area (only if my turn) */}
@@ -15435,7 +15560,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
             <>
               {chain&&chapters.length>0&&(
                 <div style={{fontSize:16,lineHeight:1.85,color:'rgba(26,25,22,0.7)',fontFamily:'"Playfair Display",serif',marginBottom:20,paddingBottom:20,borderBottom:'1px dashed '+BDR,maxHeight:280,overflowY:'auto'}}
-                  dangerouslySetInnerHTML={{__html:chapters.map(c=>c.html).join('<hr style="opacity:0.15;margin:16px 0">')}}/>
+                  dangerouslySetInnerHTML={{__html:chapters.map(c=>sanitizeHtml(c.html)).join('<hr style="opacity:0.15;margin:16px 0">')}}/>
               )}
               {requiredStart&&(
                 <div style={{background:'rgba(241,90,36,0.06)',border:'1px solid rgba(241,90,36,0.25)',borderRadius:10,padding:'10px 14px',marginBottom:14}}>
@@ -15839,7 +15964,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
                 <span style={{fontSize:9,color:FAINT}}>· Parte {t.turn_number}</span>
               </div>
               <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:PROSE_TEXT}}
-                dangerouslySetInnerHTML={{__html:t.html}}/>
+                dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
             </div>
           ))}
 
@@ -15946,6 +16071,7 @@ const ChainsHub=({user})=>{
   const [myChains,setMyChains]=useState([]);
   const [openChain,setOpenChain]=useState(null); // {chain,fresh}
   const [loaded,setLoaded]=useState(false);
+  const [responding,setResponding]=useState(null);
 
   const load=async()=>{
     try{
@@ -15956,6 +16082,19 @@ const ChainsHub=({user})=>{
     setLoaded(true);
   };
   useEffect(()=>{load();},[user.id]);
+
+  const saveForLater=async id=>{
+    setResponding(id);
+    try{await DB.saveNominationForLater(id);setMyNoms(prev=>prev.filter(n=>n.id!==id));}
+    catch(e){alert('Error: '+e.message);}
+    setResponding(null);
+  };
+  const decline=async id=>{
+    setResponding(id);
+    try{await DB.declineNomination(id);setMyNoms(prev=>prev.filter(n=>n.id!==id));}
+    catch(e){alert('Error: '+e.message);}
+    setResponding(null);
+  };
 
   // Solo mostrar si hay nominaciones activas para mí (encadenados ya enviados van al buzón)
   if(!loaded||myNoms.length===0)return null;
@@ -15971,7 +16110,13 @@ const ChainsHub=({user})=>{
             <div key={n.id} style={{background:'rgba(241,90,36,0.06)',border:'1px solid rgba(241,90,36,0.22)',borderRadius:10,padding:'12px 14px'}}>
               <div style={{fontSize:13,color:TXT,marginBottom:6}}>Te han nominado para continuar <strong>«{n.chains?.title}»</strong> · capítulo {n.chapter_number}</div>
               {n.chains?.last_sentence&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"…{n.chains.last_sentence}"</div>}
-              <button onClick={()=>setOpenChain({chain:n.chains,fresh:false})} style={{background:NARANJA,border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Escribir capítulo →</button>
+              <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center'}}>
+                <button onClick={()=>setOpenChain({chain:n.chains,fresh:false})} style={{background:NARANJA,border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Escribir capítulo →</button>
+                <button onClick={()=>saveForLater(n.id)} disabled={responding===n.id} title="Se queda en tu buzón de retos, puedes decidir más tarde"
+                  style={{background:'transparent',border:'1px solid rgba(241,90,36,0.3)',borderRadius:7,padding:'5px 12px',fontSize:11,color:'#A8461A',cursor:'pointer'}}>Guardar para después</button>
+                <button onClick={()=>decline(n.id)} disabled={responding===n.id}
+                  style={{background:'transparent',border:'none',padding:'5px 8px',fontSize:11,color:MUTED,cursor:'pointer'}}>Ignorar</button>
+              </div>
             </div>
           ))}
 
@@ -16045,7 +16190,7 @@ const VoiceButton=({onTranscript,dark=false,size=16})=>{
       setSecs(0);
       setState('recording');
       timerRef.current=setInterval(()=>setSecs(s=>{
-        if(s>=120){stop();return s;} // límite 2 minutos
+        if(s>=180){stop();return s;} // límite 3 minutos (alineado con el tope del servidor)
         return s+1;
       }),1000);
     }catch(e){
@@ -16072,12 +16217,20 @@ const VoiceButton=({onTranscript,dark=false,size=16})=>{
         reader.onerror=rej;
         reader.readAsDataURL(blob);
       });
+      // Obtener el access token de sesión real (no el anon key público):
+      // la Edge Function valida este JWT para saber que hay un usuario logueado.
+      const { data:{ session } } = await getSB().auth.getSession();
+      if(!session?.access_token){
+        console.error('transcribe: sin sesión activa');
+        setState('error');
+        setTimeout(()=>setState('idle'),2000);
+        return;
+      }
       const resp=await fetch(TRANSCRIBE_URL,{
         method:'POST',
         headers:{
           'Content-Type':'application/json',
-          // Supabase requiere el anon key para llamar a Edge Functions
-          'Authorization':'Bearer '+_SB_KEY,
+          'Authorization':'Bearer '+session.access_token,
         },
         body:JSON.stringify({audio_base64:base64,mime_type:mimeType}),
       });
@@ -17356,7 +17509,8 @@ const App=()=>{
       onRefresh={()=>loadUserData(user.id)}
       receivedChallenges={receivedChallenges}
       onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
-      onDismissChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
+      onSaveChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
+      onDeclineChallenge={async(id)=>{await DB.declineChallenge(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
       onEditEntry={e=>setEditingEntry(e)}
       onChangeVisibility={async(id,vis)=>{try{await DB.updateVisibility(id,vis);setLibrary(prev=>prev.map(x=>x.id===id?{...x,visibility:vis}:x));}catch(e){console.error(e);}}}
       onChangeFolder={async(id,folder)=>{try{await DB.updateFolder(id,folder);setLibrary(prev=>prev.map(x=>x.id===id?{...x,folder}:x));}catch(e){console.error(e);}}}
