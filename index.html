@@ -9171,7 +9171,15 @@ const mergeLibs=(a,b)=>{const m=new Map();[...a,...b].forEach(e=>{if(!m.has(e.id
 const getGreeting=name=>{const h=new Date().getHours();const t=h<12?'Buenos días':h<21?'Buenas tardes':'Buenas noches';return t+', '+name+'.'};
 const getSubline=()=>{const d=new Date();const days=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];return days[d.getDay()].charAt(0).toUpperCase()+days[d.getDay()].slice(1)+', '+d.getDate()};
 const energyMsg=v=>{if(v<=2)return{msg:'A veces el cuerpo no acompaña. El check de hoy es de observación: sin inventar nada.',sug:'check'};if(v<=4)return{msg:'Energía baja pero estás aquí. El ejercicio se adapta: algo suave para soltar la mano.',sug:'check'};if(v<=6)return{msg:'Energía media. Hay un ejercicio de transformación esperándote.',sug:'check'};if(v<=8)return{msg:'Buena energía. El reto de la semana o tu proyecto te están esperando.',sug:'reto'};return{msg:'¡A tope! El mejor momento para avanzar sin límites en tu proyecto.',sug:'proyecto'}};
-const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
+// Suma/resta días a una fecha 'YYYY-MM-DD' sin líos de zona horaria ni horario
+// de verano (se ancla al mediodía UTC, que nunca cambia de día al convertir).
+const _shiftDay=(str,n)=>{const d=new Date(str+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
+
+// `bridgedDays` = días que YA se taparon con un comodín en su momento. Es la
+// pieza que faltaba: sin ella, el hueco sigue en el historial para siempre y se
+// volvía a cobrar un comodín en CADA arranque de la app (3 → 2 → 1 → 0), en vez
+// de una sola vez. Un hueco ya pagado se puentea gratis; solo cuestan los nuevos.
+const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridgedDays=[])=>{
   // totalWords = sum of words_added across all entries
   // words_added stores the INCREMENT per session (new words only)
   // For old entries without words_added, fall back to word_count
@@ -9185,15 +9193,24 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
   const activeDayEntries=library.filter(e=>effectiveWc(e)>=100);
   const dates=[...new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
   let streak=0,wildcardCount=wildcards||0,wildcardUsed=0;
+  const bridged=new Set(bridgedDays||[]);
+  const newlyBridged=[];
   const ref=new Date();ref.setHours(0,0,0,0);
+  let refStr=today();
   for(const d of dates){
     const dt=new Date(d);dt.setHours(0,0,0,0);
     const diff=Math.round((ref-dt)/(864e5));
-    if(diff<=1){streak++;ref.setTime(dt.getTime());}
-    else if(diff===2&&wildcardCount>0){
-      // Hueco de exactamente 1 día — gastar un comodín para bridgearlo
-      streak++;wildcardCount--;wildcardUsed++;
-      ref.setTime(dt.getTime());
+    if(diff<=1){streak++;ref.setTime(dt.getTime());refStr=d;}
+    else if(diff===2){
+      // Hueco de exactamente 1 día: el día que falta es el anterior al último activo.
+      const missing=_shiftDay(refStr,-1);
+      if(bridged.has(missing)){
+        // Ya se pagó con un comodín en su día — se puentea gratis, no se recobra.
+        streak++;ref.setTime(dt.getTime());refStr=d;
+      }else if(wildcardCount>0){
+        streak++;wildcardCount--;wildcardUsed++;newlyBridged.push(missing);
+        ref.setTime(dt.getTime());refStr=d;
+      }else break;
     }else break;
   }
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
@@ -9210,7 +9227,7 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0)=>{
   const weekWords=weekEntries.reduce((s,e)=>{const wa=e.words_added;return s+(wa!=null?wa:(e.word_count||e.wordCount||0));},0);
   const weekSessions=weekEntries.length;
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
-  return{totalWords,streak,thisWeek,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newMilestone,todayActive};
+  return{totalWords,streak,thisWeek,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newlyBridged,newMilestone,todayActive};
 };
 
 // Hash simple y determinista (mismo input → mismo resultado siempre) para elegir
@@ -9635,7 +9652,7 @@ const AuthScreen=({onAuth})=>{
 };
 
 
-const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -9675,9 +9692,16 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         // El dueño ya tiene acceso de sobra: abrir el texto directamente.
         const entry=await DB.getEntryById(n.entity_id);
         if(entry)setReadingEntry(entry);
+      }else if(n.type==='duet_your_turn'||n.type==='chain_nomination'
+               ||n.type==='collective_your_turn'||n.type==='collective_update'){
+        // Estos viven en los widgets del propio Dashboard (DuetsHub/ChainsHub).
+        // Antes no se hacía nada aquí, dando por supuesto que ya estarían
+        // visibles — pero los hubs solo cargaban al montarse, así que lo normal
+        // era que NO estuvieran. Forzamos su recarga y nos quedamos en el
+        // Dashboard, donde el widget aparece ya actualizado.
+        onNewChallenge();
+        window.scrollTo({top:0,behavior:'smooth'});
       }
-      // duet_your_turn y chain_nomination: ya están visibles en los widgets
-      // DuetsHub/ChainsHub del propio Dashboard, no hace falta navegar a ningún sitio.
     }catch(e){console.error('notification navigate:',e);}
   };
   const [showSendDuet,setShowSendDuet]=useState(false);
@@ -9696,7 +9720,15 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
 
   const [wildcards,setWildcards]=useState(user?.wildcards||0);
   const [wildcard_milestone,setWildcardMilestone]=useState(user?.wildcard_milestone||0);
-  const stats=useMemo(()=>computeStats(library,reflections,wildcards,wildcard_milestone),[library,reflections,wildcards,wildcard_milestone]);
+  // Días ya tapados con un comodín. Sin este registro, el hueco seguía en el
+  // historial y se cobraba otro comodín en cada arranque de la app.
+  const [wildcardDays,setWildcardDays]=useState(()=>{
+    const raw=user?.wildcard_days;
+    if(Array.isArray(raw))return raw;
+    if(typeof raw==='string'){try{const p=JSON.parse(raw);return Array.isArray(p)?p:[];}catch(e){return[];}}
+    return[];
+  });
+  const stats=useMemo(()=>computeStats(library,reflections,wildcards,wildcard_milestone,wildcardDays),[library,reflections,wildcards,wildcard_milestone,wildcardDays]);
   // Actualizar comodines cuando la racha los gana o gasta
   const wildcardUpdateRef=useRef(null);
   useEffect(()=>{
@@ -9705,14 +9737,21 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     wildcardUpdateRef.current=key;
     let newWc=wildcards;
     let newMilestone=wildcard_milestone;
-    if(stats.wildcardUsed>0){newWc=Math.max(0,newWc-stats.wildcardUsed);}
+    let newDays=wildcardDays;
+    if(stats.wildcardUsed>0){
+      newWc=Math.max(0,newWc-stats.wildcardUsed);
+      // Apuntar qué días se han tapado para no volver a cobrarlos nunca más.
+      newDays=[...new Set([...wildcardDays,...(stats.newlyBridged||[])])];
+    }
     if(stats.newMilestone>0&&stats.newMilestone>wildcard_milestone&&stats.todayActive){
       newWc++;newMilestone=stats.newMilestone;
     }
-    if(newWc!==wildcards||newMilestone!==wildcard_milestone){
+    const daysChanged=newDays.length!==wildcardDays.length;
+    if(newWc!==wildcards||newMilestone!==wildcard_milestone||daysChanged){
       setWildcards(newWc);
       setWildcardMilestone(newMilestone);
-      getSB().from('profiles').update({wildcards:newWc,wildcard_milestone:newMilestone}).eq('id',user.id)
+      if(daysChanged)setWildcardDays(newDays);
+      getSB().from('profiles').update({wildcards:newWc,wildcard_milestone:newMilestone,wildcard_days:newDays}).eq('id',user.id)
         .then(r=>{ if(r?.error) console.error('wildcard update:',r.error); });
     }
   },[stats.streak,stats.wildcardUsed,stats.newMilestone]);
@@ -9959,10 +9998,21 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onSave={onSaveChallenge} onDecline={onDeclineChallenge}/>
-        <SharedBackBanner user={user}/>
-        <CollabInviteBanner user={user} onAccepted={onCollabAccepted}/>
-        <DuetsHub user={user}/>
-        <ChainsHub user={user}/>
+        <SharedBackBanner user={user} refreshKey={refreshKey}/>
+        <CollabInviteBanner user={user} onAccepted={onCollabAccepted} refreshKey={refreshKey}/>
+        <CollectivesHub user={user} refreshKey={refreshKey}
+          onOpen={async c=>{
+            // Única vía para volver a un colectivo ya empezado o a uno al que te
+            // han invitado. Antes solo se entraba justo tras crearlo (onCreated),
+            // así que al cerrar el editor la función quedaba inaccesible.
+            try{
+              const detail=await DB.getCollectiveDetail(c.id);
+              setCollectiveDetail(detail);
+            }catch(e){console.error('abrir colectivo:',e);}
+          }}
+          onNew={()=>setShowCollectives(true)}/>
+        <DuetsHub user={user} refreshKey={refreshKey}/>
+        <ChainsHub user={user} refreshKey={refreshKey}/>
         <FeedbackWidget user={user} library={library}/>
         <ShareNudge user={user} library={library}/>
         {(isOffline||pendingCount>0)&&<div style={{background:'rgba(241,90,36,0.06)',border:'0.5px solid rgba(241,90,36,0.2)',borderRadius:10,padding:'10px 14px',marginBottom:12,display:'flex',alignItems:'center',gap:8,fontSize:12,color:NARANJA}}>
@@ -10586,20 +10636,25 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
 };
 
 /* ─── SESSION COMPLETE (pantalla de enhorabuena) ──── */
-const SessionCompleteModal=({summary,onClose})=>{
+const SessionCompleteModal=({summary,onClose,variant='session',note=''})=>{
   if(!summary)return null;
   const{wordsAdded=0,elapsed=0,streak=0}=summary;
   const sm=streakMessage(streak);
+  // variant='turn' → cierre de un turno en dueto/encadenado/colectivo: no es el
+  // final de una sesión propia, así que se celebra la aportación sin repetir la
+  // racha (que ya se ve en el Dashboard).
+  const isTurn=variant==='turn';
   return(
-    <div style={{height:'var(--app-height,100dvh)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:PAGE_BG,padding:32,position:'relative',overflow:'hidden'}}>
+    <div style={{height:'var(--app-height,100dvh)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:PAGE_BG,padding:32,overflow:'hidden',...(isTurn?{position:'fixed',inset:0,zIndex:400}:{position:'relative'})}}>
       <Signo char="✦" size={220} top={-40} left={-30} color="azul"/>
       <Signo char="✱" size={170} bottom={-30} right={-20} color="naranja"/>
       <div className="fu" style={{position:'relative',zIndex:1,display:'flex',flexDirection:'column',alignItems:'center',maxWidth:360,width:'100%',textAlign:'center'}}>
         <div style={{width:60,height:60,borderRadius:18,background:NAVY,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:20}}>
           <Icon name="check" size={28} color="#fff"/>
         </div>
-        <div style={{fontSize:12,fontWeight:500,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>Sesión guardada</div>
-        <div style={{fontSize:26,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',marginBottom:26}}>¡Enhorabuena!</div>
+        <div style={{fontSize:12,fontWeight:500,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>{isTurn?'Turno guardado':'Sesión guardada'}</div>
+        <div style={{fontSize:26,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',marginBottom:isTurn?14:26}}>{isTurn?'¡Turno completado!':'¡Enhorabuena!'}</div>
+        {isTurn&&<div style={{fontSize:13,color:MUTED,lineHeight:1.55,marginBottom:20,maxWidth:300}}>Con este turno has añadido esto a tu marca de hoy.</div>}
 
         <div style={{display:'flex',alignItems:'center',gap:26,marginBottom:24,background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:14,padding:'16px 28px',boxShadow:'0 12px 40px -18px rgba(10,27,61,0.2)'}}>
           <div>
@@ -10613,15 +10668,17 @@ const SessionCompleteModal=({summary,onClose})=>{
           </div>
         </div>
 
-        <div style={{display:'flex',alignItems:'center',gap:12,background:sm.color+'0E',border:'0.5px solid '+sm.color+'28',borderRadius:12,padding:'13px 18px',marginBottom:28,width:'100%',textAlign:'left'}}>
+        {!isTurn&&<div style={{display:'flex',alignItems:'center',gap:12,background:sm.color+'0E',border:'0.5px solid '+sm.color+'28',borderRadius:12,padding:'13px 18px',marginBottom:28,width:'100%',textAlign:'left'}}>
           <Icon name="fire" size={28} color={streak>0?NARANJA:FAINT}/>
           <div>
             <div style={{fontSize:15,fontWeight:700,color:TXT}}>{streak} día{streak!==1?'s':''} de racha</div>
             <div style={{fontSize:11.5,color:MUTED,display:'flex',alignItems:'center',gap:4,marginTop:2}}><Icon name={sm.icon} size={12} color={sm.color}/>{sm.text}</div>
           </div>
-        </div>
+        </div>}
 
-        <Btn variant="primary" onClick={onClose} style={{height:44,fontSize:14,paddingLeft:30,paddingRight:30}}>Ir al Dashboard →</Btn>
+        {isTurn&&note&&<div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:24,maxWidth:320}}>{note}</div>}
+
+        <Btn variant="primary" onClick={onClose} style={{height:44,fontSize:14,paddingLeft:30,paddingRight:30}}>{isTurn?'Volver →':'Ir al Dashboard →'}</Btn>
       </div>
     </div>
   );
@@ -11441,7 +11498,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
       await DB.shareBackChallenge(challenge.id);
       await DB.updateVisibility(publishedEntry.id,'amigos');
     }catch(e){console.error(e);}
-    onFinish(publishedEntry?.id);
+    onFinish(publishedEntry?.id,{wordsAdded:publishedEntry?.word_count||0,elapsed:publishedEntry?.elapsed||0});
   };
 
   if(published)return(
@@ -11453,7 +11510,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
         {words.map(w=><span key={w} style={{background:'rgba(30,155,240,0.1)',border:'0.5px solid rgba(30,155,240,0.3)',borderRadius:20,padding:'3px 12px',fontSize:12,color:'#1E9BF0',fontWeight:500,textDecoration:'line-through'}}>✓ {w}</span>)}
       </div>
       <div style={{display:'flex',gap:10,flexWrap:'wrap',justifyContent:'center'}}>
-        <Btn variant="ghost" onClick={()=>onFinish(publishedEntry?.id)}>Volver al dashboard →</Btn>
+        <Btn variant="ghost" onClick={()=>onFinish(publishedEntry?.id,{wordsAdded:publishedEntry?.word_count||0,elapsed:publishedEntry?.elapsed||0})}>Volver al dashboard →</Btn>
         {challenge&&<Btn variant="primary" onClick={returnStory} disabled={sharingBack}>
           {sharingBack?'Enviando…':'Devolver relato →'}
         </Btn>}
@@ -11784,12 +11841,12 @@ const ReceivedChallengesBanner=({challenges,onAccept,onSave,onDecline})=>{
 
 
 /* ─── SHARED BACK BANNER (tu amigo terminó y devolvió el reto) ────── */
-const SharedBackBanner=({user})=>{
+const SharedBackBanner=({user,refreshKey=0})=>{
   const [items,setItems]=useState([]);
   const [readingModal,setReadingModal]=useState(null);
 
   const load=()=>{DB.getCompletedSentChallenges(user.id).then(setItems).catch(()=>{});};
-  useEffect(()=>{load();},[user.id]);
+  useEffect(()=>{load();},[user.id,refreshKey]);
 
   if(!items.length)return null;
   const ch=items[0];
@@ -11832,7 +11889,7 @@ const SharedBackBanner=({user})=>{
 
 
 /* ─── COLLAB INVITE BANNER (te han invitado a escribir un texto juntos) ── */
-const CollabInviteBanner=({user,onAccepted})=>{
+const CollabInviteBanner=({user,onAccepted,refreshKey=0})=>{
   const [invites,setInvites]=useState([]);
   const [responding,setResponding]=useState(null);
 
@@ -11854,7 +11911,7 @@ const CollabInviteBanner=({user,onAccepted})=>{
       setInvites(raw.map(i=>({...i,entryTitle:entryMap[i.entry_id]?.title,ownerName:ownerMap[i.owner_id]?.name||ownerMap[i.owner_id]?.username})));
     }catch(e){console.error('CollabInviteBanner load:',e);}
   };
-  useEffect(()=>{load();},[user.id]);
+  useEffect(()=>{load();},[user.id,refreshKey]);
 
   if(!invites.length)return null;
   const inv=invites[0];
@@ -15034,7 +15091,14 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
     DB.getDuetTurns(duet.id).then(t=>{setTurns(t);setLoading(false);}).catch(e=>{console.error(e);setLoading(false);});
   },[duet.id]);
 
+  // El tiempo del turno se cuenta desde la primera tecla, no desde que se abre
+  // el editor: si alguien lo deja abierto sin escribir, no infla su marca.
+  const startedAtRef=useRef(null);
+  const turnSecs=()=>startedAtRef.current?Math.max(1,Math.round((Date.now()-startedAtRef.current)/1000)):0;
+  const [turnDone,setTurnDone]=useState(null);
+
   const handleInput=()=>{
+    if(!startedAtRef.current)startedAtRef.current=Date.now();
     const txt=edRef.current?.innerText||'';
     setPlainTxt(txt);
     setWc(txt.trim()?txt.trim().split(/\s+/).filter(Boolean).length:0);
@@ -15047,6 +15111,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
     setSaving(true);
     try{
       const html=edRef.current?.innerHTML||'';
+      const secs=turnSecs();
       await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
       // Save to entries so it counts for daily check / stats
       try{await DB.upsertEntry({
@@ -15055,7 +15120,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         title:duet.title+' (turno '+(duet.turn_count+1)+')',
         session_label:'A dos manos con '+(isA?duet.name_b:duet.name_a),
         html,plain:plainTxt,word_count:wc,words_added:wc,
-        elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
+        elapsed:secs,font_idx:0,editor_size:17,align_dir:'left',
         date:new Date().toISOString().slice(0,10),ts:Date.now(),
         visibility:'ejercicio',
       });}catch(e){console.error('duet entry:',e);}
@@ -15068,7 +15133,8 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
       };
       if(propose){patch.status='finish_proposed';patch.finish_proposed_by=user.id;}
       await DB.updateDuet(duet.id,patch);
-      onUpdate();onClose();
+      onUpdate();
+      setTurnDone({wordsAdded:wc,elapsed:secs});
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
 
@@ -15085,7 +15151,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
           title:duet.title+' (turno final)',
           session_label:'A dos manos con '+(isA?duet.name_b:duet.name_a),
           html,plain:plainTxt,word_count:wc,words_added:wc,
-          elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
+          elapsed:turnSecs(),font_idx:0,editor_size:17,align_dir:'left',
           date:new Date().toISOString().slice(0,10),ts:Date.now(),
           visibility:'ejercicio',
         });}catch(e){}
@@ -15134,6 +15200,10 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
       onUpdate();onClose();
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
+
+  if(turnDone)return<SessionCompleteModal summary={turnDone} variant="turn"
+    note={'Le toca a '+otherName+'. Te avisaremos cuando responda.'}
+    onClose={()=>{setTurnDone(null);onClose();}}/>;
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>
@@ -15231,7 +15301,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
 };
 
 /* ─── DUETS HUB (dashboard widget) ──────────────────────────── */
-const DuetsHub=({user})=>{
+const DuetsHub=({user,refreshKey=0})=>{
   const [duets,setDuets]=useState([]);
   const [openDuet,setOpenDuet]=useState(null);
   const [loaded,setLoaded]=useState(false);
@@ -15240,7 +15310,7 @@ const DuetsHub=({user})=>{
     try{const d=await DB.getMyDuets(user.id);setDuets(d);}catch(e){console.error(e);}
     setLoaded(true);
   };
-  useEffect(()=>{load();},[user.id]);
+  useEffect(()=>{load();},[user.id,refreshKey]);
 
   const isA=d=>d.user_a===user.id;
   const invitations=duets.filter(d=>d.status==='pending'&&!isA(d));
@@ -15400,6 +15470,10 @@ const ShareNudge=({user,library})=>{
 
 /* ─── CHAIN EDITOR (Encadenados) ───────────────────────────── */
 const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
+  // Tiempo del capítulo, contado desde la primera tecla (ver DuetEditor).
+  const startedAtRef=useRef(null);
+  const turnSecs=()=>startedAtRef.current?Math.max(1,Math.round((Date.now()-startedAtRef.current)/1000)):0;
+  const [turnStats,setTurnStats]=useState(null);
   const insertVoiceChain=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
   // chain=null + startingFresh=true → primer capítulo de una cadena nueva
   // chain=objeto → continuar escribiendo el siguiente capítulo de una cadena existente
@@ -15446,6 +15520,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
   },[nomQuery,nominees]);
 
   const handleInput=()=>{
+    if(!startedAtRef.current)startedAtRef.current=Date.now();
     const txt=edRef.current?.innerText||'';
     setPlainTxt(txt);
     setWc(txt.trim()?txt.trim().split(/\s+/).filter(Boolean).length:0);
@@ -15516,12 +15591,13 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
           title:(chainTitle.trim()||chain?.title||'Relato encadenado')+' — cap. '+newChapterNumber,
           session_label:'Encadenado · capítulo '+newChapterNumber,
           html,plain:plainTxt,word_count:wc,words_added:wc,
-          elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
+          elapsed:turnSecs(),font_idx:0,editor_size:17,align_dir:'left',
           date:new Date().toISOString().slice(0,10),ts:Date.now(),
           visibility:'abierto',
         });
       }catch(e){console.error('chain entry:',e);}
 
+      setTurnStats({wordsAdded:wc,elapsed:turnSecs()});
       setStep('done');
       onUpdate&&onUpdate();
     }catch(e){
@@ -15637,6 +15713,18 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
         <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',textAlign:'center',padding:24}}>
           <div style={{fontSize:42,marginBottom:14}}>✓</div>
           <div style={{fontFamily:'"Playfair Display",serif',fontSize:20,fontWeight:700,color:TXT,marginBottom:8}}>¡Capítulo publicado!</div>
+          {turnStats&&<div style={{display:'flex',alignItems:'center',gap:22,marginBottom:16,background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:12,padding:'12px 22px'}}>
+            <div>
+              <div style={{fontSize:19,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>{(turnStats.wordsAdded||0).toLocaleString()}</div>
+              <div style={{fontSize:10.5,color:MUTED}}>palabras</div>
+            </div>
+            <div style={{width:1,height:26,background:BDR}}/>
+            <div>
+              <div style={{fontSize:19,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>{fmt(turnStats.elapsed||0)}</div>
+              <div style={{fontSize:10.5,color:MUTED}}>escritos</div>
+            </div>
+          </div>}
+          {turnStats&&<div style={{fontSize:12.5,color:MUTED,marginBottom:14}}>Se han sumado a tu marca de hoy.</div>}
           <div style={{fontSize:13,color:MUTED,marginBottom:24,maxWidth:340,lineHeight:1.5}}>
             {openNomination?'Cualquiera podrá reclamar el siguiente capítulo desde la Biblioteca.':'Hemos avisado a la persona nominada para que continúe el relato.'}
           </div>
@@ -15860,6 +15948,10 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
 /* ── 2. CollectiveEditor ──────────────────────────────────────── */
 const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
   const [col,setCol]=useState(initialCol);
+  // Tiempo de la parte, desde la primera tecla (ver DuetEditor).
+  const startedAtRef=useRef(null);
+  const turnSecs=()=>startedAtRef.current?Math.max(1,Math.round((Date.now()-startedAtRef.current)/1000)):0;
+  const [turnDone,setTurnDone]=useState(null);
   const edRef=useRef();
   const [wc,setWc]=useState(0);
   const [submitting,setSubmitting]=useState(false);
@@ -15874,7 +15966,10 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
   const nextMember=members.find(m=>m.turn_order===nextOrder);
   const myVote=myMember?.voted_finish||false;
 
-  const handleInput=e=>setWc((e.currentTarget.innerText||'').trim().split(/\s+/).filter(Boolean).length);
+  const handleInput=e=>{
+    if(!startedAtRef.current)startedAtRef.current=Date.now();
+    setWc((e.currentTarget.innerText||'').trim().split(/\s+/).filter(Boolean).length);
+  };
 
   const submit=async()=>{
     const el=edRef.current;
@@ -15889,10 +15984,30 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
         word_count:wc,turn_number:col.turn_count+1,
       };
       await DB.submitCollectiveTurn(col.id,turn,nextMember?.user_id||null,col.turn_count+1);
+      // Registrar mi parte como entrada propia para que cuente en MI racha y MIS
+      // palabras. Antes el colectivo no guardaba nada en `entries`, así que
+      // escribir en un relato colectivo no sumaba absolutamente nada a las
+      // estadísticas. visibility:'ejercicio' → no aparece en Mis textos (el
+      // relato es del grupo, no mío), pero sí cuenta como escritura del día.
+      const secs=turnSecs();
+      try{
+        await DB.upsertEntry({
+          id:'collective_'+col.id+'_t'+(col.turn_count+1)+'_'+user.id.slice(-4),
+          user_id:user.id,sk:'colectivo',
+          title:(col.title||'Relato colectivo')+' (parte '+(col.turn_count+1)+')',
+          session_label:'Relato colectivo · '+(col.title||''),
+          html:turn.html,plain:turn.plain,word_count:wc,words_added:wc,
+          elapsed:secs,font_idx:0,editor_size:17,align_dir:'left',
+          date:new Date().toISOString().slice(0,10),ts:Date.now(),
+          visibility:'ejercicio',
+        });
+      }catch(e){console.error('collective entry:',e);}
       // Refresh
       const updated=await DB.getCollectiveDetail(col.id);
       setCol(updated);onUpdate&&onUpdate(updated);
       if(el)el.innerHTML='';setWc(0);
+      startedAtRef.current=null;
+      setTurnDone({wordsAdded:wc,elapsed:secs});
     }catch(e){alert('Error: '+e.message);}
     setSubmitting(false);
   };
@@ -15907,6 +16022,10 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
     }catch(e){}
     setVotingFinish(false);
   };
+
+  if(turnDone)return<SessionCompleteModal summary={turnDone} variant="turn"
+    note={'Tu parte ya forma parte del relato. Avisaremos a quien le toca continuar.'}
+    onClose={()=>{setTurnDone(null);onClose&&onClose();}}/>;
 
   return(
     <div style={{position:'fixed',inset:0,zIndex:180,background:PAGE_BG,display:'flex',flexDirection:'column'}}>
@@ -16014,13 +16133,13 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
 };
 
 /* ── 3. CollectivesHub ────────────────────────────────────────── */
-const CollectivesHub=({user,onOpen,onNew})=>{
+const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
   const [items,setItems]=useState([]);
   const [loading,setLoading]=useState(true);
 
   useEffect(()=>{
     DB.getMyCollectives(user.id).then(setItems).catch(()=>{}).finally(()=>setLoading(false));
-  },[user.id]);
+  },[user.id,refreshKey]);
 
   if(loading)return null;
 
@@ -16066,7 +16185,7 @@ const CollectivesHub=({user,onOpen,onNew})=>{
 };
 
 
-const ChainsHub=({user})=>{
+const ChainsHub=({user,refreshKey=0})=>{
   const [myNoms,setMyNoms]=useState([]);
   const [myChains,setMyChains]=useState([]);
   const [openChain,setOpenChain]=useState(null); // {chain,fresh}
@@ -16081,7 +16200,7 @@ const ChainsHub=({user})=>{
     }catch(e){console.error(e);}
     setLoaded(true);
   };
-  useEffect(()=>{load();},[user.id]);
+  useEffect(()=>{load();},[user.id,refreshKey]);
 
   const saveForLater=async id=>{
     setResponding(id);
@@ -16475,6 +16594,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
   const [loaded,setLoaded]=useState(false);
 
   const seenChallengeIdsRef=useRef(new Set());
+  const firstLoadDoneRef=useRef(false);
 
   const loadCollabItems=async()=>{
     // No hay trigger SQL todavía que meta esto en `notifications`, así que se
@@ -16528,17 +16648,23 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
       const merged=[...data,...collabItems].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
       setItems(merged);
       setUnread(merged.filter(n=>!n.read).length);
-      // Detectar retos nuevos para avisar a App sin recargar toda la página
+      // Detectar novedades ACCIONABLES para avisar a App sin recargar la página.
+      // Antes solo miraba 'challenge_received', por eso un turno de dueto o una
+      // nominación de encadenado no refrescaban nada y no aparecían en el
+      // Dashboard hasta reiniciar la app.
       if(onNewChallenge){
-        const newChallengeNotifs=data.filter(n=>
-          n.type==='challenge_received'&&!seenChallengeIdsRef.current.has(n.id)
-        );
-        if(newChallengeNotifs.length>0&&seenChallengeIdsRef.current.size>0){
-          // Solo avisar si ya teníamos datos previos (evitar falso positivo en carga inicial)
+        const ACTIONABLE=['challenge_received','duet_your_turn','chain_nomination',
+                          'collective_your_turn','collective_update'];
+        const actionable=data.filter(n=>ACTIONABLE.includes(n.type));
+        const nuevos=actionable.filter(n=>!seenChallengeIdsRef.current.has(n.id));
+        // `firstLoadDoneRef` sustituye al antiguo guard `size>0`, que tenía un
+        // efecto colateral: si el usuario NUNCA había recibido un aviso, el set
+        // estaba vacío y el primero de todos no disparaba el refresco.
+        if(nuevos.length>0&&firstLoadDoneRef.current){
           onNewChallenge();
         }
-        // Actualizar el set de IDs conocidos
-        data.filter(n=>n.type==='challenge_received').forEach(n=>seenChallengeIdsRef.current.add(n.id));
+        actionable.forEach(n=>seenChallengeIdsRef.current.add(n.id));
+        firstLoadDoneRef.current=true;
       }
     }catch(e){console.error('notifications:',e);}
     setLoaded(true);
@@ -16546,7 +16672,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
   useEffect(()=>{
     load();
-    const t=setInterval(load,60000); // refresco cada minuto mientras la app está abierta
+    const t=setInterval(load,30000); // refresco cada 30s mientras la app está abierta
     return()=>clearInterval(t);
   },[user.id]);
 
@@ -17126,6 +17252,14 @@ const App=()=>{
   // segundo plano (cambiar de pestaña, minimizar, volver de otra app en móvil…).
   // Sin esto, si alguien más edita un texto compartido mientras tienes la PWA
   // abierta, no te enteras hasta cerrarla y volver a abrirla del todo.
+  // Contador que se incrementa cada vez que hay que refrescar los widgets que
+  // cargan sus propios datos (DuetsHub, ChainsHub, SharedBackBanner,
+  // CollabInviteBanner). Esos componentes hacían useEffect(...,[user.id]), o sea
+  // solo al montarse, y loadUserData NO toca duetos/cadenas: por eso un dueto o
+  // un encadenado nuevo no aparecía hasta reiniciar la app del todo.
+  const [dataVersion,setDataVersion]=useState(0);
+  const bumpDataVersion=useCallback(()=>setDataVersion(v=>v+1),[]);
+
   const lastFocusRefreshRef=useRef(0);
   useEffect(()=>{
     const onVisible=()=>{
@@ -17134,6 +17268,7 @@ const App=()=>{
       if(now-lastFocusRefreshRef.current<8000)return; // evita ráfagas si cambia de pestaña varias veces seguidas
       lastFocusRefreshRef.current=now;
       loadUserData(user.id);
+      setDataVersion(v=>v+1); // ← también recargar duetos/cadenas/invitaciones
     };
     document.addEventListener('visibilitychange',onVisible);
     window.addEventListener('focus',onVisible);
@@ -17345,7 +17480,7 @@ const App=()=>{
     // para que racha, estadísticas y palabras aparezcan actualizados sin recargar
     const fresh=await loadUserData(user.id).catch(()=>null);
     if(ref&&user){
-      const freshStats=fresh?computeStats(fresh.lib,fresh.refs,user?.wildcards||0,user?.wildcard_milestone||0):null;
+      const freshStats=fresh?computeStats(fresh.lib,fresh.refs,user?.wildcards||0,user?.wildcard_milestone||0,Array.isArray(user?.wildcard_days)?user.wildcard_days:[]):null;
       setSessionSummary({
         wordsAdded:ref.wordsAdded??ref.word_count??ref.wordCount??0,
         elapsed:ref.elapsed||0,
@@ -17470,9 +17605,21 @@ const App=()=>{
 
   if(view==='cuento')return<CuentoContrareloj user={user} saveEntry={saveEntry} writingMode={cuentoWritingMode}
     challenge={cuentoChallenge}
-    onFinish={async(entryId)=>{
+    onFinish={async(entryId,stats)=>{
       if(cuentoChallenge){await DB.markChallengeCompleted(cuentoChallenge.id,entryId).catch(()=>{});}
-      setCuentoChallenge(null);setView('dashboard');loadUserData(user.id);
+      setCuentoChallenge(null);
+      // El Contrarreloj no pasa por PostSession (no hay revisión ni visibilidad
+      // que elegir), pero es una sesión de escritura como cualquier otra: debe
+      // cerrar con la pantalla de "¡Enhorabuena!" y racha actualizada, no
+      // saltar directo al Dashboard como hacía antes.
+      const fresh=await loadUserData(user.id).catch(()=>null);
+      const freshStats=fresh?computeStats(fresh.lib,fresh.refs,user?.wildcards||0,user?.wildcard_milestone||0,Array.isArray(user?.wildcard_days)?user.wildcard_days:[]):null;
+      setSessionSummary({
+        wordsAdded:stats?.wordsAdded||0,
+        elapsed:stats?.elapsed||0,
+        streak:freshStats?.streak??0,
+      });
+      setView('sessionComplete');
     }}
     onBack={()=>{setCuentoChallenge(null);setView(cuentoChallenge?'dashboard':'briefing');}}/>;
 
@@ -17496,7 +17643,13 @@ const App=()=>{
       sharedWithMe={sharedWithMe}
       onCollabAccepted={entry=>setSharedWithMe(prev=>[entry,...prev.filter(x=>x.id!==entry.id)])}
       isOffline={isOffline} pendingCount={pendingCount}
+      refreshKey={dataVersion}
       onNewChallenge={async()=>{
+        // Se llama cuando la campanita detecta CUALQUIER novedad accionable
+        // (reto, turno de dueto, nominación de encadenado, colectivo…), no solo
+        // retos. Refresca los retos recibidos y además fuerza la recarga de los
+        // widgets que gestionan sus propios datos.
+        bumpDataVersion();
         try{
           const fresh=await DB.getReceivedChallenges(user.id);
           setReceivedChallenges(fresh);
