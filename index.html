@@ -9850,7 +9850,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               </button>
               <button onClick={()=>{setShowSendDuet(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
-                <Icon name="hands-clapping" size={16} color={AZUL}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>A dos manos</span>
+                <Icon name="hands-clapping" size={16} color={AZUL}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>A cuatro manos</span>
               </button>
               <button onClick={()=>{setShowStartChain(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
@@ -9926,7 +9926,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                   <span style={{fontSize:10.5,color:FAINT}}>5 palabras, 1 hora</span>
                 </button>
                 <button onClick={()=>{setShowSendDuet(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <span style={{fontSize:12.5,fontWeight:600,color:AZUL,display:'flex',alignItems:'center',gap:6}}><Icon name="hands-clapping"/>A dos manos</span>
+                  <span style={{fontSize:12.5,fontWeight:600,color:AZUL,display:'flex',alignItems:'center',gap:6}}><Icon name="hands-clapping"/>A cuatro manos</span>
                   <span style={{fontSize:10.5,color:FAINT}}>Turnos con una persona</span>
                 </button>
                 <button onClick={()=>{setShowStartChain(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",borderBottom:'1px solid '+BDR}}>
@@ -12989,11 +12989,11 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
                   <div key={d.id} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',borderBottom:'0.5px solid '+BDR}}>
                     <Icon name="hands-clapping" size={16} color={MUTED}/>
                     <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:500,color:TXT}}>{d.title||'Relato a dos manos'}</div>
+                      <div style={{fontSize:13,fontWeight:500,color:TXT}}>{d.title||'Relato a cuatro manos'}</div>
                       <div style={{fontSize:11,color:MUTED}}>Con {other} · esperando su turno</div>
                     </div>
                     <button onClick={()=>setOpenDuet(d)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'5px 12px',fontSize:11,color:MUTED,cursor:'pointer'}}>Ver</button>
-                    {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={updated=>setOpenDuet(updated)}/>}
+                    {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={updated=>{if(updated)setOpenDuet(updated);}}/>}
                   </div>
                 );
               })}
@@ -14335,11 +14335,11 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
   const catWords={};const catMins={};
   library.forEach(e=>{
     const _sl=e.session_label||e.sessionLabel||'';
-const k=e.sk==='dueto'?'A dos manos':e.sk==='cuento'&&_sl.toLowerCase().includes('dos manos')?'A dos manos':{check:'Check diario',reto:'Reto semanal',proyecto:'Proyecto',cuento:'Cuento contrareloj'}[e.sk]||'Otro';
+const _dm=_sl.toLowerCase();const k=e.sk==='dueto'?'A cuatro manos':e.sk==='cuento'&&(_dm.includes('cuatro manos')||_dm.includes('dos manos'))?'A cuatro manos':{check:'Check diario',reto:'Reto semanal',proyecto:'Proyecto',cuento:'Cuento contrareloj'}[e.sk]||'Otro';
     catWords[k]=(catWords[k]||0)+(e.word_count||e.wordCount||0);
     catMins[k]=(catMins[k]||0)+Math.round((e.elapsed||0)/60);
   });
-  const catColors={'Check diario':'#1E9BF0','Reto semanal':'#F15A24','Proyecto':'#1B5FAA','Cuento contrareloj':'#A82020','A dos manos':'#1A6B8A','Otro':MUTED};
+  const catColors={'Check diario':'#1E9BF0','Reto semanal':'#F15A24','Proyecto':'#1B5FAA','Cuento contrareloj':'#A82020','A cuatro manos':'#1A6B8A','Otro':MUTED};
   const totalW=Object.values(catWords).reduce((s,v)=>s+v,0)||1;
   const totalM=Object.values(catMins).reduce((s,v)=>s+v,0)||1;
   const cats=Object.keys(catWords);
@@ -14455,7 +14455,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
     setSending(true);setStatus('');
     try{
       const duet=await DB.createDuet({
-        title:title.trim()||'Relato a dos manos',
+        title:title.trim()||'Relato a cuatro manos',
         premise:premise.trim()||null,
         min_words:minWords,
         user_a:user.id,user_b:recipient.id,
@@ -14473,7 +14473,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
       <div className="fi" style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:440,maxHeight:'90vh',overflow:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.3)'}}>
         <div style={{padding:'16px 20px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div>
-            <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',display:'flex',alignItems:'center',gap:7}}><Icon name="hands-clapping" size={15}/>Relato a dos manos</div>
+            <div style={{fontSize:15,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',display:'flex',alignItems:'center',gap:7}}><Icon name="hands-clapping" size={15}/>Relato a cuatro manos</div>
             <div style={{fontSize:11,color:MUTED,marginTop:2}}>Escribid por turnos. Tú empiezas.</div>
           </div>
           <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
@@ -14508,7 +14508,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
           {/* Title + premise */}
           <div>
             <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Título (opcional)</div>
-            <input type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="Relato a dos manos" style={{width:'100%'}}/>
+            <input type="text" value={title} onChange={e=>setTitle(e.target.value)} placeholder="Relato a cuatro manos" style={{width:'100%'}}/>
           </div>
           <div>
             <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Premisa inicial (opcional)</div>
@@ -15118,7 +15118,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
         user_id:user.id,sk:'dueto',
         title:duet.title+' (turno '+(duet.turn_count+1)+')',
-        session_label:'A dos manos con '+(isA?duet.name_b:duet.name_a),
+        session_label:'A cuatro manos con '+(isA?duet.name_b:duet.name_a),
         html,plain:plainTxt,word_count:wc,words_added:wc,
         elapsed:secs,font_idx:0,editor_size:17,align_dir:'left',
         date:new Date().toISOString().slice(0,10),ts:Date.now(),
@@ -15133,7 +15133,9 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
       };
       if(propose){patch.status='finish_proposed';patch.finish_proposed_by=user.id;}
       await DB.updateDuet(duet.id,patch);
-      onUpdate();
+      // Mostrar primero la enhorabuena del turno; el refresco de la lista de
+      // fuera se hace al cerrar el modal (onClose), no aquí, para que este
+      // setTurnDone no compita con un posible remonte del editor.
       setTurnDone({wordsAdded:wc,elapsed:secs});
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
@@ -15149,7 +15151,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
           id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
           user_id:user.id,sk:'dueto',
           title:duet.title+' (turno final)',
-          session_label:'A dos manos con '+(isA?duet.name_b:duet.name_a),
+          session_label:'A cuatro manos con '+(isA?duet.name_b:duet.name_a),
           html,plain:plainTxt,word_count:wc,words_added:wc,
           elapsed:turnSecs(),font_idx:0,editor_size:17,align_dir:'left',
           date:new Date().toISOString().slice(0,10),ts:Date.now(),
@@ -15188,7 +15190,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         await DB.upsertEntry({
           id:entryId,user_id:user.id,sk:'cuento',
           title:duet.title+' — con '+otherName,
-          session_label:'Relato a dos manos · '+(duet.name_a||'?')+' & '+(duet.name_b||'?'),
+          session_label:'Relato a cuatro manos · '+(duet.name_a||'?')+' & '+(duet.name_b||'?'),
           html:duet.full_html,plain:duet.full_plain,
           word_count:duet.full_plain.trim().split(/\s+/).filter(Boolean).length,
           elapsed:0,font_idx:0,editor_size:17,align_dir:'left',
@@ -15336,7 +15338,7 @@ const DuetsHub=({user,refreshKey=0})=>{
     <>
       {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={load}/>}
       <div className="fu" style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:700,color:TXT,marginBottom:12,fontFamily:'"Playfair Display",serif',display:'flex',alignItems:'center',gap:7}}><Icon name="hands-clapping" size={14}/>Relatos a dos manos</div>
+        <div style={{fontSize:13,fontWeight:700,color:TXT,marginBottom:12,fontFamily:'"Playfair Display",serif',display:'flex',alignItems:'center',gap:7}}><Icon name="hands-clapping" size={14}/>Relatos a cuatro manos</div>
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
 
           {invitations.map(d=>(
