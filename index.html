@@ -1798,6 +1798,24 @@ const getRetoPorSemana=(mode='literatura')=>{const bank=mode==='guion'?SCREENPLA
 const getRetoById=(id,mode='literatura')=>{const bank=mode==='guion'?SCREENPLAY_WEEKLY_CHALLENGES:WEEKLY_CHALLENGES_64;return bank.find(r=>r.id===id)||bank[0];};
 </script>
 <script>
+// ── Captura del evento de instalación PWA (Android/Chrome) ──
+// beforeinstallprompt se dispara UNA vez, muy pronto, y hay que capturarlo
+// antes de que React monte o se pierde. Lo guardamos en window para que el
+// componente InstallPWA pueda usarlo cuando el usuario pulse el botón.
+// En iOS este evento no existe (Apple no lo implementa): allí el componente
+// muestra la guía visual de "Añadir a pantalla de inicio".
+window.__pwaInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();               // evita el mini-banner automático de Chrome
+  window.__pwaInstallPrompt = e;    // lo guardamos para dispararlo desde nuestro botón
+  window.dispatchEvent(new Event('pwa-installable'));
+});
+window.addEventListener('appinstalled', function(){
+  window.__pwaInstallPrompt = null;
+  window.dispatchEvent(new Event('pwa-installed'));
+});
+</script>
+<script>
 // ── Sanitización de HTML de usuario (defensa contra stored XSS) ──
 // Todo el contenido creado en los editores contentEditable se guarda como
 // HTML crudo y se pinta con dangerouslySetInnerHTML. Esta función lo limpia
@@ -9652,6 +9670,70 @@ const AuthScreen=({onAuth})=>{
 };
 
 
+// ══════════════════════════════════════════════════════════════════
+// TARJETAS DE DESCUBRIMIENTO
+// Funciones que están "escondidas" y que nadie pulsaría si no se las
+// presenta en el dashboard. Cada tarjeta invita a probar una función que
+// el usuario aún no ha usado. Se descarta (X) o desaparece al usarla.
+// Estado en localStorage: 'pretexto:discovered:<uid>:<id>'
+// ══════════════════════════════════════════════════════════════════
+const discoveredKey=(id,uid)=>'pretexto:discovered:'+(uid||'anon')+':'+id;
+
+const DiscoveryCards=({user,library=[],writingMode,onToggleMode,onOpenCollab})=>{
+  const [dismissed,setDismissed]=useState({});
+  const dismiss=(id)=>{ S.set(discoveredKey(id,user?.id),Date.now()); setDismissed(d=>({...d,[id]:true})); };
+  const seen=(id)=>!!S.get(discoveredKey(id,user?.id))||dismissed[id];
+
+  // ¿Ya ha escrito algún texto colaborativo? Entonces no hace falta la tarjeta.
+  const usedCollab=library.some(e=>['dueto','colectivo','chain','encadenado'].includes(e.sk));
+
+  const cards=[];
+  // 1) Modo literatura / guion — nadie sabe que existe si no se le dice
+  if(!seen('disc_modo')){
+    cards.push({
+      id:'disc_modo', icon:'film-slate', color:AZULMED,
+      title:'¿Sabías que puedes escribir guiones?',
+      body:'Cambia entre modo Literatura y modo Guion cuando quieras: los ejercicios, las lecciones y el editor se adaptan.',
+      cta:'Probar modo guion',
+      action:()=>{ onToggleMode&&onToggleMode(); dismiss('disc_modo'); },
+    });
+  }
+  // 2) Escritura colaborativa — solo si aún no la ha usado
+  if(!seen('disc_collab')&&!usedCollab){
+    cards.push({
+      id:'disc_collab', icon:'hands-clapping', color:NARANJA,
+      title:'Escribe con otras personas',
+      body:'A cuatro manos, relatos encadenados o colectivos: podéis construir un texto por turnos. Una de las mejores formas de desatascarse.',
+      cta:'Ver cómo funciona',
+      action:()=>{ onOpenCollab&&onOpenCollab(); dismiss('disc_collab'); },
+    });
+  }
+
+  if(cards.length===0)return null;
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:18}}>
+      {cards.map(c=>(
+        <div key={c.id} style={{position:'relative',display:'flex',alignItems:'flex-start',gap:13,background:CARD_BG,border:'0.5px solid '+c.color+'40',borderLeft:'3px solid '+c.color,borderRadius:12,padding:'15px 16px 15px 15px'}}>
+          <div style={{flexShrink:0,width:38,height:38,borderRadius:10,background:c.color+'15',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name={c.icon} size={20} color={c.color}/>
+          </div>
+          <div style={{flex:1,minWidth:0,paddingRight:18}}>
+            <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:3,fontFamily:'"Playfair Display",Georgia,serif'}}>{c.title}</div>
+            <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10}}>{c.body}</div>
+            <button onClick={c.action} style={{display:'inline-flex',alignItems:'center',gap:5,background:c.color,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+              {c.cta}<Icon name="arrow-right" size={12} color="#fff"/>
+            </button>
+          </div>
+          <button onClick={()=>dismiss(c.id)} title="Ocultar" style={{position:'absolute',top:10,right:10,background:'transparent',border:'none',cursor:'pointer',padding:4,color:FAINT,lineHeight:0}}>
+            <Icon name="x" size={14} color={FAINT}/>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
@@ -9669,6 +9751,15 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     const nm=writingMode==='literatura'?'guion':'literatura';
     S.set('pretexto:writing_mode',nm);
     setWritingMode(nm);
+    // Primera vez que se activa el modo guion: explicar qué cambia.
+    if(nm==='guion'&&!S.get(firstTimeKey('guion',user?.id))){
+      setActivePopup('guion');
+    }
+  };
+  const [activePopup,setActivePopup]=useState(null);
+  const closeActivePopup=()=>{
+    if(activePopup)S.set(firstTimeKey(activePopup,user?.id),Date.now());
+    setActivePopup(null);
   };
   const [confirmModeChange,setConfirmModeChange]=useState(false);
   const [showCollectives,setShowCollectives]=useState(false);
@@ -9745,6 +9836,8 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     }
     if(stats.newMilestone>0&&stats.newMilestone>wildcard_milestone&&stats.todayActive){
       newWc++;newMilestone=stats.newMilestone;
+      // Primera vez que se gana un comodín: explicar qué es.
+      if(!S.get(firstTimeKey('comodines',user?.id)))setActivePopup('comodines');
     }
     const daysChanged=newDays.length!==wildcardDays.length;
     if(newWc!==wildcards||newMilestone!==wildcard_milestone||daysChanged){
@@ -9828,7 +9921,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 style={{background:'transparent',border:'none',padding:'14px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%',borderBottom:'0.5px solid '+BDR}}>
                 <Icon name="users" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Amigos</span>
               </button>
-              <button onClick={()=>{setShowTeams(true);setShowHamburger(false);}}
+              <button onClick={()=>{setShowTeams(true);setShowHamburger(false);if(!S.get(firstTimeKey('equipos',user?.id)))setActivePopup('equipos');}}
                 style={{background:'transparent',border:'none',padding:'14px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%',borderBottom:'1px solid '+BDR}}>
                 <Icon name="users-three" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Equipos</span>
               </button>
@@ -9879,6 +9972,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {collectiveDetail&&<CollectiveEditor user={user} collective={collectiveDetail}
         onClose={()=>setCollectiveDetail(null)}
         onUpdate={updated=>setCollectiveDetail(updated)}/>}
+      {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
@@ -9971,7 +10065,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                   {icon:'chart-bar',label:'Estadísticas',action:()=>{setShowStats(true);setShowUserMenu(false);}},
                   {icon:'film-script',label:writingMode==='literatura'?'Modo: Literatura':'Modo: Guión cine',action:()=>{setConfirmModeChange(true);setShowUserMenu(false);},dot:writingMode==='guion'?NARANJA:AZUL},
                   {icon:'tray',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
-                  {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);},dot:getApiKey(user.id)?AZUL:null},
+                  {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);if(!S.get(firstTimeKey('revisionia',user?.id)))setActivePopup('revisionia');},dot:getApiKey(user.id)?AZUL:null},
                   {icon:'download-simple',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
                   {icon:'link-simple',label:'Mi perfil público',action:()=>{setShowProfile(true);setShowUserMenu(false);}},
                 ].map(item=>(
@@ -9998,6 +10092,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onSave={onSaveChallenge} onDecline={onDeclineChallenge}/>
+        <DiscoveryCards user={user} library={library} writingMode={writingMode}
+          onToggleMode={()=>setConfirmModeChange(true)}
+          onOpenCollab={()=>setShowCollectives(true)}/>
         <SharedBackBanner user={user} refreshKey={refreshKey}/>
         <CollabInviteBanner user={user} onAccepted={onCollabAccepted} refreshKey={refreshKey}/>
         <CollectivesHub user={user} refreshKey={refreshKey}
@@ -10478,6 +10575,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
 
 /* ─── POST SESSION ───────────────────────────────── */
 const PostSession=({sessionData,onComplete,onBack,user})=>{
+  const [showVisIntro,dismissVisIntro]=useFirstTime('visibilidad',user?.id,!(sessionData?.isCollabContribution));
   const canPublish=(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
   // Si quien termina es colaborador (no el dueño del texto), no le corresponde
   // decidir si se guarda en "su" biblioteca ni qué visibilidad tiene — eso ya lo
@@ -10520,7 +10618,7 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
   const lineColors=[['rgba(30,155,240,0.12)','#1E9BF0'],['rgba(241,90,36,0.12)','#F15A24'],['rgba(27,95,170,0.12)','#1B5FAA']]; // 1:Lo que funciona(AZUL) 2:Para ir más lejos(NARANJA) 3:pregunta(AZULMED)
 
   return(
-    <div style={{height:'var(--app-height,100dvh)',background:'transparent',overflow:'auto',display:'flex',flexDirection:'column'}}>
+    <div style={{height:'var(--app-height,100dvh)',background:'transparent',overflow:'auto',display:'flex',flexDirection:'column'}}>{showVisIntro&&<ContextualPopup id='visibilidad' onClose={dismissVisIntro}/>}
       {showKey&&<ApiKeyPanel userId={user.id} onClose={()=>{setShowKey(false);if(getApiKey(user.id)&&(fbState==='no_key'||fbState==='invalid_key')){setFbState('ready')}}}/>}
       <div style={{display:'flex',alignItems:'center',padding:'0 20px',height:48,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
         <button onClick={onBack} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:4}}>← Dashboard</button>
@@ -10686,6 +10784,7 @@ const SessionCompleteModal=({summary,onClose,variant='session',note=''})=>{
 
 /* ─── EXERCISE LIBRARY ───────────────────────────── */
 const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntry,filterType,onStartLesson,writingMode='literatura'})=>{
+  const [showLibIntro,dismissLibIntro]=useFirstTime('biblioteca',user?.id,!filterType);
   // filterType: 'check' -> solo los 128 checks · 'reto' -> solo los 128 semanales · undefined/null -> los 256
   const [openLesson,setOpenLesson]=useState(null);
   const [theme]=useTheme();
@@ -10710,7 +10809,7 @@ const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntr
   const MODE_LABEL={normal:'Normal',rio:'Río',limite:'Límite',tunel:'Túnel',presion:'Presión'};
 
   return(
-    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.45)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.45)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>{showLibIntro&&<ContextualPopup id='biblioteca' onClose={dismissLibIntro}/>}
       {openLesson&&<LeccionModal reto={openLesson} onClose={()=>setOpenLesson(null)}
         onStart={onStartLesson?()=>{
           const lesson=openLesson;
@@ -10905,6 +11004,7 @@ const usePresenceWarning=(entryId,userId,hasCollaborators,initialTs)=>{
 
 const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,sessionConfig})=>{
   const sk=sessionConfig.sk||(sessionConfig.type==='reto'?'reto':sessionConfig.type==='proyecto'?'proyecto':'check');
+  const [showProjIntro,dismissProjIntro]=useFirstTime('proyecto',user?.id,sk==='proyecto');
   const customExercise=sessionConfig.exercise||null;
   const customReto=sessionConfig.reto||null;
   const currentProject=sessionConfig.project||null;
@@ -11048,7 +11148,11 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     setAb(m);setIdle(0);setIdleWarn(false);resetLim();
     if(edRef.current&&m!=='tunel')Array.from(edRef.current.children).forEach(b=>{b.style.filter='';b.style.opacity='';b.style.transition='';b.style.pointerEvents='';b.style.userSelect=''});
     clearTimeout(toastRef.current);setToast(MODES.find(x=>x.id===m));toastRef.current=setTimeout(()=>setToast(null),2500);
+    // Primera vez que se cambia a un modo especial: explicar qué son.
+    if(m!=='normal'&&!S.get(firstTimeKey('modos',user?.id)))setShowModesIntro(true);
   };
+  const [showModesIntro,setShowModesIntro]=useState(false);
+  const dismissModesIntro=()=>{S.set(firstTimeKey('modos',user?.id),Date.now());setShowModesIntro(false);};
   const cmd=c=>{edRef.current?.focus();document.execCommand(c,false,null);syncFmt()};
   const syncFmt=()=>{try{setBold(document.queryCommandState('bold'));setItalic(document.queryCommandState('italic'));setUnder(document.queryCommandState('underline'))}catch(e){}};
   const doAlign=d=>{setAlign(d);edRef.current?.focus();document.execCommand({left:'justifyLeft',center:'justifyCenter',right:'justifyRight'}[d],false,null)};
@@ -11195,7 +11299,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   };
 
   return(
-    <div style={{display:'flex',flexDirection:'column',height:'var(--app-height,100dvh)',background:'transparent',position:'relative'}}>
+    <div style={{display:'flex',flexDirection:'column',height:'var(--app-height,100dvh)',background:'transparent',position:'relative'}}>{showProjIntro&&<ContextualPopup id='proyecto' onClose={dismissProjIntro}/>}{showModesIntro&&<ContextualPopup id='modos' onClose={dismissModesIntro}/>}
       {showUserMenu&&<div onClick={()=>setShowUserMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>}
       {showLib&&<ExerciseLibrary user={user} library={library} reflections={[]} onClose={()=>setShowLib(false)} writingMode={writingMode}/>}
       {showDrive&&<DrivePanel user={user} driveState={driveData||{}} onUpdate={ns=>S.set('flujo:drive:'+user.id,ns)} onClose={()=>setShowDrive(false)} library={library}/>}
@@ -11294,7 +11398,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             </div><button onClick={()=>cmd('bold')} style={{...TBTN(bold),fontSize:12,fontWeight:700,fontFamily:'Georgia,serif'}}>B</button><button onClick={()=>cmd('italic')} style={{...TBTN(italic),fontSize:12,fontStyle:'italic',fontFamily:'Georgia,serif'}}>I</button><button onClick={()=>cmd('underline')} style={{...TBTN(under),fontSize:11,textDecoration:'underline'}}>U</button>
             <Sep/>{['left','center','right'].map(d=><button key={d} onClick={()=>doAlign(d)} style={TBTN(align===d)}><AlignIcon dir={d} col={align===d?TXT:MUTED}/></button>)}
             <div style={{width:'1px',height:14,background:BDR,margin:'0 4px',flexShrink:0}}/>
-            <VoiceButton onTranscript={insertVoiceText}/>
+            <VoiceButton onTranscript={insertVoiceText} user={user}/>
             <div style={{flex:1}}/>
             <div style={{display:'flex',alignItems:'center',gap:4}}>
               <span style={{width:5,height:5,borderRadius:'50%',background:si.dot,flexShrink:0}}/>
@@ -11536,7 +11640,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
         {/* Top bar */}
         <div style={{display:'flex',alignItems:'center',padding:'0 14px',height:44,borderBottom:'0.5px solid rgba(255,255,255,0.1)'}}>
           <button onClick={()=>{if(!started||window.confirm('¿Salir? Perderás el progreso ' + (writingMode==='guion'?'de la escena.':'del cuento.')))onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir</button>
-          <VoiceButton onTranscript={insertVoiceCuento} dark={true} size={15}/>
+          <VoiceButton onTranscript={insertVoiceCuento} dark={true} size={15} user={user}/>
           <div style={{flex:1}}/>
           <div style={{textAlign:'center'}}>
             <div style={{fontSize:28,fontWeight:200,letterSpacing:2,color:timerCol(),fontVariantNumeric:'tabular-nums',lineHeight:1}}>{fmt(timer)}</div>
@@ -14944,7 +15048,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
               color:showNav?'rgba(255,255,255,0.9)':'rgba(255,255,255,0.45)'}}>
             <Icon name="list" size={15}/>
           </button>
-          <VoiceButton onTranscript={insertVoice} dark={true} size={14}/>
+          <VoiceButton onTranscript={insertVoice} dark={true} size={14} user={user}/>
           <button onClick={()=>doSave(false)}
             style={{background:'transparent',border:'none',cursor:'pointer',padding:'4px 8px',fontSize:11,
               color:'rgba(255,255,255,0.55)',fontFamily:"'Source Sans 3',sans-serif"}}>
@@ -15072,6 +15176,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
 
 /* ─── DUET EDITOR ───────────────────────────────────────────── */
 const DuetEditor=({user,duet,onClose,onUpdate})=>{
+  const [showIntro,dismissIntro]=useFirstTime('cuatromanos',user?.id,true);
   const isA=duet.user_a===user.id;
   const insertVoiceDuet=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
   const myLetter=isA?'a':'b';
@@ -15208,7 +15313,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
     onClose={()=>{setTurnDone(null);onClose();}}/>;
 
   return(
-    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>
+    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='cuatromanos' onClose={dismissIntro}/>}
       {/* Header */}
       <div style={{background:'#0A1B3D',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>← Salir</button>
@@ -15265,7 +15370,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
               <div>
                 <div style={{fontSize:11,fontWeight:500,color:'#1E9BF0',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:8,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                     <span>Tu turno — continúa el relato</span>
-                    <VoiceButton onTranscript={insertVoiceDuet} size={14}/>
+                    <VoiceButton onTranscript={insertVoiceDuet} size={14} user={user}/>
                   </div>
                 <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
                   style={{minHeight:160,outline:'none',fontSize:16,lineHeight:1.85,fontFamily:'"Playfair Display",Georgia,serif',color:PROSE_TEXT,caretColor:NARANJA,padding:'4px 0'}}/>
@@ -15472,6 +15577,7 @@ const ShareNudge=({user,library})=>{
 
 /* ─── CHAIN EDITOR (Encadenados) ───────────────────────────── */
 const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
+  const [showIntro,dismissIntro]=useFirstTime('encadenados',user?.id,true);
   // Tiempo del capítulo, contado desde la primera tecla (ver DuetEditor).
   const startedAtRef=useRef(null);
   const turnSecs=()=>startedAtRef.current?Math.max(1,Math.round((Date.now()-startedAtRef.current)/1000)):0;
@@ -15614,7 +15720,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
   };
 
   return(
-    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>
+    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='encadenados' onClose={dismissIntro}/>}
       {/* Header */}
       <div style={{background:'#0A1B3D',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>← Salir</button>
@@ -15626,7 +15732,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
             {chain?'Capítulo '+chapterNumber:'Capítulo 1'} · mín. {MIN_WORDS} palabras
           </div>
         </div>
-        {step==='write'&&<><VoiceButton onTranscript={insertVoiceChain} dark={true} size={14}/><div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:canFinish?'rgba(241,90,36,0.3)':'rgba(255,255,255,0.1)',color:canFinish?'#FCA56A':'rgba(255,255,255,0.5)',flexShrink:0}}>
+        {step==='write'&&<><VoiceButton onTranscript={insertVoiceChain} dark={true} size={14} user={user}/><div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:canFinish?'rgba(241,90,36,0.3)':'rgba(255,255,255,0.1)',color:canFinish?'#FCA56A':'rgba(255,255,255,0.5)',flexShrink:0}}>
           {wc} / {MIN_WORDS}
         </div></>}
       </div>
@@ -15949,6 +16055,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
 
 /* ── 2. CollectiveEditor ──────────────────────────────────────── */
 const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
+  const [showIntro,dismissIntro]=useFirstTime('colectivos',user?.id,true);
   const [col,setCol]=useState(initialCol);
   // Tiempo de la parte, desde la primera tecla (ver DuetEditor).
   const startedAtRef=useRef(null);
@@ -16030,7 +16137,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
     onClose={()=>{setTurnDone(null);onClose&&onClose();}}/>;
 
   return(
-    <div style={{position:'fixed',inset:0,zIndex:180,background:PAGE_BG,display:'flex',flexDirection:'column'}}>
+    <div style={{position:'fixed',inset:0,zIndex:180,background:PAGE_BG,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='colectivos' onClose={dismissIntro}/>}
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0 16px',height:44,background:HEADER_NAVY_BG,flexShrink:0}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>
@@ -16289,7 +16396,10 @@ const StartChainModal=({user,onClose})=>{
 /* ─── VOICE BUTTON (grabación + transcripción Groq Whisper) ─────── */
 const TRANSCRIBE_URL='https://nzvzjyoavpqtjwkwgzch.supabase.co/functions/v1/transcribe-audio';
 
-const VoiceButton=({onTranscript,dark=false,size=16})=>{
+const VoiceButton=({onTranscript,dark=false,size=16,user})=>{
+  const [showVoiceIntro,setShowVoiceIntro]=useState(false);
+  const voiceIntroDismiss=()=>{S.set(firstTimeKey('voz',user?.id),Date.now());setShowVoiceIntro(false);};
+  useEffect(()=>{ if(user?.id&&!S.get(firstTimeKey('voz',user?.id)))setShowVoiceIntro(true); },[user?.id]);
   const [state,setState]=useState('idle'); // idle|recording|transcribing|error
   const mediaRef=useRef(null);
   const chunksRef=useRef([]);
@@ -16389,6 +16499,8 @@ const VoiceButton=({onTranscript,dark=false,size=16})=>{
   const colRec='#E53935';
 
   return(
+    <>
+    {showVoiceIntro&&<ContextualPopup id='voz' onClose={voiceIntroDismiss}/>}
     <button onClick={handleClick} disabled={state==='transcribing'}
       title={state==='idle'?'Grabar y transcribir voz':state==='recording'?'Detener grabación':'Transcribiendo…'}
       style={{display:'flex',alignItems:'center',gap:4,background:state==='recording'?'rgba(229,57,53,0.1)':'transparent',
@@ -16400,6 +16512,7 @@ const VoiceButton=({onTranscript,dark=false,size=16})=>{
             color={state==='recording'?NARANJA:state==='error'?DANGER:col}/>}
       {state==='recording'&&<span style={{fontSize:10,color:NARANJA,fontFamily:"'Source Sans 3',sans-serif",fontWeight:600,minWidth:24}}>{fmtSecs(secs)}</span>}
     </button>
+    </>
   );
 };
 
@@ -16736,8 +16849,189 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
 
 /* ─── WELCOME CAROUSEL ──────────────────────────────────────── */
+// ══════════════════════════════════════════════════════════════════
+// POP-UPS CONTEXTUALES DE "PRIMERA VEZ"
+// Cada uno se muestra una sola vez, la primera vez que el usuario llega a
+// una función. El registro de cuáles se han visto se guarda en localStorage
+// (prefijo 'pretexto:seen_popup:'), por usuario.
+// ══════════════════════════════════════════════════════════════════
+
+// Definición de cada pop-up: título, cuerpo, icono y color de acento.
+const CONTEXTUAL_POPUPS={
+  comodines:{icon:'shield-check',color:'#F15A24',title:'Has ganado un comodín',
+    body:'Guárdalo: si algún día no puedes escribir, se gasta solo para que no pierdas la racha. Ganas uno por cada 7 días seguidos.'},
+  modos:{icon:'sliders',color:'#1E9BF0',title:'Los modos de escritura',
+    body:'Cada modo cambia las reglas: Río no deja borrar, Presión te obliga a no parar, Túnel esconde lo que ya escribiste. Prueba uno y verás cómo cambia lo que sale.'},
+  visibilidad:{icon:'eye',color:'#1B5FAA',title:'¿Quién puede leer esto?',
+    body:'Decide quién ve cada texto: solo tú (privado), tus amigos, o toda la comunidad (abierto). Puedes cambiarlo cuando quieras.'},
+  cuatromanos:{icon:'hands-clapping',color:'#1A6B8A',title:'A cuatro manos',
+    body:'Aquí escribís dos personas por turnos: tú añades un fragmento, luego le toca a la otra persona, y así vais construyendo un texto juntos. Escribe tu parte y pásala.'},
+  encadenados:{icon:'link',color:'#1B5FAA',title:'Relatos encadenados',
+    body:'Un relato que crece por capítulos: escribes el tuyo y nominas a quien sigue. Puedes leer los capítulos anteriores antes de añadir el tuyo.'},
+  colectivos:{icon:'users-three',color:'#1A6B8A',title:'Relatos colectivos',
+    body:'Varios escribís por turnos, en ronda, hasta que el grupo decide cerrarlo. Te avisaremos cuando te toque, y podrás seguir cada parte nueva que añadan los demás.'},
+  guion:{icon:'film-slate',color:'#0A1B3D',title:'Modo guion',
+    body:'Has cambiado al modo guion: los ejercicios, las lecciones y el editor se adaptan a la escritura audiovisual. Vuelve a literatura cuando quieras desde el mismo sitio.'},
+  contrarreloj:{icon:'timer',color:'#F15A24',title:'Te han retado',
+    body:'Alguien te ha retado: unas palabras y un tiempo límite para escribir un texto con ellas. Cuando termines, se lo devuelves para que lo lea.'},
+  equipos:{icon:'users',color:'#F15A24',title:'Equipos',
+    body:'Crea un equipo o únete a uno. Dentro, cualquiera puede proponer un reto semanal, todos votáis cuál hacer, y escribís juntos.'},
+  proyecto:{icon:'book-open',color:'#1B5FAA',title:'Tu proyecto personal',
+    body:'¿Tienes algo tuyo entre manos? Dedícale la sesión de hoy: cuenta igual para tu racha que un reto.'},
+  voz:{icon:'microphone',color:'#1E9BF0',title:'Dicta en voz alta',
+    body:'Toca para dictar: hablas y se transcribe solo. Útil cuando las ideas van más rápido que los dedos.'},
+  biblioteca:{icon:'books',color:'#1B5FAA',title:'Tu biblioteca',
+    body:'Todo lo que escribes queda aquí. Puedes mantenerlo privado o publicarlo para que la comunidad lo lea, comente y reaccione. Leer a otros es, en sí mismo, una lección.'},
+  revisionia:{icon:'sparkle',color:'#F15A24',title:'Revisión con IA',
+    body:'Conecta tu propia clave de Claude para que revise tus textos. Se guarda solo en tu dispositivo y solo actúa cuando tú se lo pides.'},
+};
+
+// Hook: devuelve [debeMostrarse, marcarComoVisto] para un pop-up concreto.
+// Uso: const [showX, seenX] = useFirstTime('cuatromanos', userId, activo);
+const firstTimeKey=(id,uid)=>'pretexto:seen_popup:'+(uid||'anon')+':'+id;
+const useFirstTime=(id,uid,active)=>{
+  const [show,setShow]=useState(false);
+  useEffect(()=>{
+    if(!active||!uid)return;
+    if(!S.get(firstTimeKey(id,uid))) setShow(true);
+  },[id,uid,active]);
+  const dismiss=()=>{ S.set(firstTimeKey(id,uid),Date.now()); setShow(false); };
+  return [show,dismiss];
+};
+
+// Componente visual del pop-up (hoja inferior en móvil).
+const ContextualPopup=({id,onClose})=>{
+  const cfg=CONTEXTUAL_POPUPS[id];
+  if(!cfg)return null;
+  return(
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+      style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:520,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div style={{background:PAGE_BG,width:'100%',maxWidth:440,borderRadius:'18px 18px 0 0',padding:'26px 24px calc(24px + env(safe-area-inset-bottom))',boxShadow:'0 -10px 50px -10px rgba(10,27,61,0.35)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
+          <div style={{flexShrink:0,width:42,height:42,borderRadius:11,background:cfg.color+'18',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name={cfg.icon} size={22} color={cfg.color}/>
+          </div>
+          <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:20,color:TXT}}>{cfg.title}</div>
+        </div>
+        <div style={{fontSize:14,color:MUTED,lineHeight:1.55,marginBottom:22}}>{cfg.body}</div>
+        <button onClick={onClose} style={{width:'100%',height:46,background:NAVY,color:'#fff',border:'none',borderRadius:11,fontSize:14.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Entendido</button>
+      </div>
+    </div>
+  );
+};
+
+// ── Detección de plataforma / estado de instalación PWA ──
+const pwaEnv=()=>{
+  const ua=navigator.userAgent||'';
+  const isIOS=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const isAndroid=/Android/.test(ua);
+  const isSafari=/^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+  // Ya instalada / abierta como app: no hay nada que ofrecer.
+  const standalone=window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone===true;
+  return {isIOS,isAndroid,isSafari,standalone};
+};
+
+// Botón / tarjeta de instalación. Se comporta distinto según la plataforma:
+//  · Android con evento disponible → botón que instala de un toque.
+//  · iPhone/iPad → botón que abre una guía visual de "Añadir a pantalla de inicio"
+//    (Apple no permite instalación programática en ningún navegador de iOS).
+//  · Ya instalada o escritorio sin soporte → no renderiza nada.
+const InstallPWA=({variant='block',onDone})=>{
+  const [env]=useState(pwaEnv);
+  const [canPromptAndroid,setCanPromptAndroid]=useState(!!window.__pwaInstallPrompt);
+  const [showIOSGuide,setShowIOSGuide]=useState(false);
+  const [installed,setInstalled]=useState(false);
+
+  useEffect(()=>{
+    const onInstallable=()=>setCanPromptAndroid(true);
+    const onInstalled=()=>{setInstalled(true);setCanPromptAndroid(false);};
+    window.addEventListener('pwa-installable',onInstallable);
+    window.addEventListener('pwa-installed',onInstalled);
+    return()=>{
+      window.removeEventListener('pwa-installable',onInstallable);
+      window.removeEventListener('pwa-installed',onInstalled);
+    };
+  },[]);
+
+  // Nada que mostrar: ya está instalada, o es un escritorio donde Chrome aún no
+  // ha ofrecido instalar (sin evento) y no es iOS.
+  if(env.standalone||installed)return null;
+  const androidReady=env.isAndroid&&canPromptAndroid;
+  const iosReady=env.isIOS&&env.isSafari;
+  if(!androidReady&&!iosReady){
+    // Chrome de escritorio a veces tarda en emitir el evento; si no hay ni
+    // Android instalable ni iOS Safari, no ofrecemos nada para no confundir.
+    if(!(env.isAndroid&&!canPromptAndroid))return null;
+  }
+
+  const doAndroidInstall=async()=>{
+    const p=window.__pwaInstallPrompt;
+    if(!p)return;
+    p.prompt();
+    try{await p.userChoice;}catch(e){}
+    window.__pwaInstallPrompt=null;
+    setCanPromptAndroid(false);
+    onDone&&onDone();
+  };
+
+  const btnLabel=env.isIOS?'Cómo instalar en tu iPhone':'Instalar Pretexto';
+  const onClick=env.isIOS?()=>setShowIOSGuide(true):doAndroidInstall;
+
+  // Botón (dos tamaños: 'block' para el carrusel, 'inline' para banners)
+  const btn=(
+    <button onClick={onClick} style={{
+      display:'inline-flex',alignItems:'center',justifyContent:'center',gap:8,
+      background:NARANJA,color:'#fff',border:'none',borderRadius:10,
+      padding:variant==='block'?'13px 26px':'9px 18px',
+      fontSize:variant==='block'?15:13,fontWeight:600,cursor:'pointer',
+      fontFamily:"'Source Sans 3',sans-serif",boxShadow:'0 4px 14px -4px rgba(241,90,36,0.5)',
+    }}>
+      <Icon name={env.isIOS?'export':'download-simple'} size={variant==='block'?17:14} color="#fff"/>
+      {btnLabel}
+    </button>
+  );
+
+  return(
+    <>
+      {btn}
+      {showIOSGuide&&<IOSInstallGuide onClose={()=>setShowIOSGuide(false)}/>}
+    </>
+  );
+};
+
+// Guía visual para iOS: no instala (imposible en iOS), pero deja al usuario a un
+// solo gesto, señalando el botón Compartir y el paso "Añadir a pantalla de inicio".
+const IOSInstallGuide=({onClose})=>(
+  <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+    style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.55)',zIndex:500,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+    <div style={{background:PAGE_BG,width:'100%',maxWidth:440,borderRadius:'18px 18px 0 0',padding:'26px 24px calc(24px + env(safe-area-inset-bottom))',boxShadow:'0 -10px 50px -10px rgba(10,27,61,0.35)'}}>
+      <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:20,color:TXT,marginBottom:6}}>Instala Pretexto en tu iPhone</div>
+      <div style={{fontSize:13.5,color:MUTED,lineHeight:1.5,marginBottom:22}}>Dos toques y lo tendrás en tu pantalla de inicio, con las notificaciones activas para no perder tu racha.</div>
+
+      <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:16}}>
+        <div style={{flexShrink:0,width:34,height:34,borderRadius:9,background:CARD_BG,border:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="export" size={18} color={AZUL}/></div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:2}}>1 · Toca el botón <span style={{color:AZUL}}>Compartir</span></div>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.45}}>Es el icono de un cuadrado con una flecha hacia arriba, en la barra de Safari (abajo en el iPhone, arriba en el iPad).</div>
+        </div>
+      </div>
+
+      <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:24}}>
+        <div style={{flexShrink:0,width:34,height:34,borderRadius:9,background:CARD_BG,border:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="plus-square" size={18} color={AZUL}/></div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:2}}>2 · Elige <span style={{color:AZUL}}>«Añadir a pantalla de inicio»</span></div>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.45}}>Baja un poco en el menú si no lo ves. Luego confirma con «Añadir».</div>
+        </div>
+      </div>
+
+      <button onClick={onClose} style={{width:'100%',height:46,background:NAVY,color:'#fff',border:'none',borderRadius:11,fontSize:14.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Entendido</button>
+    </div>
+  </div>
+);
+
 const WelcomeCarousel=({onClose})=>{
-  const TOTAL=6;
+  const TOTAL=5;
   const [cur,setCur]=useState(0);
   const [noShow,setNoShow]=useState(false);
   const [theme,setTheme]=useTheme();
@@ -16772,13 +17066,25 @@ const WelcomeCarousel=({onClose})=>{
         </div>
       </div>
     </div>,
+    /* SLIDE 2 — Instalación PWA (movido al 2º puesto para máxima conversión) */
+    <div key="s7" className="wc-slide">
+      <span className="wc-slide-signo" style={{fontSize:165,top:'-10px',right:'8px'}} aria-hidden="true">↓</span>
+      <div><div className="wc-eyebrow naranja">✱ Llévalo contigo</div>
+        <div className="wc-title">Instálalo como app<br/>y no pierdas el hilo.</div></div>
+      <div className="wc-body">
+        <p>Añade Pretexto a tu pantalla de inicio y recibirás un recordatorio cada día para no romper tu racha. Sin instalar, las notificaciones no llegan —y es fácil olvidarse de volver.</p>
+        <div style={{marginTop:20,marginBottom:8}}><InstallPWA variant="block"/></div>
+        <p style={{fontSize:12,opacity:0.7,marginTop:10}}>Si ya la tienes instalada o estás en el ordenador, puedes saltar este paso.</p>
+      </div>
+    </div>,
     /* SLIDE 2 */
     <div key="s2" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:150,top:'-20px',right:'-10px'}} aria-hidden="true">*</span>
       <div><div className="wc-eyebrow naranja">✱ Retos</div>
         <div className="wc-title">Lo importante es no fallar.<br/>Y si fallas, hay red.</div></div>
       <div className="wc-body">
-        <p>La consistencia vence al talento. Escribe cada día durante una semana y ya habrás demostrado lo más difícil. Además del reto diario, habrá retos semanales para ir más lejos, y retos que puedes lanzar a tus compañeros. Y si lo que quieres es avanzar en tu proyecto personal, puedes sustituir cualquiera de ellos por tiempo dedicado a lo tuyo.</p>
+        <p>La consistencia vence al talento. Escribe cada día durante una semana y ya habrás demostrado lo más difícil. Además del reto diario, habrá retos semanales para ir más lejos, y retos que puedes lanzar a tus compañeros.</p>
+        <p><strong>¿Y si un día no puedes?</strong> Para eso están los comodines: ganas uno por cada 7 días seguidos, y se gastan solos para salvarte la racha cuando faltas un día. La constancia importa, pero no tiene que ser perfecta.</p>
       </div>
       <div className="wc-mockup">
         <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/><div className="mk-navitem"/></div></div>
@@ -16798,11 +17104,12 @@ const WelcomeCarousel=({onClose})=>{
     <div key="s3" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:180,right:'-30px',bottom:'-50px'}} aria-hidden="true">,</span>
       <div><div className="wc-eyebrow">Editores</div>
-        <div className="wc-title">Un editor normal<br/>y tres muy especiales.</div></div>
+        <div className="wc-title">Un editor normal<br/>y cuatro muy especiales.</div></div>
       <div className="wc-body">
-        <p>El editor estándar te da control total. Pero si quieres que algo fluya de verdad, tienes tres modos diseñados para sacarte de tu propia cabeza:</p>
+        <p>El editor estándar te da control total. Pero si quieres que algo fluya de verdad, tienes cuatro modos diseñados para sacarte de tu propia cabeza:</p>
         <p><strong>Río</strong> — No puedes editar nada de lo que escribes. Solo hacia adelante.</p>
         <p><strong>Límite</strong> — Como el Río, pero con un número máximo de correcciones por párrafo.</p>
+        <p><strong>Túnel</strong> — Los párrafos anteriores se desvanecen. Solo ves con claridad lo que escribes ahora.</p>
         <p><strong>Presión</strong> — No pares. Si dejas de escribir, el texto se borra. Ideal para maratones.</p>
         <p>Puedes cambiar entre modos en cualquier momento.</p>
       </div>
@@ -16811,59 +17118,8 @@ const WelcomeCarousel=({onClose})=>{
         <div className="mk-modes">
           <div className="mk-mode rio"><div className="mk-mode-icon"><Icon name="waves" size={11}/></div><div className="mk-mode-tag">Río</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
           <div className="mk-mode limite"><div className="mk-mode-icon"><Icon name="pen" size={11}/></div><div className="mk-mode-tag">Límite</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{width:'90%',position:'relative'}}><span style={{position:'absolute',inset:0,background:'#1B5FAA',borderRadius:2,top:'50%',height:1}}/></div><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+          <div className="mk-mode tunel"><div className="mk-mode-icon"><Icon name="binoculars" size={11}/></div><div className="mk-mode-tag">Túnel</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{opacity:0.25}}/><div className="mk-mode-line s" style={{opacity:0.45}}/><div className="mk-mode-line"/><div className="mk-mode-line xs" style={{opacity:0.25}}/></div></div>
           <div className="mk-mode presion"><div className="mk-mode-icon"><Icon name="lightning" size={11}/></div><div className="mk-mode-tag">Presión</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
-        </div>
-      </div>
-    </div>,
-    /* SLIDE 4 */
-    <div key="s4" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:160,top:'10px',left:'6px'}} aria-hidden="true">{'{'}</span>
-      <div><div className="wc-eyebrow naranja">✱ Equipos</div>
-        <div className="wc-title">Crea tu equipo.<br/>Propón. Vota. Escribe.</div></div>
-      <div className="wc-body">
-        <p>Puedes crear tu propio equipo e invitar a quien quieras. Dentro del equipo, cada miembro puede proponer un reto semanal para el resto. La comunidad vota cuál hacer, y todos se ponen a escribir juntos.</p>
-        <p>Es la versión social de Pretexto: el empujón que necesitas cuando escribir solo no es suficiente.</p>
-      </div>
-      <div className="wc-mockup">
-        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/></div></div>
-        <div className="mk-team-header">
-          <div className="mk-team-avatar">✦</div>
-          <div><div className="mk-team-name">Escribidores Nocturnos</div><div className="mk-team-sub">Reto semanal activo</div></div>
-          <div className="mk-team-badge">5 miembros</div>
-        </div>
-        <div className="mk-team-members">
-          <div className="mk-member"><div className="mk-member-av"/><div className="mk-member-name"/><div className="mk-member-dot"/></div>
-          <div className="mk-member"><div className="mk-member-av" style={{background:'#e8d5d3'}}/><div className="mk-member-name"/><div className="mk-member-dot" style={{background:'#bbb'}}/></div>
-          <div className="mk-member"><div className="mk-member-av" style={{background:'#d5e8da'}}/><div className="mk-member-name"/><div className="mk-member-dot"/></div>
-        </div>
-        <div style={{fontSize:9,color:'#8a7f74',textTransform:'uppercase',letterSpacing:1,marginBottom:5}}>Propuestas de reto</div>
-        <div className="mk-reto-proposal"><div className="mk-proposal-av"/><div className="mk-proposal-body"><div className="mk-proposal-line"/><div className="mk-proposal-line s"/></div><div className="mk-vote">▲ 3</div></div>
-        <div className="mk-reto-proposal"><div className="mk-proposal-av" style={{background:'#e8d5d3'}}/><div className="mk-proposal-body"><div className="mk-proposal-line" style={{width:'65%'}}/><div className="mk-proposal-line s"/></div><div className="mk-vote">▲ 1</div></div>
-      </div>
-    </div>,
-    /* SLIDE 5 */
-    <div key="s5" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:165,top:'-8px',right:'10px'}} aria-hidden="true">”</span>
-      <div><div className="wc-eyebrow">Biblioteca</div>
-        <div className="wc-title">Tus textos, privados<br/>o para la comunidad.</div></div>
-      <div className="wc-body">
-        <p>Todo lo que escribes queda guardado en tu biblioteca. Puedes mantenerlo privado —solo para ti— o publicarlo para que la comunidad lo lea. Si publicas, tus compañeros pueden dejarte comentarios y reacciones.</p>
-        <p>Leer lo que escriben otros es, en sí mismo, una lección.</p>
-      </div>
-      <div className="wc-mockup">
-        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/></div></div>
-        <div className="mk-lib-grid">
-          <div className="mk-lib-card">
-            <div className="mk-lib-card-header"><div className="mk-lib-title"/><div className="mk-lib-privacy pub">Público</div></div>
-            <div className="mk-lib-lines"><div className="mk-lib-line"/><div className="mk-lib-line s"/><div className="mk-lib-line xs"/></div>
-            <div className="mk-feedback-bubble"><div className="mk-feedback-av"/><div style={{height:4,width:60,background:'#c8c0b4',borderRadius:2}}/></div>
-            <div className="mk-lib-footer"><span style={{fontSize:9,color:'#8a7f74',display:'inline-flex',alignItems:'center',gap:6}}><span style={{display:'inline-flex',alignItems:'center',gap:2}}><Icon name="heart" size={9}/>4</span><span style={{display:'inline-flex',alignItems:'center',gap:2}}><Icon name="chat-circle" size={9}/>2</span></span></div>
-          </div>
-          <div className="mk-lib-card">
-            <div className="mk-lib-card-header"><div className="mk-lib-title"/><div className="mk-lib-privacy prv">Privado</div></div>
-            <div className="mk-lib-lines"><div className="mk-lib-line"/><div className="mk-lib-line s"/><div className="mk-lib-line xs"/></div>
-            <div className="mk-lib-footer" style={{marginTop:22}}><span style={{fontSize:9,color:'#c8c0b4'}}>Solo tú</span></div>
-          </div>
         </div>
       </div>
     </div>,
@@ -17361,7 +17617,7 @@ const App=()=>{
   const logout=async()=>{await DB.signOut();setUser(null);setView('dashboard');};
 
   const goToBriefing=e=>{setEnergy(e);setView('briefing');};
-  const startCuentoWithChallenge=ch=>{setCuentoChallenge(ch);setView('cuento');};
+  const startCuentoWithChallenge=ch=>{setCuentoChallenge(ch);setView('cuento');if(!S.get(firstTimeKey('contrarreloj',user?.id)))setActivePopup('contrarreloj');};
   const startSession=cfg=>{
     if(cfg.type==='cuento'){setCuentoWritingMode(cfg.writingMode||'literatura');setView('cuento');}
     else{setSessionConfig(cfg);setView('editor');}
