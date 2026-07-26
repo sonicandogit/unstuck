@@ -9007,6 +9007,7 @@ const offlineKeepSave=entry=>{
     elapsed:entry.elapsed||0,date:entry.date,ts:entry.ts,
     visibility:entry.visibility,project_id:entry.project_id||entry.projectId,
     folder:entry.folder,meta_words:entry.meta_words,
+    goal_words:entry.goal_words??entry.goalWords??null,
     font_idx:entry.font_idx,editor_size:entry.editor_size,align_dir:entry.align_dir,
   });
 };
@@ -9205,10 +9206,20 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
     const wa=e.words_added;
     return s+(wa!=null?wa:(e.word_count||e.wordCount||0));
   },0);
-  // Active day = any entry with ≥100 effective words (words_added for projects, word_count for rest)
-  // effectiveWc = how many NEW words were written in that session
+  // Active day = una sesión que alcanzó SU objetivo (goal_words), o —para
+  // entries antiguas o sin objetivo— cualquiera con ≥100 palabras efectivas.
+  // El fallo anterior: un check de cortos (objetivo 30-70 palabras) cumplido
+  // NO contaba porque el umbral estaba fijo en 100, rompiendo rachas legítimas.
   const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};
-  const activeDayEntries=library.filter(e=>effectiveWc(e)>=100);
+  const goalOf=e=>e.goal_words||e.goalWords||0;
+  const MIN_ACTIVE=15; // suelo de seguridad: evita que un garabato cuente como día
+  const isActiveEntry=e=>{
+    const w=effectiveWc(e);
+    const g=goalOf(e);
+    if(g>0)return w>=g&&w>=MIN_ACTIVE;      // completó su ejercicio
+    return w>=100;                           // sin objetivo conocido: umbral clásico
+  };
+  const activeDayEntries=library.filter(isActiveEntry);
   const dates=[...new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
   let streak=0,wildcardCount=wildcards||0,wildcardUsed=0;
   const bridged=new Set(bridgedDays||[]);
@@ -10161,7 +10172,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               {(()=>{
                 const now=new Date();const dow=now.getDay();
                 const monday=new Date(now);monday.setDate(now.getDate()-(dow===0?6:dow-1));
-                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const activeDates=new Set(library.filter(e=>effectiveWc(e)>=100).map(e=>e.date?.slice(0,10)).filter(Boolean));
+                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const goalOf=e=>e.goal_words||e.goalWords||0;const isActive=e=>{const w=effectiveWc(e);const g=goalOf(e);return g>0?(w>=g&&w>=15):w>=100;};const activeDates=new Set(library.filter(isActive).map(e=>e.date?.slice(0,10)).filter(Boolean));
                 const DAY_LABELS=['L','M','X','J','V','S','D'];
                 return Array.from({length:7},(_,i)=>{
                   const d=new Date(monday);d.setDate(monday.getDate()+i);
@@ -10319,7 +10330,7 @@ const SectionCard=({accent,tag,title,children})=>(
 
 const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,writingMode='literatura'})=>{
   const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
-    library.some(e=>e.date?.slice(0,10)===today()&&(e.words_added!=null?e.words_added:(e.word_count||0))>=100);
+    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const g=e.goal_words||e.goalWords||0;return g>0?(w>=g&&w>=15):w>=100;});
   const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
   const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds,writingMode));
   const checkDone=!!todayCheck?.done;
@@ -11115,6 +11126,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       editor_size:sz,editorSize:sz,
       align_dir:align,alignDir:align,
       week_id:sessionConfig.weekId||null,weekId:sessionConfig.weekId||null,
+      goal_words:minW||null, // objetivo del ejercicio: permite saber si la sesión se completó (para la racha)
       project_id:currentProject?.id||null,projectId:currentProject?.id||null,
       folder,
     };
