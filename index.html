@@ -10416,8 +10416,8 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
             </div>
             <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:16}}>{checkExercise.desc}</p>
             {checkDone
-              ?<Btn variant="ghost" onClick={()=>onStart({type:'check',exercise:checkExercise,writingMode})} small>Hacer otro</Btn>
-              :<button onClick={()=>{S.set('flujo:check:'+user.id+':'+today(),{exerciseId:checkExercise.id,date:today()});onStart({type:'check',exercise:checkExercise,writingMode})}} style={{width:'100%',height:42,background:SESSION_BTN_BG,border:'none',borderRadius:9,color:SESSION_BTN_TXT,fontSize:13.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Empezar check →</button>}
+              ?<Btn variant="ghost" onClick={()=>onStart({type:'check',exercise:checkExercise,writingMode,weekId:checkExercise.id})} small>Hacer otro</Btn>
+              :<button onClick={()=>{S.set('flujo:check:'+user.id+':'+today(),{exerciseId:checkExercise.id,date:today()});onStart({type:'check',exercise:checkExercise,writingMode,weekId:checkExercise.id})}} style={{width:'100%',height:42,background:SESSION_BTN_BG,border:'none',borderRadius:9,color:SESSION_BTN_TXT,fontSize:13.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Empezar check →</button>}
           </div>
         </SectionCard>
 
