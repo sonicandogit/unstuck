@@ -9212,12 +9212,24 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
   // NO contaba porque el umbral estaba fijo en 100, rompiendo rachas legítimas.
   const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};
   const goalOf=e=>e.goal_words||e.goalWords||0;
-  const MIN_ACTIVE=15; // suelo de seguridad: evita que un garabato cuente como día
+  const skOf=e=>e.sk||'check';
+  // Regla: cualquier sesión real mantiene la racha (checks, duetos, cadenas,
+  // colectivos y proyectos). Para checks, si hay un objetivo FIABLE guardado se
+  // usa; si no (entries antiguas, o objetivo corrupto de datos viejos), basta un
+  // umbral bajo — un check es una sesión corta por diseño. Los formatos largos
+  // (dueto/proyecto/cadena/colectivo) cuentan con cualquier aportación real.
+  const CHECK_MIN=20;   // suelo para checks
+  const LONG_MIN=20;    // suelo para formatos largos (siempre lo superan)
   const isActiveEntry=e=>{
     const w=effectiveWc(e);
+    const sk=skOf(e);
+    if(['dueto','chain','encadenado','colectivo','cadena'].includes(sk))return w>=LONG_MIN;
+    if(sk==='proyecto')return w>=CHECK_MIN;
+    // checks y retos: cumplir objetivo si es de un corto, con techo sensato para
+    // no exigir de más por datos corruptos.
     const g=goalOf(e);
-    if(g>0)return w>=g&&w>=MIN_ACTIVE;      // completó su ejercicio
-    return w>=100;                           // sin objetivo conocido: umbral clásico
+    if(g>0&&g<=120)return w>=Math.min(g,CHECK_MIN);
+    return w>=CHECK_MIN;
   };
   const activeDayEntries=library.filter(isActiveEntry);
   const dates=[...new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
@@ -10172,7 +10184,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               {(()=>{
                 const now=new Date();const dow=now.getDay();
                 const monday=new Date(now);monday.setDate(now.getDate()-(dow===0?6:dow-1));
-                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const goalOf=e=>e.goal_words||e.goalWords||0;const isActive=e=>{const w=effectiveWc(e);const g=goalOf(e);return g>0?(w>=g&&w>=15):w>=100;};const activeDates=new Set(library.filter(isActive).map(e=>e.date?.slice(0,10)).filter(Boolean));
+                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const goalOf=e=>e.goal_words||e.goalWords||0;const skOf=e=>e.sk||'check';const isActive=e=>{const w=effectiveWc(e);const sk=skOf(e);if(['dueto','chain','encadenado','colectivo','cadena'].includes(sk))return w>=20;if(sk==='proyecto')return w>=20;const g=goalOf(e);if(g>0&&g<=120)return w>=Math.min(g,20);return w>=20;};const activeDates=new Set(library.filter(isActive).map(e=>e.date?.slice(0,10)).filter(Boolean));
                 const DAY_LABELS=['L','M','X','J','V','S','D'];
                 return Array.from({length:7},(_,i)=>{
                   const d=new Date(monday);d.setDate(monday.getDate()+i);
@@ -10330,7 +10342,7 @@ const SectionCard=({accent,tag,title,children})=>(
 
 const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,writingMode='literatura'})=>{
   const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
-    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const g=e.goal_words||e.goalWords||0;return g>0?(w>=g&&w>=15):w>=100;});
+    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const sk=e.sk||'check';if(['dueto','chain','encadenado','colectivo','cadena','proyecto'].includes(sk))return w>=20;const g=e.goal_words||e.goalWords||0;return (g>0&&g<=120)?w>=Math.min(g,20):w>=20;});
   const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
   const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds,writingMode));
   const checkDone=!!todayCheck?.done;
