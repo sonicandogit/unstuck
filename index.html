@@ -16191,7 +16191,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
     setSubmitting(true);
     try{
       const turn={
-        id:uid(),collective_id:col.id,user_id:user.id,
+        collective_id:col.id,user_id:user.id,
         author_name:user.name,
         html:el.innerHTML,plain,
         word_count:wc,turn_number:col.turn_count+1,
