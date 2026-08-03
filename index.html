@@ -16190,13 +16190,34 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
     if(!plain||wc<col.min_words)return;
     setSubmitting(true);
     try{
+      // El editor puede llevar mucho rato abierto: releemos el estado REAL del
+      // colectivo justo antes de guardar, para no usar un turn_count obsoleto
+      // (que provocaría un turn_number duplicado y el guardado fallaría).
+      const fresh=await DB.getCollectiveDetail(col.id);
+      if(fresh.status!=='active'){
+        setCol(fresh);onUpdate&&onUpdate(fresh);
+        alert('Este relato ya se ha cerrado.');setSubmitting(false);return;
+      }
+      if(fresh.current_turn_user_id!==user.id){
+        // Alguien se adelantó o el turno ya no es mío: refresco y aviso.
+        setCol(fresh);onUpdate&&onUpdate(fresh);
+        alert('El turno ha cambiado. Se ha actualizado el relato; revisa antes de escribir.');
+        setSubmitting(false);return;
+      }
+      // Calcular siguiente turno con los datos FRESCOS
+      const freshMembers=fresh.members||[];
+      const myFresh=freshMembers.find(m=>m.user_id===user.id);
+      const myOrderFresh=myFresh?.turn_order||1;
+      const nextOrderFresh=(myOrderFresh%freshMembers.length)+1;
+      const nextMemberFresh=freshMembers.find(m=>m.turn_order===nextOrderFresh);
+      const nextTurnNumber=(fresh.turn_count||0)+1;
       const turn={
         collective_id:col.id,user_id:user.id,
         author_name:user.name,
         html:el.innerHTML,plain,
-        word_count:wc,turn_number:col.turn_count+1,
+        word_count:wc,turn_number:nextTurnNumber,
       };
-      await DB.submitCollectiveTurn(col.id,turn,nextMember?.user_id||null,col.turn_count+1);
+      await DB.submitCollectiveTurn(col.id,turn,nextMemberFresh?.user_id||null,nextTurnNumber);
       // Registrar mi parte como entrada propia para que cuente en MI racha y MIS
       // palabras. Antes el colectivo no guardaba nada en `entries`, así que
       // escribir en un relato colectivo no sumaba absolutamente nada a las
@@ -16205,9 +16226,9 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
       const secs=turnSecs();
       try{
         await DB.upsertEntry({
-          id:'collective_'+col.id+'_t'+(col.turn_count+1)+'_'+user.id.slice(-4),
+          id:'collective_'+col.id+'_t'+nextTurnNumber+'_'+user.id.slice(-4),
           user_id:user.id,sk:'colectivo',
-          title:(col.title||'Relato colectivo')+' (parte '+(col.turn_count+1)+')',
+          title:(col.title||'Relato colectivo')+' (parte '+nextTurnNumber+')',
           session_label:'Relato colectivo · '+(col.title||''),
           html:turn.html,plain:turn.plain,word_count:wc,words_added:wc,
           elapsed:secs,font_idx:0,editor_size:17,align_dir:'left',
@@ -16440,29 +16461,40 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
         <span style={{fontSize:11,fontWeight:600,color:TXT}}>Relatos colectivos</span>
       </div>
       {myTurn.map(c=>(
-        <button key={c.id} onClick={()=>onOpen(c)}
-          style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:ADVANCE_BG,
-            border:'1px solid rgba(30,155,240,0.3)',borderRadius:10,padding:'10px 14px',
-            cursor:'pointer',marginBottom:6,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-          <Icon name="pencil" size={16} color={AZUL}/>
-          <div style={{flex:1}}>
-            <div style={{fontSize:12,fontWeight:600,color:TXT}}>{c.title}</div>
-            <div style={{fontSize:10,color:AZUL}}>Es tu turno · Parte {c.turn_count+1}</div>
+        <div key={c.id}
+          style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
+            border:'1.5px solid '+AZUL,borderRadius:10,padding:'11px 14px',
+            marginBottom:6,textAlign:'left'}}>
+          <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(30,155,240,0.12)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name="pencil-simple" size={16} color={AZUL}/>
           </div>
-          <Icon name="arrow-right" size={13} color={AZUL}/>
-        </button>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
+            <div style={{fontSize:10.5,fontWeight:600,color:AZUL}}>Es tu turno · Parte {c.turn_count+1}</div>
+          </div>
+          <button onClick={()=>onOpen(c)}
+            style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:AZUL,border:'none',borderRadius:8,padding:'8px 14px',fontSize:12.5,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+            Escribir<Icon name="arrow-right" size={12} color="#fff"/>
+          </button>
+        </div>
       ))}
       {following.map(c=>(
-        <button key={c.id} onClick={()=>onOpen(c)}
-          style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',
-            border:'0.5px solid '+BDR,borderRadius:10,padding:'9px 14px',
-            cursor:'pointer',marginBottom:6,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-          <Icon name="hourglass" size={14} color={FAINT}/>
-          <div style={{flex:1}}>
-            <div style={{fontSize:12,color:TXT}}>{c.title}</div>
-            <div style={{fontSize:10,color:FAINT}}>Turno {c.turn_count+1} · esperando…</div>
+        <div key={c.id}
+          style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
+            border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 14px',
+            marginBottom:6,textAlign:'left'}}>
+          <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name="hourglass" size={15} color={FAINT}/>
           </div>
-        </button>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
+            <div style={{fontSize:10.5,color:FAINT}}>Turno {c.turn_count+1} · esperando…</div>
+          </div>
+          <button onClick={()=>onOpen(c)}
+            style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'7px 13px',fontSize:12,fontWeight:600,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+            Leer<Icon name="arrow-right" size={11} color={MUTED}/>
+          </button>
+        </div>
       ))}
     </div>
   );
