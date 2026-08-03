@@ -120,7 +120,8 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 .wc-slides-wrap{flex:1;overflow:hidden;position:relative;}
 .wc-slides{display:flex;height:100%;transition:transform 0.4s cubic-bezier(0.25,0.46,0.45,0.94);}
 .wc-slide{min-width:100%;padding:30px 30px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;position:relative;}
-.wc-eyebrow{font:600 10px/1 'Source Sans 3',sans-serif;letter-spacing:.26em;text-transform:uppercase;color:#1E9BF0;position:relative;z-index:1;}
+.wc-eyebrow{font:600 10px/1 'Source Sans 3',sans-serif;letter-spacing:.26em;text-transform:uppercase;color:#1E9BF0;position:relative;z-index:1;display:flex;align-items:center;gap:8px;}
+.wc-eyebrow-ic{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .wc-eyebrow.naranja{color:#F15A24;}
 .wc-title{font-family:'Playfair Display',serif;font-size:27px;font-weight:700;color:var(--text,#0A1B3D);line-height:1.18;letter-spacing:-0.02em;position:relative;z-index:1;}
 .wc-body{font-size:14px;line-height:1.7;color:var(--text2,#5b6478);display:flex;flex-direction:column;gap:10px;position:relative;z-index:1;}
@@ -4908,6 +4909,25 @@ const DB = {
     const{data:members}=await getSB().from('collective_members').select('*').eq('collective_id',id).order('turn_order');
     const{data:turns}=await getSB().from('collective_turns').select('*').eq('collective_id',id).order('turn_number');
     return{...col,members:members||[],turns:turns||[]};
+  },
+  // Incorpora un participante a un colectivo YA iniciado, en la posición
+  // 'position' de la ronda (1-based). Desplaza el turn_order de los que van
+  // en esa posición o después, para hacerle hueco.
+  addCollectiveMemberAt: async(collectiveId,newMember,position)=>{
+    // 1. Traer los miembros actuales ordenados
+    const{data:members}=await getSB().from('collective_members').select('*').eq('collective_id',collectiveId).order('turn_order');
+    const list=members||[];
+    // 2. Empujar +1 el turn_order de todos los que están en 'position' o después
+    const toShift=list.filter(m=>m.turn_order>=position);
+    for(const m of toShift){
+      await getSB().from('collective_members').update({turn_order:m.turn_order+1}).eq('id',m.id);
+    }
+    // 3. Insertar el nuevo miembro en la posición liberada
+    const{error}=await getSB().from('collective_members').insert({
+      collective_id:collectiveId,user_id:newMember.id,name:newMember.name,
+      username:newMember.username,turn_order:position,voted_finish:false,
+    });
+    if(error)throw error;
   },
   submitCollectiveTurn: async(collectiveId,turn,nextUserId,nextTurnCount)=>{
     const{error:te}=await getSB().from('collective_turns').insert(turn);
@@ -9702,57 +9722,77 @@ const AuthScreen=({onAuth})=>{
 // ══════════════════════════════════════════════════════════════════
 const discoveredKey=(id,uid)=>'pretexto:discovered:'+(uid||'anon')+':'+id;
 
-const DiscoveryCards=({user,library=[],writingMode,onToggleMode,onOpenCollab})=>{
+const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,onNewChallenge,onOpenTeams,onOpenVoiceInfo})=>{
   const [dismissed,setDismissed]=useState({});
   const dismiss=(id)=>{ S.set(discoveredKey(id,user?.id),Date.now()); setDismissed(d=>({...d,[id]:true})); };
   const seen=(id)=>!!S.get(discoveredKey(id,user?.id))||dismissed[id];
 
-  // ¿Ya ha escrito algún texto colaborativo? Entonces no hace falta la tarjeta.
-  const usedCollab=library.some(e=>['dueto','colectivo','chain','encadenado'].includes(e.sk));
+  // Señales de "ya usó la función" para retirar la tarjeta correspondiente.
+  const usedCollab=library.some(e=>['dueto','colectivo','chain','encadenado','cadena'].includes(e.sk));
+  const usedPublic=library.some(e=>e.visibility==='abierto'||e.visibility==='amigos');
+  const usedCuento=library.some(e=>e.sk==='cuento');
 
-  const cards=[];
-  // 1) Modo literatura / guion — nadie sabe que existe si no se le dice
-  if(!seen('disc_modo')){
-    cards.push({
-      id:'disc_modo', icon:'film-slate', color:AZULMED,
-      title:'¿Sabías que puedes escribir guiones?',
-      body:'Cambia entre modo Literatura y modo Guion cuando quieras: los ejercicios, las lecciones y el editor se adaptan.',
-      cta:'Probar modo guion',
-      action:()=>{ onToggleMode&&onToggleMode(); dismiss('disc_modo'); },
-    });
-  }
-  // 2) Escritura colaborativa — solo si aún no la ha usado
-  if(!seen('disc_collab')&&!usedCollab){
-    cards.push({
-      id:'disc_collab', icon:'hands-clapping', color:NARANJA,
+  // Catálogo de tarjetas. Cada una: condición de seguir mostrándose + acción.
+  const catalog=[
+    {id:'disc_collab', show:!usedCollab, icon:'hands-clapping', color:NARANJA,
       title:'Escribe con otras personas',
-      body:'A cuatro manos, relatos encadenados o colectivos: podéis construir un texto por turnos. Una de las mejores formas de desatascarse.',
-      cta:'Ver cómo funciona',
-      action:()=>{ onOpenCollab&&onOpenCollab(); dismiss('disc_collab'); },
-    });
-  }
+      body:'A cuatro manos, con relatos encadenados o en colectivo: escribid una historia por turnos. Es una de las mejores formas de desatascarse y volver a disfrutar escribiendo.',
+      cta:'Pruébalo con un amigo',
+      action:()=>{ onOpenCollab&&onOpenCollab(); dismiss('disc_collab'); }},
+    {id:'disc_biblioteca', show:!usedPublic, icon:'books', color:AZULMED,
+      title:'Publica en la biblioteca',
+      body:'Escribimos por muchos motivos, pero uno de ellos es que queremos que nos lean. Por eso existe la biblioteca: un lugar donde compartir tus textos con la comunidad y descubrir los de los demás.',
+      cta:'Comparte un texto',
+      action:()=>{ onOpenLibrary&&onOpenLibrary(); dismiss('disc_biblioteca'); }},
+    {id:'disc_contrarreloj', show:!usedCuento, icon:'timer', color:'#F15A24',
+      title:'Prueba un reto contrarreloj',
+      body:'Cinco palabras al azar. Una hora. Toda tu creatividad. De vez en cuando conviene ponerse contra las cuerdas y descubrir qué sale.',
+      cta:'¿Preparado?',
+      action:()=>{ onNewChallenge&&onNewChallenge(); dismiss('disc_contrarreloj'); }},
+    {id:'disc_equipos', show:true, icon:'users', color:'#F15A24',
+      title:'Crea tu propio equipo',
+      body:'Quizá ya tengáis un grupo con el que escribís de vez en cuando. Mandaros retos, leer vuestros textos y compartir estadísticas. Si es así, en Pretexto os lo ponemos fácil.',
+      cta:'Crea tu equipo',
+      action:()=>{ onOpenTeams&&onOpenTeams(); dismiss('disc_equipos'); }},
+    {id:'disc_voz', show:true, icon:'microphone', color:'#1E9BF0',
+      title:'Igual te funciona «escribir» en voz alta',
+      body:'Hay quien se desbloquea hablando en voz alta. Primero se graba y luego reescribe el texto. ¿Quieres probarlo? Busca el icono del micrófono en cualquier editor.',
+      cta:'Entendido',
+      action:()=>{ dismiss('disc_voz'); }},
+    {id:'disc_modo', show:true, icon:'film-slate', color:AZULMED,
+      title:'¿Sabías que aquí puedes escribir guiones?',
+      body:'Pasa del modo Literatura al modo Guion cuando quieras. Los ejercicios, las lecciones y el editor se adaptan automáticamente.',
+      cta:'Probar modo guion',
+      action:()=>{ onToggleMode&&onToggleMode(); dismiss('disc_modo'); }},
+  ];
 
-  if(cards.length===0)return null;
+  // Pendientes = no vistas/descartadas y cuya función aún no se ha usado.
+  const pending=catalog.filter(c=>c.show&&!seen(c.id));
+  if(pending.length===0)return null;
+
+  // ROTACIÓN DIARIA: una tarjeta distinta cada día. Se elige de forma estable
+  // por el día del año, de modo que dentro de un mismo día siempre sale la
+  // misma, y al día siguiente rota a la siguiente pendiente.
+  const dayNum=Math.floor(Date.now()/86400000); // días desde epoch (estable por jornada)
+  const c=pending[dayNum%pending.length];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:18}}>
-      {cards.map(c=>(
-        <div key={c.id} style={{position:'relative',display:'flex',alignItems:'flex-start',gap:13,background:CARD_BG,border:'0.5px solid '+c.color+'40',borderLeft:'3px solid '+c.color,borderRadius:12,padding:'15px 16px 15px 15px'}}>
-          <div style={{flexShrink:0,width:38,height:38,borderRadius:10,background:c.color+'15',display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <Icon name={c.icon} size={20} color={c.color}/>
-          </div>
-          <div style={{flex:1,minWidth:0,paddingRight:18}}>
-            <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:3,fontFamily:'"Playfair Display",Georgia,serif'}}>{c.title}</div>
-            <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10}}>{c.body}</div>
-            <button onClick={c.action} style={{display:'inline-flex',alignItems:'center',gap:5,background:c.color,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-              {c.cta}<Icon name="arrow-right" size={12} color="#fff"/>
-            </button>
-          </div>
-          <button onClick={()=>dismiss(c.id)} title="Ocultar" style={{position:'absolute',top:10,right:10,background:'transparent',border:'none',cursor:'pointer',padding:4,color:FAINT,lineHeight:0}}>
-            <Icon name="x" size={14} color={FAINT}/>
+      <div style={{position:'relative',display:'flex',alignItems:'flex-start',gap:13,background:CARD_BG,border:'0.5px solid '+c.color+'40',borderLeft:'3px solid '+c.color,borderRadius:12,padding:'15px 16px 15px 15px'}}>
+        <div style={{flexShrink:0,width:38,height:38,borderRadius:10,background:c.color+'15',display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <Icon name={c.icon} size={20} color={c.color}/>
+        </div>
+        <div style={{flex:1,minWidth:0,paddingRight:18}}>
+          <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:3,fontFamily:'"Playfair Display",Georgia,serif'}}>{c.title}</div>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10}}>{c.body}</div>
+          <button onClick={c.action} style={{display:'inline-flex',alignItems:'center',gap:5,background:c.color,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+            {c.cta}<Icon name="arrow-right" size={12} color="#fff"/>
           </button>
         </div>
-      ))}
+        <button onClick={()=>dismiss(c.id)} title="Ocultar" style={{position:'absolute',top:10,right:10,background:'transparent',border:'none',cursor:'pointer',padding:4,color:FAINT,lineHeight:0}}>
+          <Icon name="x" size={14} color={FAINT}/>
+        </button>
+      </div>
     </div>
   );
 };
@@ -10115,9 +10155,12 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
 
       <div style={{flex:1,maxWidth:680,width:'100%',margin:'0 auto',padding:'32px 20px 48px'}}>
         <ReceivedChallengesBanner challenges={receivedChallenges} onAccept={onAcceptChallenge} onSave={onSaveChallenge} onDecline={onDeclineChallenge}/>
-        <DiscoveryCards user={user} library={library} writingMode={writingMode}
+        <DiscoveryCards user={user} library={library}
           onToggleMode={()=>setConfirmModeChange(true)}
-          onOpenCollab={()=>setShowCollectives(true)}/>
+          onOpenCollab={()=>setShowCollectives(true)}
+          onOpenLibrary={()=>onOpenLibrary&&onOpenLibrary()}
+          onNewChallenge={()=>onNewChallenge&&onNewChallenge()}
+          onOpenTeams={()=>setShowTeams(true)}/>
         <SharedBackBanner user={user} refreshKey={refreshKey}/>
         <CollabInviteBanner user={user} onAccepted={onCollabAccepted} refreshKey={refreshKey}/>
         <CollectivesHub user={user} refreshKey={refreshKey}
@@ -13143,7 +13186,9 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
 };
 
 /* ─── PUBLIC PROFILE ─────────────────────────────── */
-const PublicProfile=({user,onClose})=>{
+const PublicProfile=({user,onClose,isFollowing=false,onUnfollow,library,reflections})=>{
+  const [unfollowing,setUnfollowing]=useState(false);
+  const [copied,setCopied]=useState(false);
   const [stats,setStats]=useState(null);
   const [loading,setLoading]=useState(true);
   const [showTexts,setShowTexts]=useState(false);
@@ -13243,11 +13288,19 @@ const PublicProfile=({user,onClose})=>{
         )}
         {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
 
-        {/* Share + close */}
+        {/* Acciones: copiar enlace + (si procede) dejar de seguir */}
         <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
           <div style={{display:'flex',gap:8}}>
-            <div style={{flex:1,background:'rgba(10,27,61,0.05)',borderRadius:8,padding:'8px 10px',fontSize:11,color:MUTED,fontFamily:"'Courier New',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{profileUrl}</div>
-            <button onClick={()=>navigator.clipboard?.writeText(profileUrl).then(()=>alert('¡Copiado!'))} style={{background:ADVANCE_BG,border:'none',borderRadius:8,padding:'8px 14px',fontSize:12,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer',flexShrink:0}}>Copiar</button>
+            <button onClick={()=>{navigator.clipboard?.writeText(profileUrl).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1800);});}}
+              style={{flex:1,display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:ADVANCE_BG,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer'}}>
+              <Icon name={copied?'check':'link-simple'} size={15} color={ADVANCE_TXT}/>{copied?'¡Enlace copiado!':'Copiar link'}
+            </button>
+            {isFollowing&&onUnfollow&&(
+              <button onClick={async()=>{if(unfollowing)return;setUnfollowing(true);try{await onUnfollow(user.id);onClose();}catch(e){setUnfollowing(false);}}}
+                style={{flex:1,display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:MUTED,cursor:unfollowing?'wait':'pointer'}}>
+                <Icon name="user-minus" size={15} color={MUTED}/>{unfollowing?'…':'Dejar de seguir'}
+              </button>
+            )}
           </div>
           <button onClick={onClose} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'9px',fontSize:13,color:MUTED,cursor:'pointer'}}>Cerrar</button>
         </div>
@@ -14324,12 +14377,6 @@ const AmigosScreen=({user,onClose})=>{
             style={{background:'rgba(30,155,240,0.07)',border:'1px solid rgba(30,155,240,0.2)',borderRadius:6,padding:'4px 9px',fontSize:10,fontWeight:600,color:AZUL,cursor:'pointer'}}>
             Ver
           </button>
-          {showUnfollow&&(
-            <button onClick={()=>handleFollow(u.id,true)}
-              style={{background:'transparent',border:'1px solid '+BDR,borderRadius:6,padding:'4px 8px',fontSize:10,color:MUTED,cursor:'pointer'}}>
-              ✕
-            </button>
-          )}
           {showFollowBack&&!isFollowing&&(
             <button onClick={()=>handleFollow(u.id,false,u)}
               style={{background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:6,padding:'4px 9px',fontSize:10,fontWeight:600,color:AZUL,cursor:'pointer'}}>
@@ -14416,7 +14463,7 @@ const AmigosScreen=({user,onClose})=>{
                 </div>
                 {following.length===0
                   ?<ColEmpty msg="No sigues a nadie todavía. Búscalos arriba."/>
-                  :following.map(f=><PersonRow key={f.id} u={f} showUnfollow/>)
+                  :following.map(f=><PersonRow key={f.id} u={f}/>)
                 }
               </div>
 
@@ -14435,7 +14482,10 @@ const AmigosScreen=({user,onClose})=>{
         </div>
       </div>
 
-      {viewingProfile&&<PublicProfile user={viewingProfile} onClose={()=>setViewingProfile(null)}/>}
+      {viewingProfile&&<PublicProfile user={viewingProfile}
+        isFollowing={followingIds.has(viewingProfile.id)}
+        onUnfollow={async(id)=>{await handleFollow(id,true);}}
+        onClose={()=>setViewingProfile(null)}/>}
     </div>
   );
 };
@@ -15899,7 +15949,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
   const [premise,setPremise]=useState('');
   const [title,setTitle]=useState('');
   const [minWords,setMinWords]=useState(100);
-  const [members,setMembers]=useState([]); // [{id,name,username}]
+  const [members,setMembers]=useState([{id:user.id,name:user.name,username:user.username,isMe:true}]); // el creador entra como uno más y puede reordenarse
   const [searchQ,setSearchQ]=useState('');
   const [searchRes,setSearchRes]=useState([]);
   const [searching,setSearching]=useState(false);
@@ -15921,19 +15971,23 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
     if(!members.find(m=>m.id===p.id))setMembers(prev=>[...prev,p]);
     setSearchQ('');setSearchRes([]);
   };
-  const removeMember=id=>setMembers(prev=>prev.filter(m=>m.id!==id));
+  const removeMember=id=>{if(id===user.id)return;setMembers(prev=>prev.filter(m=>m.id!==id));};
   const moveUp=i=>setMembers(prev=>{if(i===0)return prev;const n=[...prev];[n[i-1],n[i]]=[n[i],n[i-1]];return n;});
+  const moveDown=i=>setMembers(prev=>{if(i>=prev.length-1)return prev;const n=[...prev];[n[i+1],n[i]]=[n[i],n[i+1]];return n;});
   const shuffle=()=>setMembers(prev=>{const n=[...prev];for(let i=n.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[n[i],n[j]]=[n[j],n[i]];}return n;});
 
   const create=async()=>{
     if(!premise.trim()||!title.trim()||members.length<1)return;
     setSaving(true);
     try{
-      // Creator is always first
-      const allMembers=[{id:user.id,name:user.name,username:user.username},...members];
+      // El orden es el que el creador ha dispuesto en la lista (puede ir en
+      // cualquier posición, no forzosamente primero). El primer turno es de
+      // quien quede en primera posición de la ronda.
+      const allMembers=members;
+      const firstUserId=allMembers[0]?.id||user.id;
       const col=await DB.createCollective({
         title:title.trim(),premise:premise.trim(),min_words:minWords,
-        created_by:user.id,current_turn_user_id:user.id,
+        created_by:user.id,current_turn_user_id:firstUserId,
         status:'active',turn_count:0,
       });
       await DB.addCollectiveMembers(allMembers.map((m,i)=>({
@@ -16019,54 +16073,45 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
               ))}
             </div>
           )}
-          {/* Creator always first */}
-          <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'0.5px solid '+BDR}}>
-            <UserAvatar user={user} size={26}/>
-            <div style={{flex:1}}><div style={{fontSize:12,color:TXT,fontWeight:500}}>{user.name}</div>
-              <div style={{fontSize:10,color:FAINT}}>@{user.username} · Creador</div></div>
-            <Icon name="crown" size={13} color={NARANJA}/>
-          </div>
           {members.map(m=>(
             <div key={m.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'0.5px solid '+BDR}}>
               <UserAvatar user={m} size={26}/>
-              <div style={{flex:1}}><div style={{fontSize:12,color:TXT,fontWeight:500}}>{m.name}</div>
-                <div style={{fontSize:10,color:FAINT}}>@{m.username}</div></div>
-              <button onClick={()=>removeMember(m.id)} style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:4}}><Icon name="x" size={13}/></button>
+              <div style={{flex:1}}><div style={{fontSize:12,color:TXT,fontWeight:500}}>{m.name}{m.id===user.id&&' (tú)'}</div>
+                <div style={{fontSize:10,color:FAINT}}>@{m.username}{m.id===user.id?' · Creador':''}</div></div>
+              {m.id===user.id
+                ?<Icon name="crown" size={13} color={NARANJA}/>
+                :<button onClick={()=>removeMember(m.id)} style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:4}}><Icon name="x" size={13}/></button>}
             </div>
           ))}
-          {members.length===0&&<div style={{fontSize:11,color:FAINT,padding:'12px 0',textAlign:'center'}}>Añade al menos un participante</div>}
+          {members.length<2&&<div style={{fontSize:11,color:FAINT,padding:'12px 0',textAlign:'center'}}>Añade al menos un participante más</div>}
           <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
             <Btn variant="ghost" onClick={()=>setStep(2)}>← Atrás</Btn>
-            <Btn variant="primary" onClick={()=>setStep(4)} disabled={members.length<1}>Siguiente →</Btn>
+            <Btn variant="primary" onClick={()=>setStep(4)} disabled={members.length<2}>Siguiente →</Btn>
           </div>
         </>}
 
         {/* Step 4: Order */}
         {step===4&&<>
           <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:4}}>Orden de turno</div>
-          <div style={{fontSize:11,color:MUTED,marginBottom:10}}>El creador siempre va primero. Reordena los demás o usa aleatorio.</div>
+          <div style={{fontSize:11,color:MUTED,marginBottom:10}}>Coloca a cada autor en el orden de la ronda. Puedes ponerte donde quieras.</div>
           <button onClick={shuffle} style={{display:'flex',alignItems:'center',gap:6,marginBottom:12,
             background:'rgba(30,155,240,0.07)',border:'1px solid rgba(30,155,240,0.25)',
             borderRadius:8,padding:'7px 14px',fontSize:11,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",fontWeight:600}}>
             <Icon name="shuffle" size={13} color={AZUL}/>Orden al azar
           </button>
-          {/* Creator fixed */}
-          <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'0.5px solid '+BDR}}>
-            <span style={{fontSize:11,color:FAINT,width:18,textAlign:'center'}}>1</span>
-            <UserAvatar user={user} size={24}/>
-            <div style={{flex:1,fontSize:12,color:TXT}}>{user.name}</div>
-            <Icon name="crown" size={13} color={NARANJA}/>
-          </div>
           {members.map((m,i)=>(
             <div key={m.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'0.5px solid '+BDR}}>
-              <span style={{fontSize:11,color:FAINT,width:18,textAlign:'center'}}>{i+2}</span>
+              <span style={{fontSize:11,color:FAINT,width:18,textAlign:'center'}}>{i+1}</span>
               <UserAvatar user={m} size={24}/>
-              <div style={{flex:1,fontSize:12,color:TXT}}>{m.name}</div>
+              <div style={{flex:1,fontSize:12,color:TXT}}>{m.name}{m.id===user.id&&' (tú)'}</div>
+              {m.id===user.id&&<Icon name="crown" size={13} color={NARANJA}/>}
               <div style={{display:'flex',gap:2}}>
                 <button onClick={()=>moveUp(i)} disabled={i===0} style={{background:'transparent',border:'none',cursor:i===0?'default':'pointer',color:i===0?BDR:MUTED,padding:4}}><Icon name="arrow-up" size={12}/></button>
+                <button onClick={()=>moveDown(i)} disabled={i===members.length-1} style={{background:'transparent',border:'none',cursor:i===members.length-1?'default':'pointer',color:i===members.length-1?BDR:MUTED,padding:4}}><Icon name="arrow-down" size={12}/></button>
               </div>
             </div>
           ))}
+          <div style={{fontSize:10,color:FAINT,marginTop:8}}>Quien quede primero abrirá el relato. Puedes ir en cualquier posición.</div>
           <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
             <Btn variant="ghost" onClick={()=>setStep(3)}>← Atrás</Btn>
             <Btn variant="primary" onClick={create} disabled={saving}>{saving?'Creando…':'Crear relato ✓'}</Btn>
@@ -16098,6 +16143,41 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
   const nextOrder=(myOrder%members.length)+1;
   const nextMember=members.find(m=>m.turn_order===nextOrder);
   const myVote=myMember?.voted_finish||false;
+
+  // ── Incorporar un participante a mitad de relato (solo el creador) ──
+  const isCreator=col.created_by===user.id;
+  const [showAddMember,setShowAddMember]=useState(false);
+  const [addQuery,setAddQuery]=useState('');
+  const [addResults,setAddResults]=useState([]);
+  const [addSearching,setAddSearching]=useState(false);
+  const [addPicked,setAddPicked]=useState(null);       // usuario elegido
+  const [addPosition,setAddPosition]=useState(members.length+1); // posición en la ronda
+  const [addSaving,setAddSaving]=useState(false);
+  const searchAddUser=async(q)=>{
+    setAddQuery(q);setAddPicked(null);
+    if(q.trim().length<2){setAddResults([]);return;}
+    setAddSearching(true);
+    try{
+      const r=await DB.searchByUsername(q.trim());
+      const existingIds=new Set(members.map(m=>m.user_id));
+      setAddResults((r||[]).filter(u=>u.id!==user.id&&!existingIds.has(u.id)));
+    }catch(e){setAddResults([]);}
+    finally{setAddSearching(false);}
+  };
+  const confirmAddMember=async()=>{
+    if(!addPicked||addSaving)return;
+    setAddSaving(true);
+    try{
+      await DB.addCollectiveMemberAt(col.id,addPicked,addPosition);
+      // El añadido verá el relato en "sus colectivos" (mismo mecanismo que los
+      // miembros iniciales). Recargamos el detalle para reflejar el cambio.
+      const fresh=await DB.getCollectiveDetail(col.id);
+      setCol(fresh);
+      if(onUpdate)onUpdate(fresh);
+      setShowAddMember(false);setAddQuery('');setAddResults([]);setAddPicked(null);
+    }catch(e){alert('No se pudo añadir: '+e.message);}
+    finally{setAddSaving(false);}
+  };
 
   const handleInput=e=>{
     if(!startedAtRef.current)startedAtRef.current=Date.now();
@@ -16162,6 +16242,71 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
 
   return(
     <div style={{position:'fixed',inset:0,zIndex:180,background:PAGE_BG,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='colectivos' onClose={dismissIntro}/>}
+      {showAddMember&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setShowAddMember(false);}}
+          style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+          <div style={{background:PAGE_BG,width:'100%',maxWidth:440,borderRadius:'18px 18px 0 0',padding:'22px 22px calc(22px + env(safe-area-inset-bottom))',maxHeight:'80vh',overflowY:'auto'}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+              <Icon name="user-plus" size={20} color={AZUL}/>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:19,color:TXT}}>Añadir participante</div>
+            </div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.5,marginBottom:16}}>Busca a alguien por su nombre de usuario y elige en qué punto de la ronda entra.</div>
+            {/* Buscador */}
+            <input value={addQuery} onChange={e=>searchAddUser(e.target.value)} autoFocus
+              placeholder="Buscar por @usuario…"
+              style={{width:'100%',padding:'11px 14px',border:'1px solid '+BDR,borderRadius:10,fontSize:14,color:TXT,background:CARD_BG,outline:'none',fontFamily:"'Source Sans 3',sans-serif",marginBottom:10}}/>
+            {addSearching&&<div style={{fontSize:12,color:FAINT,padding:'4px 2px'}}>Buscando…</div>}
+            {!addPicked&&addResults.length>0&&(
+              <div style={{display:'flex',flexDirection:'column',gap:4,marginBottom:14}}>
+                {addResults.slice(0,6).map(u=>(
+                  <button key={u.id} onClick={()=>{setAddPicked(u);setAddResults([]);setAddQuery('@'+u.username);}}
+                    style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,cursor:'pointer',textAlign:'left'}}>
+                    <UserAvatar user={u} size={28}/>
+                    <div><div style={{fontSize:13,fontWeight:600,color:TXT}}>{u.name}</div><div style={{fontSize:11,color:MUTED}}>@{u.username}</div></div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!addPicked&&!addSearching&&addQuery.trim().length>=2&&addResults.length===0&&(
+              <div style={{fontSize:12,color:FAINT,padding:'4px 2px',marginBottom:10}}>Nadie con ese nombre (o ya está en el relato).</div>
+            )}
+            {/* Selección confirmada + posición */}
+            {addPicked&&(
+              <div>
+                <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'rgba(30,155,240,0.06)',border:'1px solid rgba(30,155,240,0.2)',borderRadius:10,marginBottom:16}}>
+                  <UserAvatar user={addPicked} size={30}/>
+                  <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:TXT}}>{addPicked.name}</div><div style={{fontSize:11,color:MUTED}}>@{addPicked.username}</div></div>
+                  <button onClick={()=>{setAddPicked(null);setAddQuery('');}} style={{background:'transparent',border:'none',color:FAINT,cursor:'pointer',fontSize:18}}>×</button>
+                </div>
+                <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:8}}>¿En qué punto de la ronda escribe?</div>
+                <div style={{display:'flex',flexDirection:'column',gap:5,marginBottom:18}}>
+                  {Array.from({length:members.length+1},(_,i)=>i+1).map(pos=>{
+                    const before=members.find(m=>m.turn_order===pos-1);
+                    const after=members.find(m=>m.turn_order===pos);
+                    const label=pos===1?'Al principio de la ronda'
+                      :pos>members.length?'Al final (escribe el último)'
+                      :`Después de ${before?.name||'…'}, antes de ${after?.name||'…'}`;
+                    return(
+                      <button key={pos} onClick={()=>setAddPosition(pos)}
+                        style={{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',background:addPosition===pos?'rgba(30,155,240,0.1)':CARD_BG,border:'1px solid '+(addPosition===pos?AZUL:BDR),borderRadius:9,cursor:'pointer',textAlign:'left',fontSize:12.5,color:TXT,fontFamily:"'Source Sans 3',sans-serif"}}>
+                        <div style={{width:16,height:16,borderRadius:'50%',border:'2px solid '+(addPosition===pos?AZUL:BDR),flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>{addPosition===pos&&<div style={{width:7,height:7,borderRadius:'50%',background:AZUL}}/>}</div>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setShowAddMember(false)} style={{flex:1,padding:'11px',background:'transparent',border:'1px solid '+BDR,borderRadius:10,fontSize:14,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+              <button onClick={confirmAddMember} disabled={!addPicked||addSaving}
+                style={{flex:1,padding:'11px',background:addPicked?AZUL:BDR,border:'none',borderRadius:10,fontSize:14,fontWeight:600,color:'#fff',cursor:addPicked?'pointer':'default',fontFamily:"'Source Sans 3',sans-serif"}}>
+                {addSaving?'Añadiendo…':'Añadir al relato'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0 16px',height:44,background:HEADER_NAVY_BG,flexShrink:0}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>
@@ -16195,6 +16340,12 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
           <span style={{marginLeft:'auto',fontSize:9,color:FAINT,flexShrink:0}}>
             {members.filter(m=>m.voted_finish).length}/{members.length} votos para cerrar
           </span>
+        )}
+        {isCreator&&col.status==='active'&&(
+          <button onClick={()=>{setAddPosition(members.length+1);setShowAddMember(true);}} title="Añadir participante"
+            style={{marginLeft:col.finish_proposed_by?8:'auto',flexShrink:0,display:'flex',alignItems:'center',gap:4,background:'rgba(30,155,240,0.1)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:6,padding:'3px 8px',fontSize:10,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+            <Icon name="user-plus" size={12} color={AZUL}/>Añadir
+          </button>
         )}
       </div>
 
@@ -16882,32 +17033,32 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
 // Definición de cada pop-up: título, cuerpo, icono y color de acento.
 const CONTEXTUAL_POPUPS={
-  comodines:{icon:'shield-check',color:'#F15A24',title:'Has ganado un comodín',
-    body:'Guárdalo: si algún día no puedes escribir, se gasta solo para que no pierdas la racha. Ganas uno por cada 7 días seguidos.'},
+  comodines:{icon:'shield-check',color:'#F15A24',title:'¡Enhorabuena! Has ganado un comodín',
+    body:'Siete días seguidos no son poca cosa. Te has ganado un comodín para no perder la racha si un día fallas. ¿Te animas a encadenar siete más y conseguir otro?'},
   modos:{icon:'sliders',color:'#1E9BF0',title:'Los modos de escritura',
-    body:'Cada modo cambia las reglas: Río no deja borrar, Presión te obliga a no parar, Túnel esconde lo que ya escribiste. Prueba uno y verás cómo cambia lo que sale.'},
+    body:'Cada modo cambia las reglas: Río no te deja borrar, Presión te obliga a seguir escribiendo y Túnel oculta todo lo anterior. Prueba uno. Te sorprenderá lo que sale.'},
   visibilidad:{icon:'eye',color:'#1B5FAA',title:'¿Quién puede leer esto?',
-    body:'Decide quién ve cada texto: solo tú (privado), tus amigos, o toda la comunidad (abierto). Puedes cambiarlo cuando quieras.'},
+    body:'Tú decides quién puede leer cada texto: solo tú, tus amigos o toda la comunidad. Puedes cambiar la visibilidad cuando quieras.'},
   cuatromanos:{icon:'hands-clapping',color:'#1A6B8A',title:'A cuatro manos',
-    body:'Aquí escribís dos personas por turnos: tú añades un fragmento, luego le toca a la otra persona, y así vais construyendo un texto juntos. Escribe tu parte y pásala.'},
+    body:'Aquí escribís por turnos. Tú añades un fragmento, luego le toca a la otra persona, y así vais construyendo un texto entre los dos. Escribe el tuyo y pásalo.'},
   encadenados:{icon:'link',color:'#1B5FAA',title:'Relatos encadenados',
-    body:'Un relato que crece por capítulos: escribes el tuyo y nominas a quien sigue. Puedes leer los capítulos anteriores antes de añadir el tuyo.'},
+    body:'Un relato que crece capítulo a capítulo: escribes el tuyo, nominas a quien sigue y la historia continúa. Puedes leer los capítulos anteriores antes de añadir el tuyo.'},
   colectivos:{icon:'users-three',color:'#1A6B8A',title:'Relatos colectivos',
-    body:'Varios escribís por turnos, en ronda, hasta que el grupo decide cerrarlo. Te avisaremos cuando te toque, y podrás seguir cada parte nueva que añadan los demás.'},
+    body:'Escribís por turnos, en ronda, hasta que el grupo decide que el texto ha terminado. ¡No olvides activar las notificaciones! Te avisaremos cuando llegue tu turno y podrás leer cada nueva aportación de los demás.'},
   guion:{icon:'film-slate',color:'#0A1B3D',title:'Modo guion',
     body:'Has cambiado al modo guion: los ejercicios, las lecciones y el editor se adaptan a la escritura audiovisual. Vuelve a literatura cuando quieras desde el mismo sitio.'},
   contrarreloj:{icon:'timer',color:'#F15A24',title:'Te han retado',
-    body:'Alguien te ha retado: unas palabras y un tiempo límite para escribir un texto con ellas. Cuando termines, se lo devuelves para que lo lea.'},
+    body:'¡Ojo! Alguien te ha retado. Ha elegido unas palabras y, cuando recojas el guante, tendrás una hora para escribir una historia con ellas. Al terminar, podrás decidir si tu retador puede leerla.'},
   equipos:{icon:'users',color:'#F15A24',title:'Equipos',
     body:'Crea un equipo o únete a uno. Dentro, cualquiera puede proponer un reto semanal, todos votáis cuál hacer, y escribís juntos.'},
   proyecto:{icon:'book-open',color:'#1B5FAA',title:'Tu proyecto personal',
-    body:'¿Tienes algo tuyo entre manos? Dedícale la sesión de hoy: cuenta igual para tu racha que un reto.'},
+    body:'¿Tienes un proyecto entre manos? Dedícale la sesión de hoy. Para tu racha cuenta igual que cualquier reto.'},
   voz:{icon:'microphone',color:'#1E9BF0',title:'Dicta en voz alta',
     body:'Toca para dictar: hablas y se transcribe solo. Útil cuando las ideas van más rápido que los dedos.'},
   biblioteca:{icon:'books',color:'#1B5FAA',title:'Tu biblioteca',
-    body:'Todo lo que escribes queda aquí. Puedes mantenerlo privado o publicarlo para que la comunidad lo lea, comente y reaccione. Leer a otros es, en sí mismo, una lección.'},
+    body:'Todo lo que escribes queda aquí. Puedes guardarlo solo para ti o compartirlo con la comunidad para que lo lean, lo comenten y reaccionen. Porque leer a otros también es una forma de aprender.'},
   revisionia:{icon:'sparkle',color:'#F15A24',title:'Revisión con IA',
-    body:'Conecta tu propia clave de Claude para que revise tus textos. Se guarda solo en tu dispositivo y solo actúa cuando tú se lo pides.'},
+    body:'Conecta tu propia clave de API de Claude para que revise tus textos. Tu clave se guarda únicamente en tu dispositivo y Claude solo la utilizará cuando tú se lo pidas.'},
 };
 
 // Hook: devuelve [debeMostrarse, marcarComoVisto] para un pop-up concreto.
@@ -17031,13 +17182,13 @@ const IOSInstallGuide=({onClose})=>(
     style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.55)',zIndex:500,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
     <div style={{background:PAGE_BG,width:'100%',maxWidth:440,borderRadius:'18px 18px 0 0',padding:'26px 24px calc(24px + env(safe-area-inset-bottom))',boxShadow:'0 -10px 50px -10px rgba(10,27,61,0.35)'}}>
       <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:20,color:TXT,marginBottom:6}}>Instala Pretexto en tu iPhone</div>
-      <div style={{fontSize:13.5,color:MUTED,lineHeight:1.5,marginBottom:22}}>Dos toques y lo tendrás en tu pantalla de inicio, con las notificaciones activas para no perder tu racha.</div>
+      <div style={{fontSize:13.5,color:MUTED,lineHeight:1.5,marginBottom:22}}>Añádelo a tu pantalla de inicio en un momento y activa las notificaciones para no perder tu racha.</div>
 
       <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:16}}>
         <div style={{flexShrink:0,width:34,height:34,borderRadius:9,background:CARD_BG,border:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="export" size={18} color={AZUL}/></div>
         <div style={{flex:1}}>
           <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:2}}>1 · Toca el botón <span style={{color:AZUL}}>Compartir</span></div>
-          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.45}}>Es el icono de un cuadrado con una flecha hacia arriba, en la barra de Safari (abajo en el iPhone, arriba en el iPad).</div>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.45}}>Busca el icono del cuadrado con una flecha hacia arriba. Está en la barra de Safari: abajo en el iPhone y arriba en el iPad.</div>
         </div>
       </div>
 
@@ -17045,7 +17196,7 @@ const IOSInstallGuide=({onClose})=>(
         <div style={{flexShrink:0,width:34,height:34,borderRadius:9,background:CARD_BG,border:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="plus-square" size={18} color={AZUL}/></div>
         <div style={{flex:1}}>
           <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:2}}>2 · Elige <span style={{color:AZUL}}>«Añadir a pantalla de inicio»</span></div>
-          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.45}}>Baja un poco en el menú si no lo ves. Luego confirma con «Añadir».</div>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.45}}>Si no aparece, baja un poco por el menú. Luego confirma con «Añadir».</div>
         </div>
       </div>
 
@@ -17074,29 +17225,34 @@ const WelcomeCarousel=({onClose})=>{
     /* SLIDE 1 */
     <div key="s1" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:165,top:'-10px',right:'8px'}} aria-hidden="true">“</span>
-      <div><div className="wc-eyebrow">Bienvenida</div>
-        <div className="wc-title">Escribir duele.<br/>Pero cada día duele menos.</div></div>
+      <div><div className="wc-eyebrow"><span className="wc-eyebrow-ic" style={{background:'rgba(10,27,61,.08)'}}><Icon name="quotes" size={12} color="#0A1B3D"/></span>Bienvenida</div>
+        <div className="wc-title">Escribir duele.<br/>Pero con pretexto duele menos.</div></div>
       <div className="wc-body">
-        <p>Hay algo raro en sentarse a escribir cuando nadie te lo pide. No hay nota que sacar, ni jefe que espere el informe, ni excusa para justificarlo. Solo tú, el cursor y el silencio. Al principio duele. Duele el blanco, la primera frase torpe, la sensación de que todo lo que escribes ya lo dijo alguien mejor. Pero también pasa algo: con cada día que vuelves, duele un poco menos.</p>
-        <p>Pretexto existe para darte compañía en ese proceso. Aquí encontrarás textos de otros que también se sientan a escribir sin excusa, lecciones que abren grietas en la forma en que ves el lenguaje, y desafíos que te sacan del sitio donde siempre te quedas atascado.</p>
-        <div className="wc-quote">«Un escritor que espera condiciones ideales para trabajar no produce nada.» <em>— E.B. White</em></div>
-        <div className="wc-quote">«La escritura es fácil. Solo tienes que cruzar una palabra equivocada y escribir la correcta.» <em>— Mark Twain</em></div>
+        <p>Si estás aquí es porque quieres escribir. Puede que sea lo que más satisfacción te da en este mundo. Pero, curiosamente, siempre tienes una excusa para no hacerlo.</p>
+        <p>Porque hay algo extraño en escribir cuando nadie te lo pide. Si no hay nota, si no hay fecha, si no hay obligación. Si solo estáis tú, el cursor y el silencio.</p>
+        <p>Al principio duele. A unos, el folio en blanco; a otros, la primera frase torpe o la sensación de que todo lo que tecleas ya lo escribió alguien mejor. Pero también sucede algo: con cada día que vuelves, duele un poco menos.</p>
+        <p>Pretexto existe para acompañarte en ese proceso. Aquí encontrarás desafíos que te pican un poco para que te rasques escribiendo sin darte cuenta; textos de otros que también se sientan a escribir, con o sin excusa; y lecciones que abren perspectivas frescas para que te atasques menos.</p>
+        <p>Lo importante es que estás aquí.</p>
+        <p>Ahora elige tu pretexto y escribe.</p>
       </div>
       <div className="wc-mockup">
-        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem active"/><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem"/></div></div>
-        <div className="mk-editor-area">
-          <div className="mk-cursor-line"><div className="mk-cursor"/><div className="mk-placeholder">Empieza a escribir…</div></div>
-          <div className="mk-text-lines"><div className="mk-line"/><div className="mk-line s"/><div className="mk-line"/><div className="mk-line xs"/></div>
+        <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,paddingBottom:8,borderBottom:'1px solid rgba(10,27,61,.07)'}}>
+            <span style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:13,color:'#0A1B3D'}}>pretexto</span>
+            <div style={{marginLeft:'auto',display:'flex',gap:5}}><div style={{width:22,height:4,borderRadius:2,background:'#F15A24'}}/><div style={{width:22,height:4,borderRadius:2,background:'rgba(10,27,61,.12)'}}/><div style={{width:22,height:4,borderRadius:2,background:'rgba(10,27,61,.12)'}}/></div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}><Icon name="cursor-text" size={13} color="#F15A24"/><div style={{fontSize:12,color:'rgba(10,27,61,.35)'}}>Empieza a escribir…</div></div>
+          <div style={{display:'flex',flexDirection:'column',gap:5}}><div style={{height:5,background:'rgba(10,27,61,.1)',borderRadius:2}}/><div style={{height:5,background:'rgba(10,27,61,.1)',borderRadius:2,width:'72%'}}/></div>
         </div>
       </div>
     </div>,
     /* SLIDE 2 — Instalación PWA (movido al 2º puesto para máxima conversión) */
     <div key="s7" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:165,top:'-10px',right:'8px'}} aria-hidden="true">↓</span>
-      <div><div className="wc-eyebrow naranja">✱ Llévalo contigo</div>
+      <div><div className="wc-eyebrow naranja"><span className="wc-eyebrow-ic" style={{background:'rgba(241,90,36,.12)'}}><Icon name="device-mobile" size={12} color="#F15A24"/></span>Llévalo contigo</div>
         <div className="wc-title">Instálalo como app<br/>y no pierdas el hilo.</div></div>
       <div className="wc-body">
-        <p>Añade Pretexto a tu pantalla de inicio y recibirás un recordatorio cada día para no romper tu racha. Sin instalar, las notificaciones no llegan —y es fácil olvidarse de volver.</p>
+        <p>Descarga Pretexto y escribe desde donde quieras. Recibe notificaciones de tus retos y textos colaborativos, de los comentarios en tus textos y de las nuevas publicaciones de los autores que sigas. Disponible para móvil y para PC. Mejor así. Créenos.</p>
         <div style={{marginTop:20,marginBottom:8}}><InstallPWA variant="block"/></div>
         <p style={{fontSize:12,opacity:0.7,marginTop:10}}>Si ya la tienes instalada o estás en el ordenador, puedes saltar este paso.</p>
       </div>
@@ -17104,53 +17260,53 @@ const WelcomeCarousel=({onClose})=>{
     /* SLIDE 2 */
     <div key="s2" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:150,top:'-20px',right:'-10px'}} aria-hidden="true">*</span>
-      <div><div className="wc-eyebrow naranja">✱ Retos</div>
-        <div className="wc-title">Lo importante es no fallar.<br/>Y si fallas, hay red.</div></div>
+      <div><div className="wc-eyebrow naranja"><span className="wc-eyebrow-ic" style={{background:'rgba(241,90,36,.12)'}}><Icon name="flame" size={12} color="#F15A24"/></span>Retos</div>
+        <div className="wc-title">Lo importante es escribir.<br/>Y si fallas, hay red.</div></div>
       <div className="wc-body">
-        <p>La consistencia vence al talento. Escribe cada día durante una semana y ya habrás demostrado lo más difícil. Además del reto diario, habrá retos semanales para ir más lejos, y retos que puedes lanzar a tus compañeros.</p>
-        <p><strong>¿Y si un día no puedes?</strong> Para eso están los comodines: ganas uno por cada 7 días seguidos, y se gastan solos para salvarte la racha cuando faltas un día. La constancia importa, pero no tiene que ser perfecta.</p>
+        <p>Del 0 al 10... ¿cuántas ganas de escribir tienes hoy? ¿Pocas? Reto sencillo, pues. ¿Muchas? Arremángate. También puedes dejar de lado los retos y centrarte en ese proyecto personal que no te puedes sacar de la cabeza.</p>
+        <p>Lo importante es que escribas todos los días que puedas. Que mantengas la racha viva.</p>
+        <p><strong>¿Y si un día no puedes?</strong> Pues para eso están los comodines: ganas uno por cada siete días seguidos y los gastas para salvar la racha cuando faltas un día. La constancia importa, pero aquí venimos a huir de la perfección.</p>
       </div>
       <div className="wc-mockup">
-        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/><div className="mk-navitem"/></div></div>
-        <div className="mk-stats">
-          <div className="mk-stat hl"><div className="mk-stat-val">7</div><div className="mk-stat-lbl">Racha actual</div></div>
-          <div className="mk-stat"><div className="mk-stat-val">2</div><div className="mk-stat-lbl">Comodines</div></div>
-          <div className="mk-stat"><div className="mk-stat-val">3</div><div className="mk-stat-lbl">Retos pendientes</div></div>
-        </div>
-        <div className="mk-reto-list">
-          <div className="mk-reto"><div className="mk-reto-dot done"/><div className="mk-reto-text"><div className="mk-reto-title"/><div className="mk-reto-sub"/></div><div className="mk-badge">Diario ✓</div></div>
-          <div className="mk-reto"><div className="mk-reto-dot"/><div className="mk-reto-text"><div className="mk-reto-title"/><div className="mk-reto-sub"/></div><div className="mk-badge">Semanal</div></div>
-          <div className="mk-reto"><div className="mk-reto-dot"/><div className="mk-reto-text"><div className="mk-reto-title"/><div className="mk-reto-sub"/></div><div className="mk-badge">De María</div></div>
+        <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:14}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
+            <div style={{textAlign:'center',padding:'8px 4px'}}><Icon name="flame" size={16} color="#F15A24"/><div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:20,color:'#F15A24',marginTop:4}}>7</div><div style={{font:"500 9px/1 'Source Sans 3'",color:'#a8a399',textTransform:'uppercase',letterSpacing:'.08em',marginTop:3}}>Racha</div></div>
+            <div style={{textAlign:'center',padding:'8px 4px',borderLeft:'1px solid rgba(10,27,61,.07)',borderRight:'1px solid rgba(10,27,61,.07)'}}><Icon name="shield-check" size={16} color="#0A1B3D"/><div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:20,color:'#0A1B3D',marginTop:4}}>2</div><div style={{font:"500 9px/1 'Source Sans 3'",color:'#a8a399',textTransform:'uppercase',letterSpacing:'.08em',marginTop:3}}>Comodines</div></div>
+            <div style={{textAlign:'center',padding:'8px 4px'}}><Icon name="circle-dashed" size={16} color="#0A1B3D"/><div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:20,color:'#0A1B3D',marginTop:4}}>3</div><div style={{font:"500 9px/1 'Source Sans 3'",color:'#a8a399',textTransform:'uppercase',letterSpacing:'.08em',marginTop:3}}>Pendientes</div></div>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:7}}>
+            <div style={{display:'flex',alignItems:'center',gap:9,padding:'8px 10px',background:'#FBF8F0',borderRadius:7}}><Icon name="check-circle" size={14} color="#F15A24"/><div style={{flex:1,height:5,background:'rgba(10,27,61,.1)',borderRadius:2}}/><span style={{font:"600 9px/1 'Source Sans 3'",color:'#F15A24',background:'rgba(241,90,36,.1)',padding:'3px 6px',borderRadius:4,whiteSpace:'nowrap'}}>Diario</span></div>
+            <div style={{display:'flex',alignItems:'center',gap:9,padding:'8px 10px',background:'#FBF8F0',borderRadius:7}}><Icon name="circle" size={14} color="rgba(10,27,61,.3)"/><div style={{flex:1,height:5,background:'rgba(10,27,61,.1)',borderRadius:2,width:'60%'}}/><span style={{font:"600 9px/1 'Source Sans 3'",color:'#5b6478',background:'rgba(10,27,61,.06)',padding:'3px 6px',borderRadius:4,whiteSpace:'nowrap'}}>Semanal</span></div>
+          </div>
         </div>
       </div>
     </div>,
     /* SLIDE 3 */
     <div key="s3" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:180,right:'-30px',bottom:'-50px'}} aria-hidden="true">,</span>
-      <div><div className="wc-eyebrow">Editores</div>
+      <div><div className="wc-eyebrow"><span className="wc-eyebrow-ic" style={{background:'rgba(10,27,61,.08)'}}><Icon name="sliders-horizontal" size={12} color="#0A1B3D"/></span>Editores</div>
         <div className="wc-title">Un editor normal<br/>y cuatro muy especiales.</div></div>
       <div className="wc-body">
-        <p>El editor estándar te da control total. Pero si quieres que algo fluya de verdad, tienes cuatro modos diseñados para sacarte de tu propia cabeza:</p>
-        <p><strong>Río</strong> — No puedes editar nada de lo que escribes. Solo hacia adelante.</p>
-        <p><strong>Límite</strong> — Como el Río, pero con un número máximo de correcciones por párrafo.</p>
-        <p><strong>Túnel</strong> — Los párrafos anteriores se desvanecen. Solo ves con claridad lo que escribes ahora.</p>
-        <p><strong>Presión</strong> — No pares. Si dejas de escribir, el texto se borra. Ideal para maratones.</p>
-        <p>Puedes cambiar entre modos en cualquier momento.</p>
+        <p>El editor estándar te da control total. Pero, si quieres que las palabras fluyan de verdad, puedes elegir entre cuatro modos de escritura pensados para sacarte de tu propia cabeza:</p>
+        <p><strong>Río</strong> — No puedes editar nada. Solo hacia delante.</p>
+        <p><strong>Límite</strong> — Como Río, pero con un número máximo de correcciones por párrafo.</p>
+        <p><strong>Túnel</strong> — Los párrafos anteriores se desvanecen. Solo ves con claridad el que estás escribiendo.</p>
+        <p><strong>Presión</strong> — No pares. Si dejas de escribir, el texto desaparece. Ideal para maratones.</p>
+        <p>Los retos siempre te propondrán un modo, pero puedes cambiar cuando quieras.</p>
       </div>
       <div className="wc-mockup">
-        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/><div className="mk-navitem"/></div></div>
-        <div className="mk-modes">
-          <div className="mk-mode rio"><div className="mk-mode-icon"><Icon name="waves" size={11}/></div><div className="mk-mode-tag">Río</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
-          <div className="mk-mode limite"><div className="mk-mode-icon"><Icon name="pen" size={11}/></div><div className="mk-mode-tag">Límite</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{width:'90%',position:'relative'}}><span style={{position:'absolute',inset:0,background:'#1B5FAA',borderRadius:2,top:'50%',height:1}}/></div><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
-          <div className="mk-mode tunel"><div className="mk-mode-icon"><Icon name="binoculars" size={11}/></div><div className="mk-mode-tag">Túnel</div><div className="mk-mode-lines"><div className="mk-mode-line" style={{opacity:0.25}}/><div className="mk-mode-line s" style={{opacity:0.45}}/><div className="mk-mode-line"/><div className="mk-mode-line xs" style={{opacity:0.25}}/></div></div>
-          <div className="mk-mode presion"><div className="mk-mode-icon"><Icon name="lightning" size={11}/></div><div className="mk-mode-tag">Presión</div><div className="mk-mode-lines"><div className="mk-mode-line"/><div className="mk-mode-line s"/><div className="mk-mode-line"/><div className="mk-mode-line xs"/></div></div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>
+          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="wind" size={18} color="#1E9BF0"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#1E9BF0',marginTop:8,marginBottom:5}}>Río</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Solo hacia adelante. Sin editar.</div></div>
+          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="ruler" size={18} color="#1B5FAA"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#1B5FAA',marginTop:8,marginBottom:5}}>Límite</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Correcciones máximas por párrafo.</div></div>
+          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="circle-dashed" size={18} color="#1A6B8A"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#1A6B8A',marginTop:8,marginBottom:5}}>Túnel</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Lo anterior se desvanece.</div></div>
+          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="timer" size={18} color="#F15A24"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#F15A24',marginTop:8,marginBottom:5}}>Presión</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Para. El texto se borra.</div></div>
         </div>
       </div>
     </div>,
     /* SLIDE 6 */
     <div key="s6" className="wc-slide">
       <span className="wc-slide-signo" style={{fontSize:170,top:'-15px',right:'14px'}} aria-hidden="true">?</span>
-      <div><div className="wc-eyebrow naranja">✱ Revisión con IA</div>
+      <div><div className="wc-eyebrow naranja"><span className="wc-eyebrow-ic" style={{background:'rgba(241,90,36,.12)'}}><Icon name="sparkle" size={12} color="#F15A24"/></span>Revisión con IA</div>
         <div className="wc-title">Tu primer lector<br/>que nunca juzga.</div></div>
       <div className="wc-body">
         <p>Si conectas tu API key de Claude, podrás pedirle que revise y comente los textos que subas a tu biblioteca. No para corregirte como un profesor, sino para señalar lo que funciona y lo que podría ir más lejos.</p>
@@ -17159,11 +17315,12 @@ const WelcomeCarousel=({onClose})=>{
         <p>Y ahora ya no tienes excusa para no empezar. Nos vemos dentro.</p>
       </div>
       <div className="wc-mockup">
-        <div className="mk-topbar"><span className="mk-logo">pretexto</span><div className="mk-nav"><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem"/><div className="mk-navitem active"/></div></div>
-        <div className="mk-api-row"><div className="mk-api-icon">🔑</div><div className="mk-api-body"><div className="mk-api-label"/><div className="mk-api-sub"/></div><div className="mk-api-status conn">Conectado</div></div>
-        <div className="mk-review-box">
-          <div className="mk-review-header"><div className="mk-review-icon">✦</div><div className="mk-review-title"/></div>
-          <div className="mk-review-lines"><div className="mk-review-line"/><div className="mk-review-hl"/><div className="mk-review-line s"/><div className="mk-review-line"/><div className="mk-review-line xs"/></div>
+        <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <Icon name="key" size={16} color="#0A1B3D"/>
+            <div style={{flex:1}}><div style={{height:5,background:'rgba(10,27,61,.1)',borderRadius:2,width:'60%',marginBottom:4}}/><div style={{height:4,background:'rgba(10,27,61,.07)',borderRadius:2,width:'40%'}}/></div>
+            <span style={{font:"600 10px/1 'Source Sans 3'",color:'#1E9BF0',background:'#eaf5ff',padding:'4px 8px',borderRadius:5}}>Conectado</span>
+          </div>
         </div>
       </div>
     </div>,
