@@ -4913,6 +4913,29 @@ const DB = {
   // Incorpora un participante a un colectivo YA iniciado, en la posición
   // 'position' de la ronda (1-based). Desplaza el turn_order de los que van
   // en esa posición o después, para hacerle hueco.
+  // El coordinador puede ajustar rondas y mínimo de palabras del relato en curso.
+  updateCollectiveSettings: async(collectiveId,patch)=>{
+    const{error}=await getSB().from('collectives')
+      .update({...patch,updated_at:new Date().toISOString()}).eq('id',collectiveId);
+    if(error)throw error;
+  },
+  // Quitar a un participante del relato y recompactar el orden de la ronda para
+  // que no queden huecos en turn_order.
+  removeCollectiveMember: async(collectiveId,userId)=>{
+    const{data:members}=await getSB().from('collective_members')
+      .select('*').eq('collective_id',collectiveId).order('turn_order');
+    const list=members||[];
+    const target=list.find(m=>m.user_id===userId);
+    if(!target)return;
+    // Borrar al miembro
+    await getSB().from('collective_members').delete()
+      .eq('collective_id',collectiveId).eq('user_id',userId);
+    // Recompactar turn_order de los que iban después (restar 1)
+    for(const m of list.filter(m=>m.turn_order>target.turn_order)){
+      await getSB().from('collective_members')
+        .update({turn_order:m.turn_order-1}).eq('id',m.id);
+    }
+  },
   addCollectiveMemberAt: async(collectiveId,newMember,position)=>{
     // 1. Traer los miembros actuales ordenados
     const{data:members}=await getSB().from('collective_members').select('*').eq('collective_id',collectiveId).order('turn_order');
@@ -4929,12 +4952,14 @@ const DB = {
     });
     if(error)throw error;
   },
-  submitCollectiveTurn: async(collectiveId,turn,nextUserId,nextTurnCount)=>{
+  submitCollectiveTurn: async(collectiveId,turn,nextUserId,nextTurnCount,finish=false)=>{
     const{error:te}=await getSB().from('collective_turns').insert(turn);
     if(te)throw te;
-    const{error:ce}=await getSB().from('collectives').update({
+    const patch={
       current_turn_user_id:nextUserId,turn_count:nextTurnCount,updated_at:new Date().toISOString(),
-    }).eq('id',collectiveId);
+    };
+    if(finish)patch.status='finished';
+    const{error:ce}=await getSB().from('collectives').update(patch).eq('id',collectiveId);
     if(ce)throw ce;
   },
   voteToFinishCollective: async(collectiveId,uid,totalMembers)=>{
@@ -9809,6 +9834,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showStats,setShowStats]=useState(false);
   const [showAmigos,setShowAmigos]=useState(false);
   const [notifProfile,setNotifProfile]=useState(null);
+  const [followersSeenTick,setFollowersSeenTick]=useState(0); // fuerza re-render al marcar seguidores como vistos
   const [writingMode,setWritingMode]=useState(()=>S.get('pretexto:writing_mode')||'literatura'); // 'literatura'|'guion'
   const toggleWritingMode=()=>{
     const nm=writingMode==='literatura'?'guion':'literatura';
@@ -9836,7 +9862,15 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       }else if(n.type==='new_follower'){
         const profile=await DB.getProfile(n.actor_id);
         if(profile)setNotifProfile(profile);
-      }else if(n.type==='challenge_received'||n.type==='challenge_returned'){
+      }else if(n.type==='challenge_received'){
+        setShowChallengesHistory(true);
+      }else if(n.type==='challenge_returned'){
+        // Al abrir el reto devuelto desde la campanita, marcarlo como visto
+        // para que el banner del dashboard no siga anunciándolo. Antes solo se
+        // marcaba al pulsar "Leer" en el banner, así que abrirlo por la
+        // campanita lo dejaba pendiente y reaparecía.
+        if(n.entity_id){try{await DB.markSentChallengeSeen(n.entity_id);}catch(e){}}
+        onNewChallenge&&onNewChallenge(); // refresca el banner del dashboard
         setShowChallengesHistory(true);
       }else if(n.type==='collab_invite'){
         // Todavía no ha aceptado — no tiene acceso de lectura a la entrada aún,
@@ -10034,6 +10068,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         }}/>}
       {collectiveDetail&&<CollectiveEditor user={user} collective={collectiveDetail}
         onClose={()=>setCollectiveDetail(null)}
+        onRefresh={onRefresh}
         onUpdate={updated=>setCollectiveDetail(updated)}/>}
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
@@ -10291,9 +10326,10 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         {/* Followers widget */}
         {(()=>{
           const seenKey='pretexto:seen_followers:'+user.id;
+          followersSeenTick; // dependencia: al cambiar, recalcula seenIds y oculta la pastilla
           const seenIds=new Set(S.get(seenKey)||[]);
           const newFollowers=followers.filter(f=>!seenIds.has(f.id));
-          const markSeen=()=>{S.set(seenKey,followers.map(f=>f.id));};
+          const markSeen=()=>{S.set(seenKey,followers.map(f=>f.id));setFollowersSeenTick(t=>t+1);};
           return(
             <div className="fu" style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'16px 20px',marginBottom:16}}>
               {/* Header row */}
@@ -15949,6 +15985,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
   const [premise,setPremise]=useState('');
   const [title,setTitle]=useState('');
   const [minWords,setMinWords]=useState(100);
+  const [targetRounds,setTargetRounds]=useState(3); // vueltas completas al equipo (0 = sin límite)
   const [members,setMembers]=useState([{id:user.id,name:user.name,username:user.username,isMe:true}]); // el creador entra como uno más y puede reordenarse
   const [searchQ,setSearchQ]=useState('');
   const [searchRes,setSearchRes]=useState([]);
@@ -15986,7 +16023,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
       const allMembers=members;
       const firstUserId=allMembers[0]?.id||user.id;
       const col=await DB.createCollective({
-        title:title.trim(),premise:premise.trim(),min_words:minWords,
+        title:title.trim(),premise:premise.trim(),min_words:minWords,target_rounds:targetRounds||null,
         created_by:user.id,current_turn_user_id:firstUserId,
         status:'active',turn_count:0,
       });
@@ -16043,6 +16080,19 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
               style={{width:'100%',accentColor:AZUL}}/>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:FAINT,marginTop:2}}>
               <span>50</span><span>500</span>
+            </div>
+          </div>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,color:MUTED,marginBottom:5}}>Rondas (vueltas completas al equipo): <strong>{targetRounds===0?'Sin límite':targetRounds}</strong></div>
+            <input type="range" min={0} max={10} step={1} value={targetRounds} onChange={e=>setTargetRounds(+e.target.value)}
+              style={{width:'100%',accentColor:AZUL}}/>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:FAINT,marginTop:2}}>
+              <span>Sin límite</span><span>10</span>
+            </div>
+            <div style={{fontSize:10.5,color:FAINT,marginTop:6,lineHeight:1.4}}>
+              {targetRounds===0
+                ? 'El relato seguirá hasta que el grupo vote terminarlo.'
+                : 'Con '+members.length+' participante'+(members.length===1?'':'s')+', serían unos '+(targetRounds*members.length)+' turnos. También podréis cerrarlo antes por votación.'}
             </div>
           </div>
           <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
@@ -16123,7 +16173,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
 };
 
 /* ── 2. CollectiveEditor ──────────────────────────────────────── */
-const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
+const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})=>{
   const [showIntro,dismissIntro]=useFirstTime('colectivos',user?.id,true);
   const [col,setCol]=useState(initialCol);
   // Tiempo de la parte, desde la primera tecla (ver DuetEditor).
@@ -16146,6 +16196,28 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
 
   // ── Incorporar un participante a mitad de relato (solo el creador) ──
   const isCreator=col.created_by===user.id;
+  const [showSettings,setShowSettings]=useState(false);
+  const [setRounds,setSetRounds]=useState(col.target_rounds||0);
+  const [setWords,setSetWords]=useState(col.min_words||100);
+  const [savingSettings,setSavingSettings]=useState(false);
+  const saveSettings=async()=>{
+    if(savingSettings)return;setSavingSettings(true);
+    try{
+      await DB.updateCollectiveSettings(col.id,{target_rounds:setRounds||null,min_words:setWords});
+      const fresh=await DB.getCollectiveDetail(col.id);
+      setCol(fresh);onUpdate&&onUpdate(fresh);
+      setShowSettings(false);
+    }catch(e){alert('No se pudo guardar: '+e.message);}
+    finally{setSavingSettings(false);}
+  };
+  const removeMember=async(m)=>{
+    if(!confirm('¿Quitar a '+m.name+' del relato? Su parte ya escrita se conserva, pero dejará de tener turnos.'))return;
+    try{
+      await DB.removeCollectiveMember(col.id,m.user_id);
+      const fresh=await DB.getCollectiveDetail(col.id);
+      setCol(fresh);onUpdate&&onUpdate(fresh);
+    }catch(e){alert('No se pudo quitar: '+e.message);}
+  };
   const [showAddMember,setShowAddMember]=useState(false);
   const [addQuery,setAddQuery]=useState('');
   const [addResults,setAddResults]=useState([]);
@@ -16211,13 +16283,20 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
       const nextOrderFresh=(myOrderFresh%freshMembers.length)+1;
       const nextMemberFresh=freshMembers.find(m=>m.turn_order===nextOrderFresh);
       const nextTurnNumber=(fresh.turn_count||0)+1;
+      // ¿Este turno completa las rondas objetivo? Si target_rounds está fijado,
+      // el relato tiene target_rounds × nº-participantes turnos en total. Al
+      // escribir el último, el relato se cierra automáticamente.
+      const targetTurns=(fresh.target_rounds&&freshMembers.length)
+        ? fresh.target_rounds*freshMembers.length : 0;
+      const reachesEnd=targetTurns>0 && nextTurnNumber>=targetTurns;
       const turn={
         collective_id:col.id,user_id:user.id,
         author_name:user.name,
         html:el.innerHTML,plain,
         word_count:wc,turn_number:nextTurnNumber,
       };
-      await DB.submitCollectiveTurn(col.id,turn,nextMemberFresh?.user_id||null,nextTurnNumber);
+      // Si completa las rondas, no hay "siguiente" y el relato pasa a cerrado.
+      await DB.submitCollectiveTurn(col.id,turn,reachesEnd?null:(nextMemberFresh?.user_id||null),nextTurnNumber,reachesEnd);
       // Registrar mi parte como entrada propia para que cuente en MI racha y MIS
       // palabras. Antes el colectivo no guardaba nada en `entries`, así que
       // escribir en un relato colectivo no sumaba absolutamente nada a las
@@ -16236,6 +16315,9 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
           visibility:'ejercicio',
         });
       }catch(e){console.error('collective entry:',e);}
+      // Recargar los datos del usuario (library) para que este turno cuente YA
+      // en la racha y las palabras del día, sin tener que reiniciar la app.
+      try{onRefresh&&onRefresh();}catch(e){}
       // Refresh
       const updated=await DB.getCollectiveDetail(col.id);
       setCol(updated);onUpdate&&onUpdate(updated);
@@ -16263,6 +16345,62 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
 
   return(
     <div style={{position:'fixed',inset:0,zIndex:180,background:PAGE_BG,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='colectivos' onClose={dismissIntro}/>}
+      {showSettings&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setShowSettings(false);}}
+          style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+          <div style={{background:PAGE_BG,width:'100%',maxWidth:440,borderRadius:'18px 18px 0 0',padding:'22px 22px calc(22px + env(safe-area-inset-bottom))',maxHeight:'85vh',overflowY:'auto'}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+              <Icon name="gear" size={20} color={AZUL}/>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:19,color:TXT}}>Ajustes del relato</div>
+            </div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.5,marginBottom:18}}>Como coordinador puedes cambiar la duración, el mínimo de palabras y quitar participantes.</div>
+
+            {/* Rondas */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:5}}>Rondas: <span style={{color:AZUL}}>{setRounds===0?'Sin límite':setRounds}</span></div>
+              <input type="range" min={0} max={10} step={1} value={setRounds} onChange={e=>setSetRounds(+e.target.value)} style={{width:'100%',accentColor:AZUL}}/>
+              <div style={{fontSize:10.5,color:FAINT,marginTop:5,lineHeight:1.4}}>
+                {(()=>{
+                  const done=col.turn_count||0;
+                  const target=setRounds*members.length;
+                  if(setRounds===0)return'Seguirá hasta que el grupo vote terminarlo.';
+                  if(target<=done)return'Ya se han escrito '+done+' partes. Poner '+setRounds+' ronda'+(setRounds===1?'':'s')+' ('+target+' turnos) cerraría el relato en el próximo turno.';
+                  return 'Con '+members.length+' participantes: '+target+' turnos en total. Lleváis '+done+'.';
+                })()}
+              </div>
+            </div>
+
+            {/* Palabras */}
+            <div style={{marginBottom:18}}>
+              <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:5}}>Mínimo de palabras por turno: <span style={{color:AZUL}}>{setWords}</span></div>
+              <input type="range" min={50} max={500} step={25} value={setWords} onChange={e=>setSetWords(+e.target.value)} style={{width:'100%',accentColor:AZUL}}/>
+            </div>
+
+            {/* Participantes (quitar) */}
+            <div style={{marginBottom:18}}>
+              <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:8}}>Participantes</div>
+              <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                {members.map(m=>(
+                  <div key={m.id} style={{display:'flex',alignItems:'center',gap:9,padding:'7px 10px',background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:9}}>
+                    <UserAvatar user={m} size={26}/>
+                    <div style={{flex:1}}><div style={{fontSize:12.5,color:TXT}}>{m.name}{m.user_id===user.id&&' (tú)'}</div><div style={{fontSize:10,color:FAINT}}>@{m.username}{m.user_id===col.created_by?' · coordinador':''}</div></div>
+                    {m.user_id!==col.created_by&&(
+                      <button onClick={()=>removeMember(m)} title="Quitar" style={{background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:4}}>
+                        <Icon name="user-minus" size={14} color={FAINT}/>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setShowSettings(false)} style={{flex:1,padding:'11px',background:'transparent',border:'1px solid '+BDR,borderRadius:10,fontSize:14,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+              <button onClick={saveSettings} disabled={savingSettings} style={{flex:1,padding:'11px',background:AZUL,border:'none',borderRadius:10,fontSize:14,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{savingSettings?'Guardando…':'Guardar cambios'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {showAddMember&&(
         <div onClick={e=>{if(e.target===e.currentTarget)setShowAddMember(false);}}
           style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
@@ -16335,14 +16473,13 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
         </button>
         <div style={{flex:1,textAlign:'center',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)'}}>{col.title}</div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <span style={{fontSize:9,color:'rgba(255,255,255,0.4)'}}>Parte {col.turn_count+1}</span>
-          {col.status==='active'&&!myVote&&(
-            <button onClick={voteFinish} disabled={votingFinish} title="Votar para cerrar el relato"
-              style={{background:'transparent',border:'1px solid rgba(255,255,255,0.2)',borderRadius:6,
-                padding:'3px 8px',fontSize:10,color:'rgba(255,255,255,0.5)',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-              {votingFinish?'…':'Cerrar'}
-            </button>
-          )}
+          <span style={{fontSize:9,color:'rgba(255,255,255,0.4)'}}>{(()=>{
+            if(col.target_rounds&&members.length){
+              const round=Math.floor((col.turn_count)/members.length)+1;
+              return'Ronda '+Math.min(round,col.target_rounds)+' de '+col.target_rounds;
+            }
+            return'Parte '+(col.turn_count+1);
+          })()}</span>
         </div>
       </div>
 
@@ -16366,6 +16503,12 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
           <button onClick={()=>{setAddPosition(members.length+1);setShowAddMember(true);}} title="Añadir participante"
             style={{marginLeft:col.finish_proposed_by?8:'auto',flexShrink:0,display:'flex',alignItems:'center',gap:4,background:'rgba(30,155,240,0.1)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:6,padding:'3px 8px',fontSize:10,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
             <Icon name="user-plus" size={12} color={AZUL}/>Añadir
+          </button>
+        )}
+        {isCreator&&col.status==='active'&&(
+          <button onClick={()=>{setSetRounds(col.target_rounds||0);setSetWords(col.min_words||100);setShowSettings(true);}} title="Ajustes del relato"
+            style={{flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',width:26,height:24,background:'rgba(10,27,61,0.05)',border:'1px solid '+BDR,borderRadius:6,cursor:'pointer'}}>
+            <Icon name="gear" size={13} color={MUTED}/>
           </button>
         )}
       </div>
@@ -16410,9 +16553,17 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
                 <span style={{fontSize:11,color:wc>=col.min_words?AZUL:FAINT}}>
                   {wc}/{col.min_words} pal. {wc>=col.min_words&&<Icon name="check-circle" size={12} color={AZUL}/>}
                 </span>
-                <Btn variant="primary" onClick={submit} disabled={submitting||wc<col.min_words}>
-                  {submitting?'Enviando…':'Ceder turno →'}
-                </Btn>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  {col.status==='active'&&!myVote&&(
+                    <button onClick={voteFinish} disabled={votingFinish}
+                      style={{background:'transparent',border:'0.5px solid rgba(27,95,170,0.35)',borderRadius:8,padding:'8px 14px',fontSize:13,fontWeight:500,color:'#1B5FAA',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                      {votingFinish?'…':'Proponer fin'}
+                    </button>
+                  )}
+                  <Btn variant="primary" onClick={submit} disabled={submitting||wc<col.min_words}>
+                    {submitting?'Enviando…':'Ceder turno →'}
+                  </Btn>
+                </div>
               </div>
             </div>
           )}
@@ -16421,6 +16572,13 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate})=>{
             <div style={{textAlign:'center',padding:'32px 0',color:MUTED,fontSize:13}}>
               <Icon name="hourglass" size={22} color={FAINT}/><br/>
               <span style={{marginTop:8,display:'block'}}>Turno de <strong>{members.find(m=>m.user_id===col.current_turn_user_id)?.name||'…'}</strong></span>
+              {!myVote&&(
+                <button onClick={voteFinish} disabled={votingFinish}
+                  style={{marginTop:16,background:'transparent',border:'0.5px solid rgba(27,95,170,0.35)',borderRadius:8,padding:'8px 16px',fontSize:12.5,fontWeight:500,color:'#1B5FAA',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                  {votingFinish?'…':col.finish_proposed_by?'Votar por terminar el relato':'Proponer terminar el relato'}
+                </button>
+              )}
+              {myVote&&<div style={{marginTop:14,fontSize:11,color:FAINT}}>Ya has votado por terminar · {members.filter(m=>m.voted_finish).length}/{members.length}</div>}
             </div>
           )}
 
@@ -16919,46 +17077,12 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
   const firstLoadDoneRef=useRef(false);
 
   const loadCollabItems=async()=>{
-    // No hay trigger SQL todavía que meta esto en `notifications`, así que se
-    // arma aquí mismo a partir de entry_collaborators — mismo aspecto visual,
-    // pero el estado de "leído" vive en localStorage en vez de en la BD.
-    try{
-      const seen=collabNotifSeenGet(user.id);
-      const since=new Date(Date.now()-30*24*3600*1000).toISOString(); // últimos 30 días
-      const [pending,accepted]=await Promise.all([
-        DB.getPendingCollabInvites(user.id).catch(e=>{console.error('collab notif: getPendingCollabInvites falló:',e?.message||e);return[];}),
-        DB.getRecentlyAcceptedCollabs(user.id,since).catch(e=>{console.error('collab notif: getRecentlyAcceptedCollabs falló:',e?.message||e);return[];}),
-      ]);
-      if(!pending.length&&!accepted.length)return[];
-      const entryIds=[...new Set([...pending.map(i=>i.entry_id),...accepted.map(i=>i.entry_id)])];
-      const peopleIds=[...new Set([...pending.map(i=>i.owner_id),...accepted.map(i=>i.collaborator_id)])];
-      const [entries,people]=await Promise.all([
-        DB.getEntriesByIds(entryIds).catch(e=>{console.error('collab notif: getEntriesByIds falló:',e?.message||e);return[];}),
-        DB.getProfilesByIds(peopleIds).catch(e=>{console.error('collab notif: getProfilesByIds falló:',e?.message||e);return[];}),
-      ]);
-      if(entries.length<entryIds.length){
-        console.error('collab notif: se pidieron '+entryIds.length+' textos y solo llegaron '+entries.length+' — probable bloqueo de RLS en la lectura de entries, o el/los id no existen.',{entryIds,entriesRecibidos:entries.map(e=>e.id)});
-      }
-      const entryMap=Object.fromEntries(entries.map(e=>[e.id,e]));
-      const peopleMap=Object.fromEntries(people.map(p=>[p.id,p]));
-      const invItems=pending.map(i=>{
-        const nid='collab_invite_'+i.id;
-        return{
-          id:nid,type:'collab_invite',
-          title:(peopleMap[i.owner_id]?.name||peopleMap[i.owner_id]?.username||'Alguien')+' te invita a escribir «'+(entryMap[i.entry_id]?.title||'un texto')+'»',
-          read:seen.has(nid),created_at:i.created_at,entity_id:i.entry_id,
-        };
-      });
-      const accItems=accepted.map(i=>{
-        const nid='collab_accepted_'+i.id;
-        return{
-          id:nid,type:'collab_accepted',
-          title:(peopleMap[i.collaborator_id]?.name||peopleMap[i.collaborator_id]?.username||'Alguien')+' aceptó escribir «'+(entryMap[i.entry_id]?.title||'tu texto')+'» contigo',
-          read:seen.has(nid),created_at:i.responded_at,entity_id:i.entry_id,
-        };
-      });
-      return[...invItems,...accItems];
-    }catch(e){console.error('collab notif items:',e);return[];}
+    // Las notificaciones de colaboración (invitación recibida / aceptada) ahora
+    // viven en la tabla `notifications`, insertadas por los triggers
+    // trg_notify_collab_invite y trg_notify_collab_accepted. Ya no se arman
+    // aquí al vuelo: se leen junto al resto en DB.getNotifications, de modo que
+    // el estado "leído" se guarda en la BD y sincroniza entre dispositivos.
+    return[];
   };
 
   const load=async()=>{
@@ -17000,13 +17124,8 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
   const handleClick=async(n)=>{
     setOpen(false);
-    const isSynthetic=n.type==='collab_invite'||n.type==='collab_accepted';
     if(!n.read){
-      if(isSynthetic){
-        collabNotifSeenAdd(user.id,n.id);
-      }else{
-        try{await DB.markNotificationRead(n.id);}catch(e){}
-      }
+      try{await DB.markNotificationRead(n.id);}catch(e){}
       setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
       setUnread(prev=>Math.max(0,prev-1));
     }
@@ -17015,7 +17134,6 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
 
   const markAllRead=async()=>{
     try{await DB.markAllNotificationsRead(user.id);}catch(e){}
-    items.filter(n=>n.type==='collab_invite'||n.type==='collab_accepted').forEach(n=>collabNotifSeenAdd(user.id,n.id));
     setItems(prev=>prev.map(x=>({...x,read:true})));
     setUnread(0);
   };
