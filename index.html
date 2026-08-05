@@ -9835,6 +9835,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
   const [showBiblioteca,setShowBiblioteca]=useState(false);
+  const [showEscritorio,setShowEscritorio]=useState(false);
   const [showStats,setShowStats]=useState(false);
   const [showAmigos,setShowAmigos]=useState(false);
   const [notifProfile,setNotifProfile]=useState(null);
@@ -10014,6 +10015,10 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
             </div>
             {/* Nav items */}
             <div style={{flex:1}}>
+              <button onClick={()=>{setShowEscritorio(true);setShowHamburger(false);}}
+                style={{background:'transparent',border:'none',padding:'14px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%',borderBottom:'0.5px solid '+BDR}}>
+                <Icon name="folders" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Escritorio</span>
+              </button>
               <button onClick={()=>{setShowBiblioteca(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'14px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%',borderBottom:'0.5px solid '+BDR}}>
                 <Icon name="book-open" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Biblioteca</span>
@@ -10077,7 +10082,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
-        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry}/>}
+        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} mode="biblioteca"/>}
+      {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
+        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} mode="escritorio"/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
@@ -13739,7 +13746,8 @@ const InviteCollaboratorsModal=({user,entry,onClose,onInvited})=>{
   );
 };
 
-const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,onFolderChange,onEdit,onDelete,onCollabAccepted})=>{
+const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,onFolderChange,onEdit,onDelete,onCollabAccepted,mode='biblioteca'})=>{
+  const isEscritorio=mode==='escritorio';
   const [filter,setFilter]=useState('all');
   const [folder,setFolder]=useState('todos'); // 'todos' | 'sin' | slug de carpeta por defecto | id de carpeta personalizada
   const [customFolders,setCustomFolders]=useState([]);
@@ -13834,7 +13842,17 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     return Array.from(map.values());
   },[library,offlineKept,sharedWithMe]);
 
-  const myTexts=combinedLibrary.filter(e=>e.visibility!=='ejercicio'&&!e.deleted);
+  const myTexts=combinedLibrary.filter(e=>{
+    if(e.deleted)return false;
+    if(isEscritorio){
+      // Escritorio: TODO tu propio trabajo (ejercicios, proyectos, retos y
+      // textos sueltos). No incluye textos de otros compartidos contigo.
+      return e.user_id===user.id;
+    }
+    // Biblioteca: solo lo que TÚ has publicado (in_library) + lo compartido
+    // contigo por otros autores.
+    return (e.user_id===user.id&&e.in_library) || e.user_id!==user.id;
+  });
 
   useEffect(()=>{
     const ids=myTexts.map(e=>e.id);
@@ -14164,8 +14182,9 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete})=>{
-  const [tab,setTab]=useState('explorar'); // 'explorar'|'amigos'|'mis_textos'
+const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete,mode='biblioteca'})=>{
+  const isEscritorio=mode==='escritorio';
+  const [tab,setTab]=useState(mode==='escritorio'?'mis_textos':'explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
   const [following,setFollowing]=useState([]); // array of user_ids
@@ -14230,11 +14249,13 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
     }catch(e){alert('Error: '+e.message);}
   };
 
-  const tabs=[
+  const tabs=isEscritorio?[
+    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&!e.deleted&&!e.in_library).length},
+  ]:[
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
     {id:'buscar',label:'Buscar',count:0},
-    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.visibility!=='ejercicio'&&!e.deleted).length+sharedWithMe.length},
+    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&e.in_library&&!e.deleted).length},
   ];
 
   return(
@@ -14244,7 +14265,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:10,padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,padding:'4px 6px',borderRadius:6,flexShrink:0,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
-        <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:16,color:TXT}}>Biblioteca</div>
+        <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:16,color:TXT}}>{isEscritorio?'Escritorio':'Biblioteca'}</div>
       </div>
 
       {/* Tabs */}
@@ -14350,7 +14371,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
-        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete}/>}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete} mode={mode}/>}
       </div>
     </div>
   );
