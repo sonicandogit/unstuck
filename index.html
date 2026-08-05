@@ -232,11 +232,15 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 
 /* ══ RESPONSIVE / MOBILE ══════════════════════════════════ */
 @media(max-width:680px){
-  /* Topbar: horizontal scroll instead of overflow */
-  .topbar{padding:0 12px!important;gap:6px;}
-  .topbar-nav{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;max-width:75vw;padding:6px 0;}
-  .topbar-nav::-webkit-scrollbar{display:none}
+  /* Topbar: compactar para que quepa sin cortarse */
+  .topbar{padding:0 10px!important;gap:6px;}
+  .topbar-nav{gap:10px!important;max-width:none!important;flex-shrink:1;min-width:0;}
   .topbar-nav>button{flex-shrink:0;white-space:nowrap;}
+  .theme-toggle button{padding:6px 9px!important;}
+  /* Nombre de usuario oculto en móvil: basta el avatar */
+  .topbar-username{display:none!important;}
+  /* Red de seguridad: nada debe provocar scroll horizontal de la página */
+  #root{overflow-x:hidden!important;max-width:100vw!important;}
 
   /* Grids collapse */
   .resp-2col{grid-template-columns:1fr!important;}
@@ -10143,7 +10147,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
           <div style={{position:'relative'}}>
             <button onClick={()=>setShowUserMenu(v=>!v)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:20,padding:'3px 10px 3px 4px',cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
               <UserAvatar user={user} size={24}/>
-              <span style={{fontSize:11,fontWeight:500,color:TXT,maxWidth:70,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>{user.name}</span>
+              <span className="topbar-username" style={{fontSize:11,fontWeight:500,color:TXT,maxWidth:70,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>{user.name}</span>
               {receivedChallenges?.length>0&&<span style={{width:7,height:7,borderRadius:'50%',background:NARANJA,flexShrink:0}}/>}
             </button>
             {showUserMenu&&<>
@@ -11499,7 +11503,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           {idleWarn&&ab==='presion'&&<div style={{padding:'6px 18px',background:'rgba(168,32,32,0.07)',borderBottom:'0.5px solid rgba(168,32,32,0.16)',fontSize:12,color:'#A82020',flexShrink:0}}>⚡ {idleLimit-idle}s antes de perder el párrafo</div>}
 
           {/* TOOLBAR */}
-          <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:36,background:'#F9F8F5',borderBottom:'0.5px solid '+BDR,gap:2,flexShrink:0}}>
+          <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:36,background:'#F9F8F5',borderBottom:'0.5px solid '+BDR,gap:2,flexShrink:0,overflowX:'auto',overflowY:'hidden',scrollbarWidth:'none'}}>
             <div className="desk-only" style={{display:'flex',alignItems:'center',gap:2}}>
               <select value={fontIdx} onChange={e=>setFontIdx(+e.target.value)} style={{fontSize:11,color:TXT,background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'2px 3px',cursor:'pointer',height:24,maxWidth:72}}>{FONTS.map((f,i)=><option key={f.label} value={i}>{f.label}</option>)}</select>
               <div style={{display:'flex',alignItems:'center',border:'0.5px solid '+BDR,borderRadius:5,overflow:'hidden',height:24,flexShrink:0}}>
