@@ -11173,6 +11173,12 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const connected=driveData?.token&&driveData?.expires_at>Date.now()+30000;
 
   const headerTitle=customExercise?.title||customReto?.titulo||customReto?.title||currentProject?.title||'Mi proyecto';
+  // Título editable por el usuario. Se inicializa con el título calculado, pero
+  // puede cambiarlo (proyectos propios y ejercicios). Al guardar se usa este.
+  const [editTitle,setEditTitle]=useState(headerTitle);
+  const [titleFocused,setTitleFocused]=useState(false);
+  useEffect(()=>{setEditTitle(headerTitle);},[headerTitle]);
+  const effectiveTitle=(editTitle||'').trim()||headerTitle;
   const headerFamily=customExercise?.family||customReto?'Reto de la semana':currentProject?.type||'Proyecto';
   const headerDescShort=customExercise?customExercise.family+' · '+customExercise.mode+' · '+customExercise.min+' pal. mín.'
     :customReto?wc+'/'+(customReto.goal||0)+' palabras'
@@ -11205,7 +11211,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
       owner_user_id:existing?.user_id||user.id, // dueño original — nunca cambia por quien guarda
       words_added:Math.max(0,wc-initialWcRef.current), // increment only, 0 if didn't add words
       session_label:headerFamily,sessionLabel:headerFamily,
-      title:headerTitle,
+      title:effectiveTitle,
       html:edRef.current?.innerHTML||'',
       plain:plainTxt,
       word_count:wc,wordCount:wc,
@@ -11225,7 +11231,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
   const saveVersion=async()=>{
     if(!plainTxt.trim())return;
-    const snap={...buildEntry(),id:sk+'_v_'+Date.now(),title:headerTitle+' (versión '+new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})+')'  };
+    const snap={...buildEntry(),id:sk+'_v_'+Date.now(),title:effectiveTitle+' (versión '+new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})+')'  };
     await saveEntry(snap);
     setToast('✓ Versión guardada');
     setTimeout(()=>setToast(null),2500);
@@ -11378,7 +11384,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const si=siL();
   const TBTN=on=>({background:on?'rgba(0,0,0,0.08)':'transparent',border:'none',borderRadius:5,cursor:'pointer',color:on?TXT:MUTED,display:'flex',alignItems:'center',justifyContent:'center',width:26,height:26,flexShrink:0});
   const handleFinishDay=async()=>{
-    const finishPayload={sk,title:headerTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null};
+    const finishPayload={sk,title:effectiveTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null};
     if(started){
       // Texto compartido: comprobamos si alguien más ha guardado mientras lo teníamos
       // abierto, para no sobrescribirlo a lo bruto sin avisar (no hay tiempo real, así
@@ -11461,7 +11467,11 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:10,fontWeight:500,color:headerAccent,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:1}}>{headerFamily}</div>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <div style={{fontSize:13,fontWeight:500,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{headerTitle}</div>
+                  <input value={editTitle} onChange={e=>setEditTitle(e.target.value)}
+                    onFocus={()=>setTitleFocused(true)} onBlur={()=>setTitleFocused(false)}
+                    placeholder="Título…" spellCheck={false}
+                    style={{flex:1,minWidth:0,fontSize:13,fontWeight:500,color:TXT,background:titleFocused?'rgba(30,155,240,0.06)':'transparent',border:'none',borderBottom:'1px solid '+(titleFocused?AZUL:'transparent'),borderRadius:titleFocused?4:0,padding:titleFocused?'2px 6px':'2px 0',outline:'none',fontFamily:'inherit',transition:'background 0.15s'}}/>
+                  {!titleFocused&&<Icon name="pencil-simple" size={11} color={FAINT}/>}
                   {lockedMode&&<ModeBadge modeId={lockedMode} small/>}
                 </div>
                 {headerDescShort&&<div style={{fontSize:11,color:MUTED,marginTop:1}}>{headerDescShort}</div>}
@@ -12051,15 +12061,26 @@ const ReceivedChallengesBanner=({challenges,onAccept,onSave,onDecline})=>{
 const SharedBackBanner=({user,refreshKey=0})=>{
   const [items,setItems]=useState([]);
   const [readingModal,setReadingModal]=useState(null);
+  const [localHidden,setLocalHidden]=useState(()=>new Set(S.get('pretexto:sharedback_hidden:'+user.id)||[]));
 
   const load=()=>{DB.getCompletedSentChallenges(user.id).then(setItems).catch(()=>{});};
   useEffect(()=>{load();},[user.id,refreshKey]);
 
-  if(!items.length)return null;
-  const ch=items[0];
+  // El banner respeta DOS filtros: el from_seen de la BD (si el update funciona)
+  // y un descarte local en este dispositivo. El descarte local garantiza que,
+  // aunque el update de la BD falle (p.ej. por permisos), el aviso no vuelva a
+  // aparecer sesión tras sesión. El reto SIEMPRE sigue accesible en el buzón.
+  const visible=items.filter(c=>!localHidden.has(c.id));
+  if(!visible.length)return null;
+  const ch=visible[0];
 
-  const dismiss=async(id)=>{
-    try{await DB.markSentChallengeSeen(id);}catch(e){}
+  // "Más tarde": oculta el banner (aquí y, si se puede, en la BD) pero el reto
+  // se mantiene en el buzón de retos para leerlo cuando quieras.
+  const hide=(id)=>{
+    const next=new Set(localHidden);next.add(id);
+    setLocalHidden(next);
+    S.set('pretexto:sharedback_hidden:'+user.id,[...next]);
+    DB.markSentChallengeSeen(id).catch(()=>{}); // best-effort; el descarte local ya lo cubre
     setItems(prev=>prev.filter(c=>c.id!==id));
   };
 
@@ -12086,8 +12107,8 @@ const SharedBackBanner=({user,refreshKey=0})=>{
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
-          <button onClick={()=>{openStory();dismiss(ch.id);}} style={{background:'#1E9BF0',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Leer →</button>
-          <button onClick={()=>dismiss(ch.id)} style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'4px 14px',fontSize:11,color:'rgba(255,255,255,0.4)',cursor:'pointer'}}>Más tarde</button>
+          <button onClick={()=>{openStory();hide(ch.id);}} style={{background:'#1E9BF0',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>Leer →</button>
+          <button onClick={()=>hide(ch.id)} title="Se oculta del panel pero seguirá en tu buzón de retos" style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.2)',borderRadius:7,padding:'4px 14px',fontSize:11,color:'rgba(255,255,255,0.4)',cursor:'pointer'}}>Más tarde</button>
         </div>
       </div>
     </>
@@ -18300,9 +18321,10 @@ const Root=()=>{
   return(<>
     <App/>
     {!consent&&<CookieBanner onAccept={accept} onDecline={decline}/>}
-    {consent&&<button onClick={()=>setConsent(null)} title="Volver a elegir si aceptas cookies analíticas"
-      style={{position:'fixed',bottom:8,left:8,zIndex:400,background:'rgba(10,27,61,0.85)',color:'rgba(255,255,255,0.7)',border:'none',borderRadius:6,padding:'4px 9px',fontSize:10,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-      Preferencias de cookies
+    {consent&&<button onClick={()=>setConsent(null)} title="Preferencias de cookies"
+      aria-label="Preferencias de cookies"
+      style={{position:'fixed',bottom:8,right:8,zIndex:400,background:'rgba(10,27,61,0.55)',color:'rgba(255,255,255,0.75)',border:'none',borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',padding:0,cursor:'pointer',boxShadow:'0 2px 8px -2px rgba(10,27,61,0.4)'}}>
+      <Icon name="cookie" size={14} color="rgba(255,255,255,0.75)"/>
     </button>}
   </>);
 };
