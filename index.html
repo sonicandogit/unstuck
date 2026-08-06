@@ -4403,6 +4403,23 @@ const DB = {
     const { error } = await getSB().from('entries').update({ visibility }).eq('id', entryId);
     if (error) throw error;
   },
+  // Publica un texto en la biblioteca del autor: lo marca in_library=true y le
+  // fija la visibilidad elegida (privado = solo yo, amigos, abierto = todos).
+  // El texto sigue existiendo en el Escritorio; esto solo añade la copia a la
+  // Biblioteca. Si la visibilidad es 'ejercicio' (texto de trabajo sin publicar)
+  // se normaliza a 'privado' al publicar.
+  publishToLibrary: async (entryId, visibility) => {
+    const vis=(visibility==='ejercicio'||!visibility)?'privado':visibility;
+    const { error } = await getSB().from('entries')
+      .update({ in_library: true, visibility: vis }).eq('id', entryId);
+    if (error) throw error;
+  },
+  // Retira un texto de la biblioteca (vuelve a estar solo en el Escritorio).
+  unpublishFromLibrary: async (entryId) => {
+    const { error } = await getSB().from('entries')
+      .update({ in_library: false }).eq('id', entryId);
+    if (error) throw error;
+  },
   stripEntryContent: async (entryId) => {
     // Borra el TEXTO de una entrada (html/plain) pero conserva word_count/elapsed/words_added
     // para que las estadísticas (palabras escritas, tiempo escrito) sigan siendo correctas.
@@ -9826,7 +9843,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
   );
 };
 
-const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,followers=[],following=[],onFollow})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -10082,9 +10099,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
-        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} mode="biblioteca"/>}
+        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="biblioteca"/>}
       {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
-        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} mode="escritorio"/>}
+        onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="escritorio"/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
       {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
@@ -10792,8 +10809,8 @@ const PostSession=({sessionData,onComplete,onBack,user})=>{
                     {saveToLib&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                   </div>
                   <div>
-                    <div style={{fontSize:13,fontWeight:500,color:TXT}}>Guardar en mi biblioteca</div>
-                    <div style={{fontSize:11,color:MUTED}}>{saveToLib?"Visible en Mis textos":"Solo cuenta para las estadísticas"}</div>
+                    <div style={{fontSize:13,fontWeight:500,color:TXT}}>Publicar en mi biblioteca</div>
+                    <div style={{fontSize:11,color:MUTED}}>{saveToLib?"Se añade a tu biblioteca":"Solo cuenta para las estadísticas"}</div>
                   </div>
                 </div>}
                 {fbState==='done'&&(
@@ -13747,7 +13764,54 @@ const InviteCollaboratorsModal=({user,entry,onClose,onInvited})=>{
   );
 };
 
-const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,onFolderChange,onEdit,onDelete,onCollabAccepted,mode='biblioteca'})=>{
+// Modal reutilizable "Publicar en biblioteca": elige visibilidad y marca
+// in_library=true. Se usa al terminar una sesión y desde el Escritorio.
+const PublishModal=({entry,onClose,onPublished})=>{
+  const [vis,setVis]=useState(entry?.visibility&&entry.visibility!=='ejercicio'?entry.visibility:'privado');
+  const [saving,setSaving]=useState(false);
+  const publish=async()=>{
+    if(saving)return;setSaving(true);
+    try{
+      await DB.publishToLibrary(entry.id,vis);
+      onPublished&&onPublished(entry.id,vis);
+      onClose&&onClose();
+    }catch(e){alert('No se pudo publicar: '+e.message);}
+    finally{setSaving(false);}
+  };
+  return(
+    <div onClick={onClose} style={{position:'fixed',inset:0,zIndex:420,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:16,padding:'22px',width:'100%',maxWidth:340,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
+        <div style={{display:'flex',alignItems:'center',gap:9,marginBottom:5}}>
+          <Icon name="book-open" size={19} color={AZUL}/>
+          <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT}}>Publicar en biblioteca</div>
+        </div>
+        <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:16}}>«{entry?.title||'Sin título'}» seguirá en tu escritorio. Elige quién podrá verlo en tu biblioteca.</div>
+        <div style={{display:'flex',flexDirection:'column',gap:5,marginBottom:18}}>
+          {[['privado','lock-simple','Privado','Solo tú, guardado en tu biblioteca'],['amigos','users','Amigos','Quienes te siguen y tú a ellos'],['abierto','globe','Público','Cualquiera puede leerlo']].map(([v,ic,label,hint])=>{
+            const cur=vis===v;
+            return(
+              <button key={v} onClick={()=>setVis(v)}
+                style={{display:'flex',alignItems:'center',gap:11,background:cur?'rgba(30,155,240,0.08)':'transparent',border:'1px solid '+(cur?AZUL:BDR),borderRadius:10,padding:'11px 12px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+                <Icon name={ic} size={16} color={cur?AZUL:MUTED}/>
+                <span style={{flex:1}}>
+                  <div style={{fontSize:13.5,color:TXT,fontWeight:cur?600:500}}>{label}</div>
+                  <div style={{fontSize:11,color:FAINT}}>{hint}</div>
+                </span>
+                {cur&&<Icon name="check-circle" size={16} color={AZUL}/>}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={onClose} style={{flex:1,padding:'11px',background:'transparent',border:'1px solid '+BDR,borderRadius:10,fontSize:14,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+          <button onClick={publish} disabled={saving} style={{flex:1,padding:'11px',background:AZUL,border:'none',borderRadius:10,fontSize:14,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{saving?'Publicando…':'Publicar'}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,onFolderChange,onEdit,onDelete,onCollabAccepted,onPublish,onUnpublish,mode='biblioteca'})=>{
   const isEscritorio=mode==='escritorio';
   const [filter,setFilter]=useState('all');
   const [folder,setFolder]=useState('todos'); // 'todos' | 'sin' | slug de carpeta por defecto | id de carpeta personalizada
@@ -13756,6 +13820,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
   const [newFolderName,setNewFolderName]=useState('');
   const [movingEntry,setMovingEntry]=useState(null); // entry para el menú "mover a carpeta"
   const [visMenuEntry,setVisMenuEntry]=useState(null); // entry para el menú explícito de visibilidad
+  const [publishEntry,setPublishEntry]=useState(null); // entry para el modal de publicar en biblioteca
   const [updating,setUpdating]=useState(null);
   const [readEntry,setReadEntry]=useState(null);
   const [activity,setActivity]=useState({});
@@ -13959,6 +14024,8 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
         </div>
       </div>}
 
+      {publishEntry&&<PublishModal entry={publishEntry} onClose={()=>setPublishEntry(null)}
+        onPublished={(id,vis)=>{onPublish&&onPublish(id,vis);}}/>}
       {visMenuEntry&&<div onClick={()=>setVisMenuEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Visibilidad</div>
@@ -14122,6 +14189,16 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
                     <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>{e.word_count||e.wordCount||0} pal.</span>
                     {isPublic&&act&&(act.reactions>0||act.comments>0)&&<span style={{font:"500 11px/1 'Source Sans 3'",color:AZUL,marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:8}}><span style={{display:'inline-flex',alignItems:'center',gap:3}}><Icon name="heart" size={11}/>{act.reactions}</span><span style={{display:'inline-flex',alignItems:'center',gap:3}}><Icon name="chat-circle" size={11}/>{act.comments}</span></span>}
                   </div>
+                  {/* Publicar en biblioteca — solo en el Escritorio, para textos
+                      propios. Si ya está publicado, se muestra la marca. */}
+                  {isEscritorio&&isMine&&(
+                    e.in_library
+                      ? <div style={{marginTop:10,display:'flex',alignItems:'center',gap:5,fontSize:11,color:AZUL}}><Icon name="book-open" size={13} color={AZUL}/>En tu biblioteca</div>
+                      : <button onClick={ev=>{ev.stopPropagation();setPublishEntry(e);}}
+                          style={{marginTop:10,display:'inline-flex',alignItems:'center',gap:6,background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:8,padding:'7px 12px',fontSize:11.5,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",alignSelf:'flex-start'}}>
+                          <Icon name="book-open" size={13} color={AZUL}/>Publicar en biblioteca
+                        </button>
+                  )}
                 </div>
               </div>
             );
@@ -14186,7 +14263,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete,mode='biblioteca'})=>{
+const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete,onPublish,onUnpublish,mode='biblioteca'})=>{
   const isEscritorio=mode==='escritorio';
   const [tab,setTab]=useState(mode==='escritorio'?'mis_textos':'explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
@@ -14375,7 +14452,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
-        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete} mode={mode}/>}
+        {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete} onPublish={onPublish} onUnpublish={onUnpublish} mode={mode}/>}
       </div>
     </div>
   );
@@ -18093,7 +18170,11 @@ const App=()=>{
             await DB.stripEntryContent(ref.entryId);
             setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:'ejercicio',html:'',plain:''}:x));
           }else{
-            await DB.updateVisibility(ref.entryId,ref.visibility);
+            // El usuario ha elegido guardar en su biblioteca con una visibilidad:
+            // marcamos in_library=true (Fase 2) además de la visibilidad, para que
+            // aparezca en la Biblioteca. El texto sigue en el Escritorio.
+            await DB.publishToLibrary(ref.entryId,ref.visibility);
+            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,in_library:true,visibility:ref.visibility}:x));
             // Marcar si es encadenable (primer capítulo disponible para continuar)
             if(ref.chainStart){
               getSB().from('entries').update({chain_start:true}).eq('id',ref.entryId)
@@ -18305,6 +18386,8 @@ const App=()=>{
       onDeclineChallenge={async(id)=>{await DB.declineChallenge(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
       onEditEntry={e=>setEditingEntry(e)}
       onChangeVisibility={async(id,vis)=>{try{await DB.updateVisibility(id,vis);setLibrary(prev=>prev.map(x=>x.id===id?{...x,visibility:vis}:x));}catch(e){console.error(e);}}}
+      onPublishToLibrary={(id,vis)=>{setLibrary(prev=>prev.map(x=>x.id===id?{...x,in_library:true,visibility:(vis==='ejercicio'||!vis)?'privado':vis}:x));}}
+      onUnpublishFromLibrary={(id)=>{setLibrary(prev=>prev.map(x=>x.id===id?{...x,in_library:false}:x));}}
       onChangeFolder={async(id,folder)=>{try{await DB.updateFolder(id,folder);setLibrary(prev=>prev.map(x=>x.id===id?{...x,folder}:x));}catch(e){console.error(e);}}}
       followers={followers}
       following={following}
