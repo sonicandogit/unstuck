@@ -12782,7 +12782,7 @@ const StatsChart=({library})=>{
     </div>
   );
 };
-const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEdit,onToggleOffline,isOfflineKept,onMoveFolder,onInvite,isOwnerForInvite})=>{
+const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEdit,onToggleOffline,isOfflineKept,onMoveFolder,onInvite,isOwnerForInvite,onPublish,onUnpublish})=>{
   const [showEncadenar,setShowEncadenar]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [deleting,setDeleting]=useState(false);
@@ -12962,55 +12962,81 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
             </div>
           )}
           {!loadingData&&(
-            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:2,flexWrap:'wrap',rowGap:8}}>
-              {avgRating&&<div style={{display:'flex',alignItems:'center',gap:5}}>
-                <Stars value={Math.round(avgRating)} readonly/>
-                <span style={{fontSize:11,color:MUTED}}>{avgRating}/5 ({ratings.length} valoración{ratings.length!==1?'es':''})</span>
-              </div>}
-              <span style={{fontSize:11,color:FAINT}}>{entry.word_count||entry.wordCount||0} palabras</span>
+            <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:2}}>
+              {/* Metadatos */}
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',rowGap:6}}>
+                {avgRating&&<div style={{display:'flex',alignItems:'center',gap:5}}>
+                  <Stars value={Math.round(avgRating)} readonly/>
+                  <span style={{fontSize:11,color:MUTED}}>{avgRating}/5 ({ratings.length} valoración{ratings.length!==1?'es':''})</span>
+                </div>}
+                <span style={{fontSize:11,color:FAINT}}>{entry.word_count||entry.wordCount||0} palabras</span>
+              </div>
+
+              {/* FILA 1 — Acciones principales: Editar + Publicar/Visibilidad */}
               {editAllowed&&(
-                <button onClick={()=>setShowVisMenu(true)} title="Cambiar visibilidad"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'0.5px solid '+BDR,borderRadius:14,padding:'3px 10px',background:'rgba(0,0,0,0.03)',cursor:'pointer',fontSize:11,fontWeight:500}}>
-                  <Icon name={vis==='privado'?'lock-simple':vis==='amigos'?'users':'globe'} size={12}/>
-                  {vis==='privado'?'Privado':vis==='amigos'?'Amigos':'Público'}
-                </button>
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',rowGap:8}}>
+                {onEdit&&(
+                  <button onClick={()=>{onClose();onEdit(entry);}} title="Editar este texto"
+                    style={{display:'flex',alignItems:'center',gap:6,border:'none',borderRadius:14,padding:'6px 16px',background:ADVANCE_BG,color:ADVANCE_TXT,cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
+                    <Icon name="pencil-simple" size={13}/>Editar
+                  </button>
+                )}
+                {/* Misma ranura: si NO está en biblioteca → Publicar; si YA está → pastilla de visibilidad */}
+                {isOwn&&!entry.in_library&&onPublish&&(
+                  <button onClick={()=>{onClose();onPublish(entry);}} title="Publicar en tu biblioteca"
+                    style={{display:'flex',alignItems:'center',gap:6,border:'1px solid rgba(30,155,240,0.3)',borderRadius:14,padding:'6px 16px',background:'rgba(30,155,240,0.08)',color:AZUL,cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name="book-open" size={13}/>Publicar en biblioteca
+                  </button>
+                )}
+                {isOwn&&entry.in_library&&(
+                  <button onClick={()=>setShowVisMenu(true)} title="Cambiar quién puede verlo en tu biblioteca"
+                    style={{display:'flex',alignItems:'center',gap:6,border:'1px solid '+BDR,borderRadius:14,padding:'6px 14px',background:'rgba(0,0,0,0.03)',cursor:'pointer',fontSize:12,fontWeight:600,color:TXT,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name={vis==='privado'?'lock-simple':vis==='amigos'?'users':'globe'} size={13}/>
+                    {vis==='privado'?'Privado':vis==='amigos'?'Amigos':'Público'}
+                  </button>
+                )}
+              </div>
               )}
-              {editAllowed&&onEdit&&(
-                <button onClick={()=>{onClose();onEdit(entry);}} title="Editar este texto"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'none',borderRadius:14,padding:'4px 12px',background:ADVANCE_BG,color:ADVANCE_TXT,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif"}}>
-                  <Icon name="pencil-simple" size={12}/>Editar
-                </button>
-              )}
-              {onToggleOffline&&(
-                <button onClick={()=>onToggleOffline(entry)} title={isOfflineKept?'Disponible sin conexión · quitar':'Mantener disponible sin conexión'}
-                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+(isOfflineKept?'rgba(30,155,240,0.3)':BDR),borderRadius:14,padding:'4px 12px',background:isOfflineKept?'rgba(30,155,240,0.07)':'rgba(0,0,0,0.03)',color:isOfflineKept?AZUL:MUTED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
-                  <Icon name={isOfflineKept?'cloud-check':'cloud-arrow-down'} size={12}/>{isOfflineKept?'Offline':'Mantener offline'}
-                </button>
-              )}
-              {onMoveFolder&&editAllowed&&(
-                <button onClick={()=>{onClose();onMoveFolder(entry);}} title="Mover a carpeta"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:14,padding:'4px 12px',background:'rgba(0,0,0,0.03)',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
-                  <Icon name="folder-simple" size={12}/>Mover
-                </button>
-              )}
-              {onInvite&&isOwnerForInvite&&(
-                <button onClick={()=>{onClose();onInvite(entry);}} title="Invitar a escribir juntos"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(30,155,240,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(30,155,240,0.07)',color:AZUL,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
-                  <Icon name="user-plus" size={12}/>Invitar
-                </button>
-              )}
-              {isOwn&&entry.chain_start&&(
-                <button onClick={()=>setShowEncadenar(true)} title="Proponer como inicio de un relato encadenado"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(27,95,170,0.3)',borderRadius:14,padding:'4px 12px',background:'rgba(27,95,170,0.07)',color:AZULMED,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
-                  <Icon name="link" size={12}/>Encadenar
-                </button>
-              )}
-              {isOwn&&onDelete&&(
-                <button onClick={()=>setConfirmDelete(true)} title="Eliminar este texto"
-                  style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(197,34,31,0.25)',borderRadius:14,padding:'4px 12px',background:'rgba(197,34,31,0.05)',color:DANGER,cursor:'pointer',fontSize:11,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
-                  <Icon name="trash" size={12}/>Eliminar
-                </button>
-              )}
+
+              {/* FILA 2 — Gestión: acciones secundarias, más tenues */}
+              <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',rowGap:7}}>
+                {onMoveFolder&&editAllowed&&(
+                  <button onClick={()=>{onClose();onMoveFolder(entry);}} title="Mover a carpeta"
+                    style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:13,padding:'4px 11px',background:'transparent',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name="folder-simple" size={12}/>Mover
+                  </button>
+                )}
+                {onToggleOffline&&(
+                  <button onClick={()=>onToggleOffline(entry)} title={isOfflineKept?'Disponible sin conexión · quitar':'Mantener disponible sin conexión'}
+                    style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+(isOfflineKept?'rgba(30,155,240,0.3)':BDR),borderRadius:13,padding:'4px 11px',background:isOfflineKept?'rgba(30,155,240,0.07)':'transparent',color:isOfflineKept?AZUL:MUTED,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name={isOfflineKept?'cloud-check':'cloud-arrow-down'} size={12}/>{isOfflineKept?'Offline':'Offline'}
+                  </button>
+                )}
+                {onInvite&&isOwnerForInvite&&(
+                  <button onClick={()=>{onClose();onInvite(entry);}} title="Invitar a escribir juntos"
+                    style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:13,padding:'4px 11px',background:'transparent',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name="user-plus" size={12}/>Invitar
+                  </button>
+                )}
+                {isOwn&&entry.chain_start&&(
+                  <button onClick={()=>setShowEncadenar(true)} title="Proponer como inicio de un relato encadenado"
+                    style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:13,padding:'4px 11px',background:'transparent',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name="link" size={12}/>Encadenar
+                  </button>
+                )}
+                {isOwn&&entry.in_library&&onUnpublish&&(
+                  <button onClick={()=>{onUnpublish(entry.id);onClose();}} title="Quitar de la biblioteca (seguirá en tu escritorio)"
+                    style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:13,padding:'4px 11px',background:'transparent',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name="book-bookmark" size={12}/>Quitar de biblioteca
+                  </button>
+                )}
+                {isOwn&&onDelete&&(
+                  <button onClick={()=>setConfirmDelete(true)} title="Eliminar este texto"
+                    style={{display:'flex',alignItems:'center',gap:5,border:'1px solid rgba(197,34,31,0.25)',borderRadius:13,padding:'4px 11px',background:'transparent',color:DANGER,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
+                    <Icon name="trash" size={12}/>Eliminar
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -14005,7 +14031,8 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
       {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)} onEdit={()=>{setReadEntry(null);onEdit&&onEdit(readEntry);}} onVisibilityChange={onVisibilityChange} onDelete={onDelete}
         canEdit={readEntry.user_id===user.id||(collabMap[readEntry.id]||[]).some(c=>c.status==='aceptado'&&(c.collaborator_id===user.id||c.owner_id===user.id))}
         onToggleOffline={toggleOfflineKeep} isOfflineKept={offlineKept.has(readEntry.id)}
-        onMoveFolder={e2=>setMovingEntry(e2)} onInvite={e2=>setInvitingEntry(e2)} isOwnerForInvite={readEntry.user_id===user.id}/>}
+        onMoveFolder={e2=>setMovingEntry(e2)} onInvite={e2=>setInvitingEntry(e2)} isOwnerForInvite={readEntry.user_id===user.id}
+        onPublish={e2=>setPublishEntry(e2)} onUnpublish={onUnpublish}/>}
       {movingEntry&&<div onClick={()=>setMovingEntry(null)} style={{position:'fixed',inset:0,zIndex:299,background:'rgba(10,27,61,0.4)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
         <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,padding:'18px',width:'100%',maxWidth:300,boxShadow:'0 20px 50px -16px rgba(10,27,61,0.4)'}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,marginBottom:4}}>Mover a…</div>
@@ -14189,16 +14216,6 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
                     <span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>{e.word_count||e.wordCount||0} pal.</span>
                     {isPublic&&act&&(act.reactions>0||act.comments>0)&&<span style={{font:"500 11px/1 'Source Sans 3'",color:AZUL,marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:8}}><span style={{display:'inline-flex',alignItems:'center',gap:3}}><Icon name="heart" size={11}/>{act.reactions}</span><span style={{display:'inline-flex',alignItems:'center',gap:3}}><Icon name="chat-circle" size={11}/>{act.comments}</span></span>}
                   </div>
-                  {/* Publicar en biblioteca — solo en el Escritorio, para textos
-                      propios. Si ya está publicado, se muestra la marca. */}
-                  {isEscritorio&&isMine&&(
-                    e.in_library
-                      ? <div style={{marginTop:10,display:'flex',alignItems:'center',gap:5,fontSize:11,color:AZUL}}><Icon name="book-open" size={13} color={AZUL}/>En tu biblioteca</div>
-                      : <button onClick={ev=>{ev.stopPropagation();setPublishEntry(e);}}
-                          style={{marginTop:10,display:'inline-flex',alignItems:'center',gap:6,background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:8,padding:'7px 12px',fontSize:11.5,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",alignSelf:'flex-start'}}>
-                          <Icon name="book-open" size={13} color={AZUL}/>Publicar en biblioteca
-                        </button>
-                  )}
                 </div>
               </div>
             );
