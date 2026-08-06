@@ -10100,6 +10100,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:18,letterSpacing:'-0.01em',color:TXT,flexShrink:0}}>Pretexto</div>
         <div style={{flex:1,minWidth:10}}/>
         <div className="topbar-nav" style={{display:'flex',alignItems:'center',gap:18}}>
+          <button onClick={()=>setShowEscritorio(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="folders"/>Escritorio</button>
           <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="book-open"/>Biblioteca</button>
           <button onClick={()=>setShowAmigos(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users"/>Amigos</button>
           <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users-three"/>Equipos</button>
@@ -13928,7 +13929,9 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     privado:{label:'Privado',color:MUTED,bg:'rgba(10,27,61,0.06)',signo:';',signoColor:'navy'},
     amigos:{label:'Amigos',color:AZULMED,bg:'rgba(27,95,170,0.1)',signo:',',signoColor:'azul'},
     abierto:{label:'Público',color:NARANJA,bg:'rgba(241,90,36,0.1)',signo:'\u201c',signoColor:'naranja'},
+    ejercicio:{label:'Escritorio',color:AZULMED,bg:'rgba(27,95,170,0.08)',signo:'\u00b7',signoColor:'azul'},
   };
+  const visMeta=(v)=>VIS_META[v]||VIS_META.ejercicio;
 
   const FILTERS=[['all','Todos'],['privado','Privados'],['amigos','Amigos'],['abierto','Abiertos']];
 
@@ -14005,9 +14008,10 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
         </div>
       </div>}
 
-      {/* Carpetas */}
+      {/* Carpetas — las carpetas de trabajo (Retos, Poesía, Relato…) son del
+          Escritorio. En la Biblioteca solo tiene sentido "Todos" y lo compartido. */}
       <div style={{display:'flex',gap:7,padding:'14px 16px 0',flexShrink:0,flexWrap:'wrap',alignItems:'center'}}>
-        {[['todos','Todos'],['compartidos','Compartidos'],['sin','Sin carpeta'],...allFolders].map(([id,name])=>{
+        {(isEscritorio?[['todos','Todos'],['sin','Sin carpeta'],...allFolders]:[['todos','Todos'],['compartidos','Compartidos']]).map(([id,name])=>{
           const active=folder===id;
           const sharedCount=id==='compartidos'?combinedLibrary.filter(e=>e.user_id!==user.id&&e.visibility!=='ejercicio'&&!e.deleted).length:0;
           return(
@@ -14057,7 +14061,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
           {filtered.map(e=>{
             const vis=e.visibility||'privado';
-            const meta=VIS_META[vis];
+            const meta=visMeta(vis);
             const isUpdating=updating===e.id;
             const excerpt=(e.plain||'').slice(0,100);
             const isPublic=vis!=='privado';
