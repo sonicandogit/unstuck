@@ -10129,11 +10129,15 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               }
               setShowRetosMenu(v=>!v);
             }} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,color:NARANJA,cursor:'pointer',fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:4}}>
-              <Icon name="lightning"/>Retos <span style={{fontSize:9,opacity:0.7}}>▾</span>
+              <Icon name="lightning"/>Escribe <span style={{fontSize:9,opacity:0.7}}>▾</span>
             </button>
             {showRetosMenu&&retosPos&&<>
               <div onClick={()=>setShowRetosMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
               <div className="fi" style={{position:'fixed',top:retosPos.top,left:retosPos.left,width:190,background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,boxShadow:'0 12px 40px -12px rgba(10,27,61,0.3)',overflow:'hidden',zIndex:50}}>
+                <button onClick={()=>{onContinue&&onContinue(5);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+                  <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="notebook"/>Tu proyecto</span>
+                  <span style={{fontSize:10.5,color:FAINT}}>Continúa o crea un proyecto propio</span>
+                </button>
                 <button onClick={()=>{setShowLibChecks(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="lightbulb"/>Checks</span>
                   <span style={{fontSize:10.5,color:FAINT}}>Ejercicios diarios</span>
@@ -13841,6 +13845,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
   const isEscritorio=mode==='escritorio';
   const [filter,setFilter]=useState('all');
   const [folder,setFolder]=useState('todos'); // 'todos' | 'sin' | slug de carpeta por defecto | id de carpeta personalizada
+  const [textQuery,setTextQuery]=useState(''); // buscador discreto por título dentro de la carpeta/pestaña actual
   const [customFolders,setCustomFolders]=useState([]);
   const [creatingFolder,setCreatingFolder]=useState(false);
   const [newFolderName,setNewFolderName]=useState('');
@@ -13970,7 +13975,8 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     if(folder==='sin')return !e.folder&&e.user_id===user.id;
     return e.folder===folder&&e.user_id===user.id;
   };
-  const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado')));
+  const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado'))
+    &&(!textQuery.trim()||(e.title||'').toLowerCase().includes(textQuery.trim().toLowerCase())));
 
 
   useEffect(()=>{
@@ -14120,10 +14126,10 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
             </button>
           );
         })}
-        {!creatingFolder&&<button onClick={()=>setCreatingFolder(true)} style={{background:'transparent',border:'1px dashed rgba(30,155,240,0.4)',borderRadius:8,padding:'6px 12px',fontSize:11,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5}}>
+        {isEscritorio&&!creatingFolder&&<button onClick={()=>setCreatingFolder(true)} style={{background:'transparent',border:'1px dashed rgba(30,155,240,0.4)',borderRadius:8,padding:'6px 12px',fontSize:11,fontWeight:600,color:AZUL,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5}}>
           <Icon name="plus" size={11}/>Nueva carpeta
         </button>}
-        {creatingFolder&&<div style={{display:'flex',gap:5,alignItems:'center'}}>
+        {isEscritorio&&creatingFolder&&<div style={{display:'flex',gap:5,alignItems:'center'}}>
           <input autoFocus value={newFolderName} onChange={e=>setNewFolderName(e.target.value)}
             onKeyDown={e=>{if(e.key==='Enter')createFolder();if(e.key==='Escape'){setCreatingFolder(false);setNewFolderName('');}}}
             placeholder="Nombre de la carpeta…" style={{width:160,padding:'6px 10px',fontSize:11,borderRadius:7}}/>
@@ -14132,8 +14138,10 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
         </div>}
       </div>
 
-      {/* Filter pills (visibilidad) */}
-      <div style={{display:'flex',gap:7,padding:'10px 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
+      {/* Filter pills (visibilidad) — solo tiene sentido en el Escritorio, para
+          separar tu trabajo por privado/amigos/abierto. En la Biblioteca los
+          textos se ven directamente en tarjetas, sin este filtro fino. */}
+      {isEscritorio&&<div style={{display:'flex',gap:7,padding:'10px 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
         {FILTERS.map(([v,l])=>{
           const count=myTexts.filter(e=>inFolder(e)&&(v==='all'||e.visibility===v||(!e.visibility&&v==='privado'))).length;
           const active=filter===v;
@@ -14147,6 +14155,16 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
             </button>
           );
         })}
+      </div>}
+      {/* Buscador discreto de textos — filtra por título dentro de la carpeta o
+          pestaña actual. Deliberadamente pequeño: no es una pestaña aparte. */}
+      <div style={{padding:'0 16px 10px',flexShrink:0}}>
+        <div style={{position:'relative',maxWidth:260}}>
+          <Icon name="magnifying-glass" size={13} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
+          <input value={textQuery} onChange={e=>setTextQuery(e.target.value)} placeholder="Buscar por título…"
+            style={{width:'100%',padding:'7px 10px 7px 30px',fontSize:12,border:'1px solid '+BDR,borderRadius:8,background:CARD_BG,color:TXT,outline:'none',fontFamily:"'Source Sans 3',sans-serif"}}/>
+          {textQuery&&<button onClick={()=>setTextQuery('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:2}}><Icon name="x" size={12}/></button>}
+        </div>
       </div>
 
       {/* Grid de tarjetas */}
@@ -14285,6 +14303,8 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   const [tab,setTab]=useState(mode==='escritorio'?'mis_textos':'explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
+  const [exploreQuery,setExploreQuery]=useState('');
+  const [amigosQuery,setAmigosQuery]=useState('');
   const [following,setFollowing]=useState([]); // array of user_ids
   const [loading,setLoading]=useState(false);
   const [readEntry,setReadEntry]=useState(null);
@@ -14352,7 +14372,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   ]:[
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
-    {id:'buscar',label:'Buscar',count:0},
+    {id:'buscar',label:'Personas',count:0},
     {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&e.in_library&&!e.deleted).length},
   ];
 
@@ -14406,6 +14426,16 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
             </div>
           )}
 
+          {/* Buscador discreto por título */}
+          <div style={{padding:'0 0 14px',maxWidth:260}}>
+            <div style={{position:'relative'}}>
+              <Icon name="magnifying-glass" size={13} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
+              <input value={exploreQuery} onChange={e=>setExploreQuery(e.target.value)} placeholder="Buscar por título…"
+                style={{width:'100%',padding:'7px 10px 7px 30px',fontSize:12,border:'1px solid '+BDR,borderRadius:8,background:CARD_BG,color:TXT,outline:'none',fontFamily:"'Source Sans 3',sans-serif"}}/>
+              {exploreQuery&&<button onClick={()=>setExploreQuery('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:2}}><Icon name="x" size={12}/></button>}
+            </div>
+          </div>
+
           {loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando textos…</div>}
           {!loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40}}>
             <div style={{marginBottom:12}}><Icon name="book-open" size={32} color={FAINT}/></div>
@@ -14414,7 +14444,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           </div>}
           {(()=>{
             // Sort: recent activity first, then entry date
-            const sorted=publicEntries.slice().sort((a,b)=>{
+            const sorted=publicEntries.filter(e=>!exploreQuery.trim()||(e.title||'').toLowerCase().includes(exploreQuery.trim().toLowerCase())).sort((a,b)=>{
               const aAct=activity[a.id]?.lastActivity||0;
               const bAct=activity[b.id]?.lastActivity||0;
               const aScore=Math.max(aAct,a.ts||0);
@@ -14458,10 +14488,18 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           {following.length===0&&<div style={{background:'rgba(27,95,170,0.06)',border:'1px solid rgba(27,95,170,0.22)',borderRadius:12,padding:'16px 20px',marginBottom:12,fontSize:13,color:AZULMED,lineHeight:1.65}}>
             Sigue a otros escritores desde la pestaña "Explorar" para ver aquí sus textos compartidos con amigos.
           </div>}
+          {following.length>0&&<div style={{padding:'0 0 14px',maxWidth:260}}>
+            <div style={{position:'relative'}}>
+              <Icon name="magnifying-glass" size={13} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
+              <input value={amigosQuery} onChange={e=>setAmigosQuery(e.target.value)} placeholder="Buscar por título…"
+                style={{width:'100%',padding:'7px 10px 7px 30px',fontSize:12,border:'1px solid '+BDR,borderRadius:8,background:CARD_BG,color:TXT,outline:'none',fontFamily:"'Source Sans 3',sans-serif"}}/>
+              {amigosQuery&&<button onClick={()=>setAmigosQuery('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:2}}><Icon name="x" size={12}/></button>}
+            </div>
+          </div>}
           {loading&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Cargando…</div>}
           {!loading&&friendsEntries.length===0&&following.length>0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Tus amigos no han compartido textos contigo todavía.</div>}
           <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {friendsEntries.map(e=><PublicEntryCard key={e.id} entry={e} currentUser={user} onRead={setReadEntry} onFollow={handleFollow} following={following}/>)}
+            {friendsEntries.filter(e=>!amigosQuery.trim()||(e.title||'').toLowerCase().includes(amigosQuery.trim().toLowerCase())).map(e=><PublicEntryCard key={e.id} entry={e} currentUser={user} onRead={setReadEntry} onFollow={handleFollow} following={following}/>)}
           </div>
         </>}
 
@@ -15290,7 +15328,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
       {/* TOP BAR */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0 14px',height:44,background:HEADER_NAVY_BG,flexShrink:0,borderBottom:'0.5px solid rgba(255,255,255,0.08)'}}>
         <button onClick={()=>{doSave(true);onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4,padding:0}}>
-          <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>← Menú
+          <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>Menú
         </button>
         <div style={{flex:1,textAlign:'center',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)'}}>
           {project?.title||sessionConfig?.exercise?.title||'Editor de guión'}
@@ -16613,7 +16651,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:8,padding:'0 16px',height:44,background:HEADER_NAVY_BG,flexShrink:0}}>
         <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>
-          <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>← Menú
+          <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>Menú
         </button>
         <div style={{flex:1,textAlign:'center',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)'}}>{col.title}</div>
         <div style={{display:'flex',alignItems:'center',gap:6}}>
