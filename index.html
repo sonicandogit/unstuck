@@ -237,6 +237,8 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
   .topbar-nav{gap:10px!important;max-width:none!important;flex-shrink:1;min-width:0;}
   .topbar-nav>button{flex-shrink:0;white-space:nowrap;}
   .theme-toggle button{padding:6px 9px!important;}
+  /* El Claro/Oscuro de la topbar se oculta en móvil: vive en el menú de perfil */
+  .topbar-theme-toggle{display:none!important;}
   /* Nombre de usuario oculto en móvil: basta el avatar */
   .topbar-username{display:none!important;}
   /* Red de seguridad: nada debe provocar scroll horizontal de la página */
@@ -10175,7 +10177,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
             style={{background:'transparent',border:'none',cursor:'pointer',padding:'4px 6px',color:MUTED,flexShrink:0}}>
             <Icon name="list" size={20}/>
           </button>
-          <ThemeToggle theme={theme} setTheme={setTheme} small/>
+          <div className="topbar-theme-toggle"><ThemeToggle theme={theme} setTheme={setTheme} small/></div>
           {/* User menu button */}
           <div style={{position:'relative'}}>
             <button onClick={()=>setShowUserMenu(v=>!v)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:20,padding:'3px 10px 3px 4px',cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
@@ -10193,6 +10195,11 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                     <div style={{fontSize:13,fontWeight:700,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:'"Playfair Display",serif'}}>{user.name}</div>
                     <div style={{fontSize:11,color:MUTED}}>@{user.username||'—'}</div>
                   </div>
+                </div>
+                {/* Apariencia: Claro/Oscuro — vive aquí en vez de ocupar sitio en la topbar */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid '+BDR}}>
+                  <span style={{fontSize:12,color:TXT}}>Apariencia</span>
+                  <ThemeToggle theme={theme} setTheme={setTheme} small/>
                 </div>
                 {/* Menu items */}
                 {[
