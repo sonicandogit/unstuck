@@ -15884,7 +15884,7 @@ const FeedbackWidget=({user,library})=>{
     <div className="fu" style={{background:CARD_BG,border:'1px solid rgba(27,95,170,0.35)',borderRadius:14,padding:'16px 20px',marginBottom:16,position:'relative',overflow:'hidden'}}>
       <Signo char="*" size={90} top={-16} right={6} color="naranja"/>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,position:'relative',zIndex:1}}>
-        <div style={{fontSize:12,fontWeight:700,color:AZULMED,fontFamily:'"Playfair Display",serif'}}>✨ Tu escritura está recibiendo feedback</div>
+        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,fontWeight:700,color:AZULMED,fontFamily:'"Playfair Display",serif'}}><Icon name="sparkle" size={13} color={AZULMED}/>Tu escritura está recibiendo feedback</div>
         <button onClick={markSeen} style={{background:'transparent',border:'none',fontSize:11,color:FAINT,cursor:'pointer',padding:0}}>Marcar como visto</button>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:6}}>
@@ -15894,8 +15894,8 @@ const FeedbackWidget=({user,library})=>{
             <span><strong>{c.author_name}</strong> comentó «{titleById[c.entry_id]||'tu texto'}»: <span style={{color:MUTED,fontStyle:'italic'}}>"{c.comment.slice(0,80)}{c.comment.length>80?'…':''}"</span></span>
           </div>
         ))}
-        {newRatings>0&&<div style={{fontSize:12,color:TXT}}>★ Has recibido <strong>{newRatings}</strong> valoración{newRatings>1?'es':''} nueva{newRatings>1?'s':''}</div>}
-        {newReactions>0&&<div style={{fontSize:12,color:TXT}}>👏 Has recibido <strong>{newReactions}</strong> reacción{newReactions>1?'es':''} nueva{newReactions>1?'s':''}</div>}
+        {newRatings>0&&<div style={{fontSize:12,color:TXT,display:'flex',gap:6,alignItems:'baseline'}}><Icon name="star" size={13}/><span>Has recibido <strong>{newRatings}</strong> valoración{newRatings>1?'es':''} nueva{newRatings>1?'s':''}</span></div>}
+        {newReactions>0&&<div style={{fontSize:12,color:TXT,display:'flex',gap:6,alignItems:'baseline'}}><Icon name="heart" size={13}/><span>Has recibido <strong>{newReactions}</strong> reacción{newReactions>1?'es':''} nueva{newReactions>1?'s':''}</span></div>}
       </div>
     </div>
   );
