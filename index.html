@@ -10512,7 +10512,13 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
 
   const createProject=async()=>{
     if(!newProj.title.trim())return;
-    const p={id:uid(),title:newProj.title.trim(),type:newProj.type,goal:newProj.goal,created_at:today(),word_count:0};
+    // El género elegido en el grid (Poesía/Relato/Novela/Ensayo) debe mapear al
+    // mismo slug que usan las carpetas del Escritorio (DEFAULT_FOLDERS), para
+    // que los textos de este proyecto aparezcan en su carpeta correspondiente
+    // en vez de quedarse sin carpeta.
+    const GENRE_TO_FOLDER={'Poesía':'poesia','Relato':'relato','Novela':'novela','Ensayo':'ensayo'};
+    const folder=GENRE_TO_FOLDER[selectedGenre]||null;
+    const p={id:uid(),title:newProj.title.trim(),type:newProj.type,goal:newProj.goal,created_at:today(),word_count:0,folder};
     await saveProject(p);
     onStart({type:'proyecto',project:p});
   };
@@ -11216,7 +11222,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const prog=minW>0?Math.min(100,(wc/minW)*100):0;
   const connected=driveData?.token&&driveData?.expires_at>Date.now()+30000;
 
-  const headerTitle=customExercise?.title||customReto?.titulo||customReto?.title||currentProject?.title||'Mi proyecto';
+  const headerTitle=sessionConfig.existingTitle||customExercise?.title||customReto?.titulo||customReto?.title||currentProject?.title||'Mi proyecto';
   // Título editable por el usuario. Se inicializa con el título calculado, pero
   // puede cambiarlo (proyectos propios y ejercicios). Al guardar se usa este.
   const [editTitle,setEditTitle]=useState(headerTitle);
@@ -11239,7 +11245,16 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     // La carpeta se asigna sola la primera vez (check/reto/cuento -> "retos"); si el usuario
     // ya la movió a mano en una sesión anterior, se respeta esa carpeta en los guardados siguientes.
     const existing=library.find(e=>e.id===id);
-    const defaultFolder=['check','reto','cuento'].includes(sk)?'retos':null;
+    // check/reto/cuento -> "retos" por defecto. proyecto -> hereda la carpeta
+    // del propio proyecto. Los proyectos creados ANTES de este arreglo no
+    // tienen folder guardado, así que se infiere a partir de su 'type'
+    // (Poemario->poesia, Relato corto/Microrrelatos->relato, etc.) para que
+    // también aparezcan agrupados sin tener que recrearlos.
+    const TYPE_TO_FOLDER={'Poemario':'poesia','Relato corto':'relato','Microrrelatos':'relato','Novela':'novela','Ensayo':'ensayo','Diario creativo':'ensayo'};
+    const inferredProjectFolder=currentProject?.folder
+      ??(currentProject?.type?TYPE_TO_FOLDER[currentProject.type]||null:null);
+    const defaultFolder=['check','reto','cuento'].includes(sk)?'retos'
+      :(sk==='proyecto'?inferredProjectFolder:null);
     const folder=existing?(existing.folder!==undefined?existing.folder:defaultFolder):defaultFolder;
     // Reedición de un cuento contrareloj ya publicado: el "elapsed" original queda fijo,
     // y el tiempo de esta sesión se suma aparte como tiempo extra de edición.
@@ -13975,18 +13990,23 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     }).catch(()=>{});
   },[myTexts.map(e=>e.id).join(',')]);
 
+  // 'borrador' agrupa lo que aún no tiene una visibilidad social explícita
+  // (checks, retos, proyectos: visibility='ejercicio', o cualquier valor no
+  // reconocido). Sin esto, esos textos no encajaban en ninguna pastilla, así
+  // que Privados+Amigos+Abiertos nunca sumaban el total de "Todos".
+  const KNOWN_VIS=['privado','amigos','abierto'];
+  const visBucket=e=>KNOWN_VIS.includes(e.visibility)?e.visibility:(!e.visibility?'privado':'borrador');
   const inFolder=e=>{
-    // Los checks y retos semanales que siguen en la carpeta "Retos" por defecto
-    // (es decir, nadie los ha movido a mano todavía) no aparecen en "Todos":
-    // son ejercicios de calentamiento, no piezas que el usuario haya curado.
-    // En cuanto se mueven a otra carpeta, se comportan como cualquier otro texto.
-    const isUncuratedExercise=e.folder==='retos'&&(e.sk==='check'||e.sk==='reto');
+    // 'Todos' cuenta TODO lo tuyo, sin excepciones — así el número coincide
+    // siempre con el de la pestaña de arriba. (Antes se excluían aquí los
+    // checks/retos aún no movidos a una carpeta; se quitó esa distinción
+    // silenciosa porque generaba números que no cuadraban entre sí.)
     if(folder==='compartidos')return e.user_id!==user.id; // autor distinto a mí — siempre aquí, no depende de e.folder
-    if(folder==='todos')return !isUncuratedExercise&&e.user_id===user.id;
+    if(folder==='todos')return e.user_id===user.id;
     if(folder==='sin')return !e.folder&&e.user_id===user.id;
     return e.folder===folder&&e.user_id===user.id;
   };
-  const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||e.visibility===filter||(!e.visibility&&filter==='privado'))
+  const filtered=myTexts.filter(e=>inFolder(e)&&(filter==='all'||visBucket(e)===filter)
     &&(!textQuery.trim()||(e.title||'').toLowerCase().includes(textQuery.trim().toLowerCase())));
 
 
@@ -14037,11 +14057,15 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     privado:{label:'Privado',color:MUTED,bg:'rgba(10,27,61,0.06)',signo:';',signoColor:'navy'},
     amigos:{label:'Amigos',color:AZULMED,bg:'rgba(27,95,170,0.1)',signo:',',signoColor:'azul'},
     abierto:{label:'Público',color:NARANJA,bg:'rgba(241,90,36,0.1)',signo:'\u201c',signoColor:'naranja'},
-    ejercicio:{label:'Escritorio',color:AZULMED,bg:'rgba(27,95,170,0.08)',signo:'\u00b7',signoColor:'azul'},
+    ejercicio:{label:'Borrador',color:AZULMED,bg:'rgba(27,95,170,0.08)',signo:'\u00b7',signoColor:'azul'},
   };
   const visMeta=(v)=>VIS_META[v]||VIS_META.ejercicio;
 
-  const FILTERS=[['all','Todos'],['privado','Privados'],['amigos','Amigos'],['abierto','Abiertos']];
+  // 'borrador' agrupa lo que aún no tiene una visibilidad social explícita
+  // (checks, retos, proyectos: visibility='ejercicio', o cualquier valor no
+  // reconocido). Antes esos textos no encajaban en ninguna pastilla, así que
+  // Privados+Amigos+Abiertos nunca sumaban el total de "Todos".
+  const FILTERS=[['all','Todos'],['borrador','Borrador'],['privado','Privados'],['amigos','Amigos'],['abierto','Abiertos']];
 
   return(
     <div style={{display:'flex',flexDirection:'column',height:'100%'}}>
@@ -14154,7 +14178,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
           textos se ven directamente en tarjetas, sin este filtro fino. */}
       {isEscritorio&&<div style={{display:'flex',gap:7,padding:'10px 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
         {FILTERS.map(([v,l])=>{
-          const count=myTexts.filter(e=>inFolder(e)&&(v==='all'||e.visibility===v||(!e.visibility&&v==='privado'))).length;
+          const count=myTexts.filter(e=>inFolder(e)&&(v==='all'||visBucket(e)===v)).length;
           const active=filter===v;
           return(
             <button key={v} onClick={()=>setFilter(v)} style={{
@@ -14379,7 +14403,11 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   };
 
   const tabs=isEscritorio?[
-    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&!e.deleted&&!e.in_library).length},
+    // Escritorio muestra TODO lo tuyo, esté o no también publicado en la
+    // Biblioteca (un texto puede estar en ambos sitios a la vez) — por eso
+    // aquí NO se excluye in_library, para que el número coincida siempre con
+    // lo que se ve realmente en la pantalla.
+    {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&!e.deleted).length},
   ]:[
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
@@ -18350,7 +18378,7 @@ const App=()=>{
     if(!user)return;
     const p={...proj,user_id:user.id};
     setProjects(prev=>[p,...prev.filter(x=>x.id!==p.id)]);
-    const dbProj={id:p.id,user_id:p.user_id,title:p.title||null,type:p.type||null,goal:p.goal||50000,word_count:p.word_count||p.wordCount||0,updated_at:p.updated_at||p.updatedAt||null};
+    const dbProj={id:p.id,user_id:p.user_id,title:p.title||null,type:p.type||null,goal:p.goal||50000,word_count:p.word_count||p.wordCount||0,updated_at:p.updated_at||p.updatedAt||null,folder:p.folder!==undefined?p.folder:null};
     try{await DB.upsertProject(dbProj);}catch(e){console.error('save project',e);}
   };
 
@@ -18382,7 +18410,7 @@ const App=()=>{
       driveData={driveData}
       sessionConfig={{type:'edit',sk:editingEntry.sk||'check',
         initialHtml:editingEntry.html||'',initialPlain:editingEntry.plain||'',
-        entryId:editingEntry.id}}/>;
+        entryId:editingEntry.id,existingTitle:editingEntry.title||null}}/>;
   }
 
   if(view==='postSession')return<PostSession sessionData={sessionData} onComplete={completeReflection} onBack={()=>{setView('dashboard');loadUserData(user.id);}} user={user}/>;
