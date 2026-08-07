@@ -10049,7 +10049,11 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 <Icon name="users-three" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Equipos</span>
               </button>
               {/* Ejercicios section */}
-              <div style={{fontSize:10,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',padding:'12px 18px 4px'}}>Ejercicios</div>
+              <div style={{fontSize:10,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',padding:'12px 18px 4px'}}>Escribe</div>
+              <button onClick={()=>{onContinue&&onContinue(5);setShowHamburger(false);}}
+                style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
+                <Icon name="notebook" size={16} color={AZULMED}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Tu proyecto</span>
+              </button>
               <button onClick={()=>{setShowLibChecks(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
                 <Icon name="lightbulb" size={16} color={AZULMED}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Checks diarios</span>
