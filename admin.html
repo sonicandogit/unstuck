@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Pretexto · Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/light/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --navy:#0A1B3D; --azul:#1E9BF0; --azulmed:#1B5FAA; --naranja:#F15A24;
+    --cream:#FBF8F0; --card:#fff; --border:rgba(10,27,61,0.1);
+    --muted:#5B6478; --faint:#8A8578; --danger:#C5221F;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--cream);color:var(--navy);font-family:'Source Sans 3',sans-serif;-webkit-font-smoothing:antialiased}
+  .serif{font-family:'Playfair Display',Georgia,serif}
+  a{color:inherit}
+
+  /* ── Login ── */
+  #loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .login-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:36px 32px;width:100%;max-width:360px;box-shadow:0 20px 60px -20px rgba(10,27,61,0.25)}
+  .login-card h1{font-size:22px;font-style:italic;font-weight:600;margin:0 0 4px}
+  .login-card p{font-size:13px;color:var(--muted);margin:0 0 22px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
+  .field input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-family:inherit;background:var(--cream);color:var(--navy)}
+  .field input:focus{outline:none;border-color:var(--azul)}
+  .btn{width:100%;padding:11px;border:none;border-radius:9px;background:var(--navy);color:#fff;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:opacity .15s}
+  .btn:hover{opacity:.9}
+  .btn:disabled{opacity:.5;cursor:default}
+  .err{background:rgba(197,34,31,0.08);border:1px solid rgba(197,34,31,0.25);color:var(--danger);font-size:12.5px;padding:9px 12px;border-radius:8px;margin-bottom:14px}
+
+  /* ── App shell ── */
+  #app{display:none}
+  .topbar{display:flex;align-items:center;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--border);gap:12px}
+  .topbar h1{font-size:17px;font-style:italic;font-weight:600;margin:0;flex-shrink:0}
+  .topbar .tag{font-size:10px;font-weight:700;color:var(--azul);background:rgba(30,155,240,0.1);padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.06em}
+  .topbar .spacer{flex:1}
+  .range-picker{display:flex;background:rgba(10,27,61,0.05);border-radius:9px;padding:3px;gap:2px}
+  .range-picker button{border:none;background:transparent;padding:7px 13px;font-size:12.5px;font-weight:600;color:var(--muted);border-radius:7px;cursor:pointer;font-family:inherit}
+  .range-picker button.active{background:#fff;color:var(--navy);box-shadow:0 1px 4px rgba(10,27,61,0.1)}
+  .signout{background:transparent;border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px}
+
+  main{max-width:1080px;margin:0 auto;padding:28px 24px 60px}
+
+  /* ── Overview cards ── */
+  .overview{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:32px}
+  .ov-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:16px 18px}
+  .ov-card .lbl{font-size:10.5px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+  .ov-card .val{font-family:'Playfair Display',serif;font-weight:700;font-size:26px;color:var(--navy)}
+
+  /* ── Section ── */
+  section{margin-bottom:36px}
+  .sec-head{display:flex;align-items:baseline;gap:8px;margin-bottom:14px}
+  .sec-head h2{font-size:16px;font-weight:600;margin:0;display:flex;align-items:center;gap:7px}
+  .sec-head .hint{font-size:12px;color:var(--faint)}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  canvas{max-height:280px}
+
+  /* ── Feature usage bars (custom, not chart.js, for label clarity) ── */
+  .bar-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12.5px}
+  .bar-row .name{width:110px;flex-shrink:0;color:var(--navy);font-weight:500;text-transform:capitalize}
+  .bar-row .track{flex:1;height:9px;background:rgba(10,27,61,0.06);border-radius:5px;overflow:hidden}
+  .bar-row .fill{height:100%;border-radius:5px}
+  .bar-row .num{width:56px;text-align:right;color:var(--muted);flex-shrink:0;font-variant-numeric:tabular-nums}
+
+  /* ── Heatmap ── */
+  .heatmap{display:grid;grid-template-columns:34px repeat(24,1fr);gap:2px;font-size:9.5px}
+  .heatmap .hcell{aspect-ratio:1;border-radius:3px;background:rgba(30,155,240,0.08)}
+  .heatmap .hlabel{color:var(--faint);display:flex;align-items:center;font-size:9.5px}
+  .heatmap .hourlabel{color:var(--faint);text-align:center;padding-bottom:2px}
+
+  /* ── Retention table ── */
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;font-size:10.5px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--border)}
+  td{padding:9px 10px;border-bottom:1px solid rgba(10,27,61,0.05);color:var(--navy)}
+  tr:last-child td{border-bottom:none}
+
+  .empty{text-align:center;padding:40px 20px;color:var(--faint);font-size:13px}
+  .loading{text-align:center;padding:60px 20px;color:var(--faint);font-size:13px}
+
+  @media(max-width:820px){
+    .overview{grid-template-columns:repeat(2,1fr)}
+    .grid2{grid-template-columns:1fr}
+    .heatmap{font-size:7px}
+    main{padding:20px 14px 48px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="loginScreen">
+  <div class="login-card">
+    <h1 class="serif">Pretexto</h1>
+    <p>Panel de administración</p>
+    <div id="loginErr" class="err" style="display:none"></div>
+    <form id="loginForm">
+      <div class="field"><label>Email</label><input type="email" id="loginEmail" required autocomplete="username"></div>
+      <div class="field"><label>Contraseña</label><input type="password" id="loginPass" required autocomplete="current-password"></div>
+      <button class="btn" type="submit" id="loginBtn">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ APP ═══ -->
+<div id="app">
+  <div class="topbar">
+    <h1 class="serif">Pretexto</h1>
+    <span class="tag">Panel</span>
+    <div class="spacer"></div>
+    <div class="range-picker" id="rangePicker">
+      <button data-days="30">30 días</button>
+      <button data-days="90" class="active">90 días</button>
+      <button data-days="365">1 año</button>
+    </div>
+    <button class="signout" id="signOutBtn"><i class="ph-light ph-sign-out"></i>Salir</button>
+  </div>
+
+  <main>
+    <div id="unauthorizedMsg" class="empty" style="display:none">
+      <i class="ph-light ph-lock-key" style="font-size:28px"></i>
+      <p>Esta cuenta no tiene acceso al panel.</p>
+    </div>
+
+    <div id="content" style="display:none">
+      <!-- Overview -->
+      <div class="overview" id="overviewCards"></div>
+
+      <!-- 1. Palabras y minutos -->
+      <section>
+        <div class="sec-head">
+          <h2><i class="ph-light ph-pen-nib" style="color:var(--azul)"></i>Palabras y minutos</h2>
+          <span class="hint">— actividad diaria en el rango elegido</span>
+        </div>
+        <div class="panel"><canvas id="chartWordsMinutes"></canvas></div>
+      </section>
+
+      <!-- 2. Uso por funcionalidad -->
+      <section>
+        <div class="sec-head">
+          <h2><i class="ph-light ph-squares-four" style="color:var(--naranja)"></i>Funcionalidades más usadas</h2>
+          <span class="hint">— sesiones por tipo y por modo de escritura</span>
+        </div>
+        <div class="grid2">
+          <div class="panel">
+            <div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Por tipo</div>
+            <div id="skBars"></div>
+          </div>
+          <div class="panel">
+            <div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Por modo de escritura</div>
+            <div id="modeBars"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Actividad por hora -->
+      <section>
+        <div class="sec-head">
+          <h2><i class="ph-light ph-clock" style="color:var(--azulmed)"></i>Cuándo escriben</h2>
+          <span class="hint">— sesiones por hora y día de la semana (hora de Madrid)</span>
+        </div>
+        <div class="panel">
+          <div class="heatmap" id="heatmap"></div>
+        </div>
+      </section>
+
+      <!-- 4. Usuarios activos y retención -->
+      <section>
+        <div class="sec-head">
+          <h2><i class="ph-light ph-users-three" style="color:var(--navy)"></i>Usuarios activos y retención</h2>
+          <span class="hint">— quién vuelve, y cuándo</span>
+        </div>
+        <div class="grid2">
+          <div class="panel"><canvas id="chartDau"></canvas></div>
+          <div class="panel">
+            <div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Retención por cohorte semanal</div>
+            <table>
+              <thead><tr><th>Semana de alta</th><th>Nuevos</th><th>+7 días</th><th>+30 días</th></tr></thead>
+              <tbody id="retentionBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="loadingMsg" class="loading">Cargando datos…</div>
+  </main>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// Config — mismo proyecto Supabase que la app principal.
+// ═══════════════════════════════════════════════════════════════════════
+const SB_URL = 'https://nzvzjyoavpqtjwkwgzch.supabase.co';
+const SB_KEY = 'sb_publishable_MZita6X22w8fd8dAw9Cr_g_RSXTYACO';
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+const COLORS = { azul:'#1E9BF0', azulmed:'#1B5FAA', naranja:'#F15A24', navy:'#0A1B3D', muted:'#5B6478', tunel:'#1A6B8A', dueto:'#1A6B8A' };
+const SK_COLOR = { check:'#1E9BF0', reto:'#F15A24', proyecto:'#1B5FAA', cuento:'#A82020', dueto:'#1A6B8A', colectivo:'#1E9BF0', cadena:'#1A6B8A', colaboracion:'#8A8578' };
+const SK_LABEL = { check:'Checks diarios', reto:'Retos semanales', proyecto:'Proyectos', cuento:'Contrarreloj', dueto:'A cuatro manos', colectivo:'Relato colectivo', cadena:'Encadenados', colaboracion:'Colaboración' };
+const MODE_COLOR = { rio:'#1E9BF0', limite:'#1B5FAA', tunel:'#1A6B8A', presion:'#F15A24', normal:'#8A8578' };
+const MODE_LABEL = { rio:'Río', limite:'Límite', tunel:'Túnel', presion:'Presión', normal:'Normal' };
+const DOW_LABEL = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+
+let currentDays = 90;
+let charts = {};
+
+// ── Login ──
+document.getElementById('loginForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  const errEl = document.getElementById('loginErr');
+  errEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Entrando…';
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  btn.disabled = false; btn.textContent = 'Entrar';
+  if (error) {
+    errEl.textContent = 'No se pudo iniciar sesión: ' + error.message;
+    errEl.style.display = 'block';
+    return;
+  }
+  showApp();
+});
+
+document.getElementById('signOutBtn').addEventListener('click', async ()=>{
+  await sb.auth.signOut();
+  location.reload();
+});
+
+document.getElementById('rangePicker').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-days]');
+  if (!btn) return;
+  document.querySelectorAll('#rangePicker button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentDays = parseInt(btn.dataset.days, 10);
+  loadAll();
+});
+
+// ── Boot: ¿ya hay sesión? ──
+(async ()=>{
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) showApp(); 
+})();
+
+function showApp(){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  loadAll();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Carga de datos — llama a las funciones RPC. Si el resultado viene vacío,
+// puede ser por falta de autorización (comprobado dentro de Postgres) o
+// porque de verdad no hay datos en ese rango; se distingue en loadAll().
+// ═══════════════════════════════════════════════════════════════════════
+async function loadAll(){
+  document.getElementById('loadingMsg').style.display = 'block';
+  document.getElementById('content').style.display = 'none';
+  document.getElementById('unauthorizedMsg').style.display = 'none';
+
+  try{
+    const [overview, wordsMinutes, featureUsage, hours, dau, retention] = await Promise.all([
+      sb.rpc('admin_overview'),
+      sb.rpc('admin_words_minutes', { p_days: currentDays }),
+      sb.rpc('admin_feature_usage', { p_days: currentDays }),
+      sb.rpc('admin_activity_hours', { p_days: currentDays }),
+      sb.rpc('admin_dau', { p_days: currentDays }),
+      sb.rpc('admin_retention', { p_weeks: 12 }),
+    ]);
+
+    for (const r of [overview, wordsMinutes, featureUsage, hours, dau, retention]) {
+      if (r.error) throw r.error;
+    }
+
+    // admin_overview() siempre devuelve una fila si estás autorizado (aunque
+    // todo sea 0), y ninguna si no lo estás — es la señal más clara.
+    if (!overview.data || overview.data.length === 0) {
+      document.getElementById('loadingMsg').style.display = 'none';
+      document.getElementById('unauthorizedMsg').style.display = 'block';
+      return;
+    }
+
+    renderOverview(overview.data[0]);
+    renderWordsMinutes(wordsMinutes.data || []);
+    renderFeatureUsage(featureUsage.data || []);
+    renderHeatmap(hours.data || []);
+    renderDau(dau.data || []);
+    renderRetention(retention.data || []);
+
+    document.getElementById('loadingMsg').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  }catch(err){
+    console.error('Error cargando panel:', err);
+    document.getElementById('loadingMsg').textContent = 'Error al cargar: ' + (err.message || 'desconocido');
+  }
+}
+
+// ── 0. Resumen ──
+function renderOverview(o){
+  const cards = [
+    { lbl: 'Usuarios totales', icon: 'users', val: Number(o.total_users).toLocaleString('es-ES') },
+    { lbl: 'Palabras escritas', icon: 'pen-nib', val: Number(o.total_words).toLocaleString('es-ES') },
+    { lbl: 'Minutos escritos', icon: 'clock', val: Number(o.total_minutes).toLocaleString('es-ES') },
+    { lbl: 'Textos guardados', icon: 'files', val: Number(o.total_entries).toLocaleString('es-ES') },
+  ];
+  document.getElementById('overviewCards').innerHTML = cards.map(c => `
+    <div class="ov-card">
+      <div class="lbl"><i class="ph-light ph-${c.icon}"></i>${c.lbl}</div>
+      <div class="val serif">${c.val}</div>
+    </div>`).join('');
+}
+
+// ── 1. Palabras y minutos ──
+function renderWordsMinutes(rows){
+  const labels = rows.map(r => r.day);
+  const words = rows.map(r => r.words);
+  const minutes = rows.map(r => r.minutes);
+  if (charts.wm) charts.wm.destroy();
+  charts.wm = new Chart(document.getElementById('chartWordsMinutes'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Palabras', data: words, backgroundColor: 'rgba(30,155,240,0.55)', borderRadius: 3, yAxisID: 'y' },
+        { label: 'Minutos', data: minutes, type: 'line', borderColor: '#F15A24', backgroundColor: '#F15A24', tension: 0.3, yAxisID: 'y1', pointRadius: 0 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: { position: 'left', title: { display: true, text: 'Palabras' }, grid: { color: 'rgba(10,27,61,0.05)' } },
+        y1: { position: 'right', title: { display: true, text: 'Minutos' }, grid: { display: false } },
+        x: { grid: { display: false } },
+      },
+      plugins: { legend: { position: 'top', labels: { font: { family: "'Source Sans 3'" } } } },
+    }
+  });
+}
+
+// ── 2. Funcionalidades ──
+function renderBars(containerId, rows, colorMap, labelMap){
+  const max = Math.max(...rows.map(r => r.sessions), 1);
+  document.getElementById(containerId).innerHTML = rows.map(r => `
+    <div class="bar-row">
+      <span class="name">${labelMap[r.label] || r.label}</span>
+      <span class="track"><span class="fill" style="width:${(r.sessions/max*100).toFixed(0)}%;background:${colorMap[r.label]||'#8A8578'}"></span></span>
+      <span class="num">${Number(r.sessions).toLocaleString('es-ES')}</span>
+    </div>`).join('') || '<div class="empty">Sin datos en este rango</div>';
+}
+function renderFeatureUsage(rows){
+  const skRows = rows.filter(r => r.kind === 'sk').sort((a,b)=>b.sessions-a.sessions);
+  const modeRows = rows.filter(r => r.kind === 'mode').sort((a,b)=>b.sessions-a.sessions);
+  renderBars('skBars', skRows, SK_COLOR, SK_LABEL);
+  renderBars('modeBars', modeRows, MODE_COLOR, MODE_LABEL);
+}
+
+// ── 3. Mapa de calor hora × día ──
+function renderHeatmap(rows){
+  const grid = {};
+  let max = 1;
+  rows.forEach(r => { grid[r.dow+'_'+r.hour] = r.sessions; if (r.sessions > max) max = r.sessions; });
+  let html = '<div class="hlabel"></div>';
+  for (let h=0; h<24; h++) html += `<div class="hourlabel">${h%3===0?h:''}</div>`;
+  for (let d=0; d<7; d++){
+    html += `<div class="hlabel">${DOW_LABEL[d]}</div>`;
+    for (let h=0; h<24; h++){
+      const v = grid[d+'_'+h] || 0;
+      const alpha = (0.06 + (v/max)*0.85).toFixed(2);
+      html += `<div class="hcell" title="${DOW_LABEL[d]} ${h}h: ${v} sesiones" style="background:rgba(30,155,240,${alpha})"></div>`;
+    }
+  }
+  document.getElementById('heatmap').innerHTML = html;
+}
+
+// ── 4. DAU + retención ──
+function renderDau(rows){
+  if (charts.dau) charts.dau.destroy();
+  charts.dau = new Chart(document.getElementById('chartDau'), {
+    type: 'line',
+    data: {
+      labels: rows.map(r => r.day),
+      datasets: [{ label: 'Usuarios activos', data: rows.map(r => r.active_users), borderColor: '#1E9BF0', backgroundColor: 'rgba(30,155,240,0.12)', fill: true, tension: 0.3, pointRadius: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { y: { beginAtZero: true, grid: { color: 'rgba(10,27,61,0.05)' } }, x: { grid: { display: false } } },
+      plugins: { legend: { display: false } },
+    }
+  });
+}
+function renderRetention(rows){
+  document.getElementById('retentionBody').innerHTML = rows.map(r => {
+    const pct7 = r.cohort_size > 0 ? Math.round(r.retained_7d / r.cohort_size * 100) : 0;
+    const pct30 = r.cohort_size > 0 ? Math.round(r.retained_30d / r.cohort_size * 100) : 0;
+    return `<tr>
+      <td>${r.cohort_week}</td>
+      <td>${r.cohort_size}</td>
+      <td>${r.retained_7d} <span style="color:var(--faint)">(${pct7}%)</span></td>
+      <td>${r.retained_30d} <span style="color:var(--faint)">(${pct30}%)</span></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--faint)">Sin cohortes en este rango</td></tr>';
+}
+</script>
+</body>
+</html>
