@@ -9201,6 +9201,20 @@ const unsubscribeFromPush=async()=>{
 /* ─── SIGNOS DESIGN TOKENS ─────────────────────────── */
 // Paleta fija (no cambia entre temas)
 const NAVY='#0A1B3D';      // tinta principal: titulares, logo, botón de avance, nav
+// ═══ FEATURE FLAGS ═══════════════════════════════════════════════════════
+// Funcionalidades completas y con todo su código intacto, pero ocultas de
+// la interfaz por ahora (pocos usuarios, se activarán más adelante). Para
+// reactivar cualquiera de las dos, basta con poner su bandera a `true` —
+// no hace falta tocar nada más en el resto del archivo.
+const FEATURE_TEAMS_ENABLED = false;       // Equipos
+// FEATURE_SCREENPLAY_ENABLED controla SOLO el interruptor global "modo
+// literatura / modo guion" (el que cambia checks, retos y contrarreloj
+// enteros a su versión de cine). NO afecta al editor de guion de PROYECTOS
+// PROPIOS: crear un proyecto de tipo Película o Cortometraje sigue
+// disponible siempre, con su editor de guion correspondiente — eso es un
+// camino independiente que no depende de esta bandera.
+const FEATURE_SCREENPLAY_ENABLED = false;  // Modo Guion (interruptor global, no el editor de proyectos)
+
 const AZUL='#1E9BF0';      // acento / interacción / signos / activo
 const AZULMED='#1B5FAA';   // enlaces, tarjetas de acento, estado 2.º
 const NARANJA='#F15A24';   // ACCIÓN: CTA principal, acento cálido
@@ -9820,7 +9834,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
       body:'Cinco palabras al azar. Una hora. Toda tu creatividad. De vez en cuando conviene ponerse contra las cuerdas y descubrir qué sale.',
       cta:'¿Preparado?',
       action:()=>{ onNewChallenge&&onNewChallenge(); dismiss('disc_contrarreloj'); }},
-    {id:'disc_equipos', show:true, icon:'users', color:'#F15A24',
+    {id:'disc_equipos', show:FEATURE_TEAMS_ENABLED, icon:'users', color:'#F15A24',
       title:'Crea tu propio equipo',
       body:'Quizá ya tengáis un grupo con el que escribís de vez en cuando. Mandaros retos, leer vuestros textos y compartir estadísticas. Si es así, en Pretexto os lo ponemos fácil.',
       cta:'Crea tu equipo',
@@ -9884,6 +9898,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [followersSeenTick,setFollowersSeenTick]=useState(0); // fuerza re-render al marcar seguidores como vistos
   const [writingMode,setWritingMode]=useState(()=>S.get('pretexto:writing_mode')||'literatura'); // 'literatura'|'guion'
   const toggleWritingMode=()=>{
+    if(!FEATURE_SCREENPLAY_ENABLED)return; // defensa adicional: el interruptor está apagado
     const nm=writingMode==='literatura'?'guion':'literatura';
     S.set('pretexto:writing_mode',nm);
     setWritingMode(nm);
@@ -10069,10 +10084,12 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 style={{background:'transparent',border:'none',padding:'14px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%',borderBottom:'0.5px solid '+BDR}}>
                 <Icon name="users" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Amigos</span>
               </button>
+              {FEATURE_TEAMS_ENABLED&&(
               <button onClick={()=>{setShowTeams(true);setShowHamburger(false);if(!S.get(firstTimeKey('equipos',user?.id)))setActivePopup('equipos');}}
                 style={{background:'transparent',border:'none',padding:'14px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%',borderBottom:'1px solid '+BDR}}>
                 <Icon name="users-three" size={18} color={MUTED}/><span style={{fontSize:14,fontWeight:500,color:TXT}}>Equipos</span>
               </button>
+              )}
               {/* Ejercicios section */}
               <div style={{fontSize:10,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',padding:'12px 18px 4px'}}>Escribe</div>
               <button onClick={()=>{onContinue&&onContinue(5);setShowHamburger(false);}}
@@ -10140,7 +10157,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showStartChain&&<StartChainModal user={user} onClose={()=>setShowStartChain(false)}/>}
       {showLibChecks&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="check" onStartLesson={onStartLesson} onClose={()=>setShowLibChecks(false)} writingMode={writingMode}/>}
       {showLibSemanales&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="reto" onStartLesson={onStartLesson} onClose={()=>setShowLibSemanales(false)} writingMode={writingMode}/>}
-      {showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
+      {FEATURE_TEAMS_ENABLED&&showTeams&&<TeamsScreen user={user} onClose={()=>setShowTeams(false)} onEdit={onEditEntry} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showKeyPanel&&<ApiKeyPanel userId={user.id} onClose={()=>setShowKeyPanel(false)}/>}
       <div className="topbar" style={{display:'flex',alignItems:'center',padding:'0 20px',height:52,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0}}>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:18,letterSpacing:'-0.01em',color:TXT,flexShrink:0}}>Pretexto</div>
@@ -10149,7 +10166,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
           <button onClick={()=>setShowEscritorio(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="folders"/>Escritorio</button>
           <button onClick={()=>setShowBiblioteca(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="book-open"/>Biblioteca</button>
           <button onClick={()=>setShowAmigos(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users"/>Amigos</button>
-          <button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users-three"/>Equipos</button>
+          {FEATURE_TEAMS_ENABLED&&<button onClick={()=>setShowTeams(true)} style={{background:'transparent',border:'none',padding:'4px 2px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:6}}><Icon name="users-three"/>Equipos</button>}
           <div style={{position:'relative'}}>
             <button ref={retosBtnRef} onClick={()=>{
               if(!showRetosMenu&&retosBtnRef.current){
@@ -10228,7 +10245,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 {[
                   {icon:'sliders-horizontal',label:'Editar perfil',action:()=>{setShowProfileSettings(true);setShowUserMenu(false);}},
                   {icon:'chart-bar',label:'Estadísticas',action:()=>{setShowStats(true);setShowUserMenu(false);}},
-                  {icon:'film-script',label:writingMode==='literatura'?'Modo: Literatura':'Modo: Guión cine',action:()=>{setConfirmModeChange(true);setShowUserMenu(false);},dot:writingMode==='guion'?NARANJA:AZUL},
+                  ...(FEATURE_SCREENPLAY_ENABLED?[{icon:'film-script',label:writingMode==='literatura'?'Modo: Literatura':'Modo: Guión cine',action:()=>{setConfirmModeChange(true);setShowUserMenu(false);},dot:writingMode==='guion'?NARANJA:AZUL}]:[]),
                   {icon:'tray',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
                   {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);if(!S.get(firstTimeKey('revisionia',user?.id)))setActivePopup('revisionia');},dot:getApiKey(user.id)?AZUL:null},
                   {icon:'download-simple',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
