@@ -4998,13 +4998,16 @@ const DB = {
     });
     if(error)throw error;
   },
-  submitCollectiveTurn: async(collectiveId,turn,nextUserId,nextTurnCount,finish=false)=>{
+  submitCollectiveTurn: async(collectiveId,turn,nextUserId,nextTurnCount,finish=false,bonusTurns=null)=>{
     const{error:te}=await getSB().from('collective_turns').insert(turn);
     if(te)throw te;
     const patch={
       current_turn_user_id:nextUserId,turn_count:nextTurnCount,updated_at:new Date().toISOString(),
     };
     if(finish)patch.status='finished';
+    // Solo se toca en un salto de turno: añade +1 al total de turnos objetivo
+    // para que ese hueco no reste una parte escrita al relato final.
+    if(bonusTurns!==null)patch.bonus_turns=bonusTurns;
     const{error:ce}=await getSB().from('collectives').update(patch).eq('id',collectiveId);
     if(ce)throw ce;
   },
@@ -11434,7 +11437,21 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     }catch(e){setTunnelRects([]);}
   };
 
-  useEffect(()=>{document.execCommand('defaultParagraphSeparator',false,'p');const init=sessionConfig.initialHtml||'';if(init&&edRef.current){edRef.current.innerHTML=init;const txt=edRef.current.innerText||'';setPlainTxt(txt);const iwc=txt.trim().split(/\s+/).filter(Boolean).length;setWc(iwc);initialWcRef.current=iwc;}},[]);
+  useEffect(()=>{
+    document.execCommand('defaultParagraphSeparator',false,'p');
+    // Red de seguridad: si html está vacío pero plain tiene texto (puede pasar
+    // por un fallo de guardado en algún flujo, como le pasó a los capítulos de
+    // encadenados antes de este arreglo), se reconstruye el editor a partir de
+    // plain en vez de abrir vacío — igual que ya hace ReadingModal al leer.
+    const init=sessionConfig.initialHtml||(sessionConfig.initialPlain?sessionConfig.initialPlain.split('\n').map(l=>'<p>'+(l||'<br>')+'</p>').join(''):'');
+    if(init&&edRef.current){
+      edRef.current.innerHTML=init;
+      const txt=edRef.current.innerText||'';
+      setPlainTxt(txt);
+      const iwc=txt.trim().split(/\s+/).filter(Boolean).length;
+      setWc(iwc);initialWcRef.current=iwc;
+    }
+  },[]);
   // Keyboard shortcuts
   useEffect(()=>{
     const handler=e=>{
@@ -15578,7 +15595,23 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
   const [plainTxt,setPlainTxt]=useState('');
   const [wc,setWc]=useState(0);
   const [saving,setSaving]=useState(false);
+  const [confirmSkip,setConfirmSkip]=useState(false);
   const edRef=useRef(null);
+
+  // Saltar mi turno SIN escribir — para cuando no llego a tiempo y no quiero
+  // parar la historia. Se guarda como un turno más (vacío, passed:true), así
+  // que la notificación de "te toca" al otro se dispara exactamente igual
+  // que con un turno normal (mismo trigger, sin tocar nada del backend).
+  const skipTurn=async()=>{
+    if(saving)return;setSaving(true);
+    try{
+      await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html:'',plain:'',word_count:0,turn_number:duet.turn_count+1,passed:true});
+      await DB.updateDuet(duet.id,{turn_count:duet.turn_count+1,current_turn:isA?'b':'a'});
+      onUpdate&&onUpdate();
+      onClose();
+    }catch(e){alert('Error: '+e.message);}
+    finally{setSaving(false);setConfirmSkip(false);}
+  };
 
   useEffect(()=>{
     DB.getDuetTurns(duet.id).then(t=>{setTurns(t);setLoading(false);}).catch(e=>{console.error(e);setLoading(false);});
@@ -15785,10 +15818,28 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
             style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.3)',borderRadius:8,padding:'9px 14px',fontSize:12,color:canPass?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
             Proponer fin
           </button>
+          <button onClick={()=>setConfirmSkip(true)} disabled={saving}
+            title="Pasa tu turno sin escribir, para que la historia no se quede esperando"
+            style={{background:'transparent',border:'none',padding:'9px 6px',fontSize:11.5,color:'rgba(255,255,255,0.55)',textDecoration:'underline',cursor:'pointer'}}>
+            Saltar mi turno
+          </button>
           <button onClick={()=>passTurn(false)} disabled={!canPass||saving}
             style={{background:canPass?'#fff':'rgba(255,255,255,0.15)',border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:600,color:canPass?'#1E9BF0':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
             {saving?'Guardando…':'Pasar el turno →'}
           </button>
+        </div>
+      )}
+      {confirmSkip&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setConfirmSkip(false);}}
+          style={{position:'fixed',inset:0,zIndex:600,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:340,padding:'24px 22px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
+            <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT,marginBottom:8}}>¿Saltar tu turno?</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.55,marginBottom:20}}>Le tocará escribir a {isA?duet.name_b:duet.name_a} sin que tú añadas nada esta vez. Lo que hayas escrito aquí no se guardará.</div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setConfirmSkip(false)} style={{flex:1,padding:'10px',background:'transparent',border:'1px solid '+BDR,borderRadius:9,fontSize:13.5,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+              <button onClick={skipTurn} disabled={saving} style={{flex:1,padding:'10px',background:NAVY,border:'none',borderRadius:9,fontSize:13.5,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{saving?'Guardando…':'Saltar turno'}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -16029,7 +16080,18 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
     return parts[parts.length-1]||txt.trim().slice(-140);
   };
 
-  const goNominate=()=>{ if(canFinish) setStep('nominate'); };
+  // El área de escritura (edRef) solo existe en el DOM mientras step==='write'
+  // — al pasar a 'nominate' se desmonta. Si confirmPublish() leyera
+  // edRef.current.innerHTML en ese momento, ya sería null y guardaría el
+  // capítulo con html vacío (aunque plainTxt, que es estado de React, sí
+  // conservara el texto). Por eso el html se captura AQUÍ, con el DOM
+  // todavía vivo, y confirmPublish usa esta copia en vez de edRef.
+  const finalHtmlRef=useRef('');
+  const goNominate=()=>{
+    if(!canFinish)return;
+    finalHtmlRef.current=edRef.current?.innerHTML||'';
+    setStep('nominate');
+  };
 
   const confirmPublish=async()=>{
     if(!openNomination&&nominees.length===0){
@@ -16037,7 +16099,9 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
     }
     setSaving(true);
     try{
-      const html=edRef.current?.innerHTML||'';
+      // edRef ya está desmontado en este paso (step==='nominate'), por eso se
+      // usa el html capturado en goNominate() en vez de leerlo de edRef aquí.
+      const html=finalHtmlRef.current||'';
       const lastSentence=extractLastSentence(plainTxt);
       let chainId=chain?.id;
       let newChapterNumber=chapterNumber;
@@ -16562,10 +16626,11 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       const nextMemberFresh=freshMembers.find(m=>m.turn_order===nextOrderFresh);
       const nextTurnNumber=(fresh.turn_count||0)+1;
       // ¿Este turno completa las rondas objetivo? Si target_rounds está fijado,
-      // el relato tiene target_rounds × nº-participantes turnos en total. Al
-      // escribir el último, el relato se cierra automáticamente.
+      // el relato tiene target_rounds × nº-participantes turnos en total, más
+      // los turnos extra acumulados por saltos previos (bonus_turns) — cada
+      // salto amplía el objetivo en +1 para no perder una parte escrita.
       const targetTurns=(fresh.target_rounds&&freshMembers.length)
-        ? fresh.target_rounds*freshMembers.length : 0;
+        ? fresh.target_rounds*freshMembers.length+(fresh.bonus_turns||0) : 0;
       const reachesEnd=targetTurns>0 && nextTurnNumber>=targetTurns;
       const turn={
         collective_id:col.id,user_id:user.id,
@@ -16604,6 +16669,39 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       setTurnDone({wordsAdded:wc,elapsed:secs});
     }catch(e){alert('Error: '+e.message);}
     setSubmitting(false);
+  };
+
+  // Saltar mi turno SIN escribir — para no dejar la historia parada si no
+  // llego a tiempo. Se guarda como un turno más (vacío, passed:true) para
+  // reutilizar exactamente la misma infraestructura que un turno normal:
+  // notificación al siguiente, avance de la ronda, y cierre automático si
+  // este turno completaba las rondas objetivo.
+  const [confirmSkip,setConfirmSkip]=useState(false);
+  const skipTurn=async()=>{
+    if(submitting)return;setSubmitting(true);
+    try{
+      const fresh=await DB.getCollectiveDetail(col.id);
+      if(fresh.status!=='active'){setCol(fresh);onUpdate&&onUpdate(fresh);setSubmitting(false);setConfirmSkip(false);return;}
+      if(fresh.current_turn_user_id!==user.id){setCol(fresh);onUpdate&&onUpdate(fresh);setSubmitting(false);setConfirmSkip(false);return;}
+      const freshMembers=fresh.members||[];
+      const myFresh=freshMembers.find(m=>m.user_id===user.id);
+      const myOrderFresh=myFresh?.turn_order||1;
+      const nextOrderFresh=(myOrderFresh%freshMembers.length)+1;
+      const nextMemberFresh=freshMembers.find(m=>m.turn_order===nextOrderFresh);
+      const nextTurnNumber=(fresh.turn_count||0)+1;
+      // Este salto amplía el objetivo en +1 turno, para que no se pierda una
+      // parte escrita del relato por culpa del hueco. El resto de saltos
+      // previos (si los hubo) ya están en fresh.bonus_turns.
+      const newBonusTurns=(fresh.bonus_turns||0)+1;
+      const targetTurns=(fresh.target_rounds&&freshMembers.length)
+        ? fresh.target_rounds*freshMembers.length+newBonusTurns : 0;
+      const reachesEnd=targetTurns>0&&nextTurnNumber>=targetTurns;
+      const turn={collective_id:col.id,user_id:user.id,author_name:user.name,html:'',plain:'',word_count:0,turn_number:nextTurnNumber,passed:true};
+      await DB.submitCollectiveTurn(col.id,turn,reachesEnd?null:(nextMemberFresh?.user_id||null),nextTurnNumber,reachesEnd,newBonusTurns);
+      const updated=await DB.getCollectiveDetail(col.id);
+      setCol(updated);onUpdate&&onUpdate(updated);
+    }catch(e){alert('Error: '+e.message);}
+    finally{setSubmitting(false);setConfirmSkip(false);}
   };
 
   const voteFinish=async()=>{
@@ -16808,8 +16906,14 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
                 <span style={{fontSize:10,fontWeight:600,color:AZULMED}}>{t.author_name}</span>
                 <span style={{fontSize:9,color:FAINT}}>· Parte {t.turn_number}</span>
               </div>
-              <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:PROSE_TEXT}}
-                dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
+              {t.passed?(
+                <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:FAINT,fontStyle:'italic'}}>
+                  <Icon name="arrow-bend-up-right" size={13} color={FAINT}/>{t.author_name} pasó su turno esta vez.
+                </div>
+              ):(
+                <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:PROSE_TEXT}}
+                  dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
+              )}
             </div>
           ))}
 
@@ -16838,6 +16942,11 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
                       {votingFinish?'…':'Proponer fin'}
                     </button>
                   )}
+                  <button onClick={()=>setConfirmSkip(true)} disabled={submitting}
+                    title="Pasa tu turno sin escribir, para que el relato no se quede esperando"
+                    style={{background:'transparent',border:'none',padding:'8px 4px',fontSize:12,color:MUTED,textDecoration:'underline',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                    Saltar mi turno
+                  </button>
                   <Btn variant="primary" onClick={submit} disabled={submitting||wc<col.min_words}>
                     {submitting?'Enviando…':'Ceder turno →'}
                   </Btn>
@@ -16845,6 +16954,19 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
               </div>
             </div>
           )}
+      {confirmSkip&&(
+        <div onClick={e=>{if(e.target===e.currentTarget)setConfirmSkip(false);}}
+          style={{position:'fixed',inset:0,zIndex:600,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:340,padding:'24px 22px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
+            <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT,marginBottom:8}}>¿Saltar tu turno?</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.55,marginBottom:20}}>Le tocará escribir a la siguiente persona de la ronda sin que tú añadas nada esta vez. Lo que hayas escrito aquí no se guardará.</div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setConfirmSkip(false)} style={{flex:1,padding:'10px',background:'transparent',border:'1px solid '+BDR,borderRadius:9,fontSize:13.5,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
+              <button onClick={skipTurn} disabled={submitting} style={{flex:1,padding:'10px',background:NAVY,border:'none',borderRadius:9,fontSize:13.5,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{submitting?'Guardando…':'Saltar turno'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
           {!isMyTurn&&col.status==='active'&&(
             <div style={{textAlign:'center',padding:'32px 0',color:MUTED,fontSize:13}}>
@@ -17508,8 +17630,8 @@ const ContextualPopup=({id,onClose})=>{
   if(!cfg)return null;
   return(
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
-      style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:520,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
-      <div style={{background:PAGE_BG,width:'100%',maxWidth:440,borderRadius:'18px 18px 0 0',padding:'26px 24px calc(24px + env(safe-area-inset-bottom))',boxShadow:'0 -10px 50px -10px rgba(10,27,61,0.35)'}}>
+      style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:520,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{background:PAGE_BG,width:'100%',maxWidth:400,borderRadius:18,padding:'26px 24px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
           <div style={{flexShrink:0,width:42,height:42,borderRadius:11,background:cfg.color+'18',display:'flex',alignItems:'center',justifyContent:'center'}}>
             <Icon name={cfg.icon} size={22} color={cfg.color}/>
