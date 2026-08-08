@@ -9889,6 +9889,40 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
+
+  // ── Notificaciones: permiso push del dispositivo + preferencias por
+  // categoría. Antes el permiso push vivía dentro de "Editar perfil"; ahora
+  // todo lo de notificaciones vive en una única línea del menú personal.
+  const [pushStatus,setPushStatus]=useState('checking'); // checking|granted|default|denied|unsupported
+  useEffect(()=>{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)){setPushStatus('unsupported');return;}
+    navigator.serviceWorker.ready.then(reg=>reg.pushManager.getSubscription()).then(sub=>{
+      setPushStatus(sub?'granted':(Notification.permission==='denied'?'denied':'default'));
+    }).catch(()=>setPushStatus('default'));
+  },[]);
+  const togglePush=async()=>{
+    if(pushStatus==='granted'){
+      await unsubscribeFromPush();
+      setPushStatus('default');
+    }else{
+      setPushStatus('checking');
+      const result=await subscribeToPush(user.id);
+      setPushStatus(result==='granted'?'granted':result==='denied'?'denied':'default');
+    }
+  };
+  const [showNotifPrefs,setShowNotifPrefs]=useState(false);
+  const DEFAULT_NOTIF_PREFS={master:true,app_engagement:true,friend_posts:true,turns_and_challenges:true,comments:true,new_followers:true};
+  const [notifPrefs,setNotifPrefs]=useState({...DEFAULT_NOTIF_PREFS,...(user.notification_prefs||{})});
+  const [savingNotifPrefs,setSavingNotifPrefs]=useState(false);
+  const saveNotifPrefs=async(next)=>{
+    setNotifPrefs(next);setSavingNotifPrefs(true);
+    try{
+      await getSB().from('profiles').update({notification_prefs:next}).eq('id',user.id);
+      Object.assign(user,{notification_prefs:next});
+    }catch(e){console.error('saveNotifPrefs:',e);}
+    finally{setSavingNotifPrefs(false);}
+  };
+  const toggleNotifCategory=key=>saveNotifPrefs({...notifPrefs,[key]:!notifPrefs[key]});
   const [showTeams,setShowTeams]=useState(false);
   const [showSendChallenge,setShowSendChallenge]=useState(false);
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
@@ -10243,6 +10277,57 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid '+BDR}}>
                   <span style={{fontSize:12,color:TXT}}>Apariencia</span>
                   <ThemeToggle theme={theme} setTheme={setTheme} small/>
+                </div>
+                {/* Notificaciones: línea propia con maestro general + desplegable de
+                    categorías. Antes el permiso push vivía dentro de "Editar perfil";
+                    ahora todo lo de notificaciones vive en un único sitio. */}
+                <div style={{borderBottom:'1px solid '+BDR}}>
+                  <div onClick={()=>setShowNotifPrefs(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',cursor:'pointer'}}>
+                    <span style={{width:20,textAlign:'center',flexShrink:0,display:'inline-flex',justifyContent:'center'}}><Icon name="bell" size={16} color={MUTED}/></span>
+                    <span style={{fontSize:12,color:TXT,flex:1}}>Notificaciones</span>
+                    <div onClick={e=>{e.stopPropagation();toggleNotifCategory('master');}}
+                      style={{width:32,height:18,borderRadius:9,background:notifPrefs.master?AZUL:'rgba(0,0,0,0.15)',position:'relative',flexShrink:0,cursor:'pointer'}}>
+                      <div style={{position:'absolute',top:2,left:notifPrefs.master?16:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
+                    </div>
+                    <Icon name={showNotifPrefs?'caret-up':'caret-down'} size={11} color={FAINT}/>
+                  </div>
+                  {showNotifPrefs&&(
+                    <div style={{padding:'2px 14px 12px',display:'flex',flexDirection:'column',gap:1,opacity:notifPrefs.master?1:0.4,pointerEvents:notifPrefs.master?'auto':'none',transition:'opacity 0.15s'}}>
+                      {pushStatus!=='unsupported'&&(
+                        <div onClick={pushStatus==='denied'?undefined:togglePush} style={{display:'flex',alignItems:'center',gap:9,padding:'8px 6px',borderRadius:8,cursor:pushStatus==='denied'?'default':'pointer'}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:11.5,color:TXT}}>Avisos en este dispositivo</div>
+                            <div style={{fontSize:9.5,color:FAINT}}>
+                              {pushStatus==='granted'?'Activados':pushStatus==='denied'?'Bloqueados — actívalos en el navegador':pushStatus==='checking'?'Comprobando…':'Permitir avisos push'}
+                            </div>
+                          </div>
+                          {pushStatus!=='denied'&&pushStatus!=='checking'&&(
+                            <div style={{width:30,height:17,borderRadius:9,background:pushStatus==='granted'?AZUL:'rgba(0,0,0,0.15)',position:'relative',flexShrink:0}}>
+                              <div style={{position:'absolute',top:1.5,left:pushStatus==='granted'?15:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <div style={{height:1,background:BDR,margin:'5px 0'}}/>
+                      {[
+                        {key:'app_engagement',label:'Notificaciones de la app',hint:'Rachas y recordatorios · próximamente'},
+                        {key:'friend_posts',label:'Nuevas publicaciones',hint:'Cuando un amigo publica un texto'},
+                        {key:'turns_and_challenges',label:'Turnos y retos',hint:'Colectivos, duetos, contrarreloj, encadenados'},
+                        {key:'comments',label:'Comentarios',hint:'Cuando comentan tus textos'},
+                        {key:'new_followers',label:'Nuevos seguidores',hint:'Cuando alguien te sigue'},
+                      ].map(c=>(
+                        <div key={c.key} onClick={()=>notifPrefs.master&&toggleNotifCategory(c.key)} style={{display:'flex',alignItems:'center',gap:9,padding:'8px 6px',borderRadius:8,cursor:notifPrefs.master?'pointer':'default'}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:11.5,color:TXT}}>{c.label}</div>
+                            <div style={{fontSize:9.5,color:FAINT}}>{c.hint}</div>
+                          </div>
+                          <div style={{width:30,height:17,borderRadius:9,background:notifPrefs[c.key]?AZUL:'rgba(0,0,0,0.15)',position:'relative',flexShrink:0}}>
+                            <div style={{position:'absolute',top:1.5,left:notifPrefs[c.key]?15:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {/* Menu items */}
                 {[
@@ -13534,23 +13619,6 @@ const UserAvatar=({user,size=36,onClick})=>{
 /* ─── PROFILE SETTINGS ───────────────────────────── */
 const ProfileSettings=({user,onClose,onSave})=>{
   const [avatar,setAvatar]=useState(user.avatar||null);
-  const [pushStatus,setPushStatus]=useState('checking'); // checking|granted|default|denied|unsupported
-  useEffect(()=>{
-    if(!('serviceWorker' in navigator)||!('PushManager' in window)){setPushStatus('unsupported');return;}
-    navigator.serviceWorker.ready.then(reg=>reg.pushManager.getSubscription()).then(sub=>{
-      setPushStatus(sub?'granted':(Notification.permission==='denied'?'denied':'default'));
-    }).catch(()=>setPushStatus('default'));
-  },[]);
-  const togglePush=async()=>{
-    if(pushStatus==='granted'){
-      await unsubscribeFromPush();
-      setPushStatus('default');
-    }else{
-      setPushStatus('checking');
-      const result=await subscribeToPush(user.id);
-      setPushStatus(result==='granted'?'granted':result==='denied'?'denied':'default');
-    }
-  };
   const [name,setName]=useState(user.name||'');
   const [username,setUsername]=useState(user.username||'');
   const [checking,setChecking]=useState(false);
@@ -13646,25 +13714,6 @@ const ProfileSettings=({user,onClose,onSave})=>{
           </div>
 
           {err&&<div style={{fontSize:12,color:'#C5221F',padding:'8px 11px',background:'rgba(197,34,31,0.06)',borderRadius:7}}>{err}</div>}
-
-          {pushStatus!=='unsupported'&&(
-            <div onClick={pushStatus==='denied'?undefined:togglePush} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',background:'rgba(0,0,0,0.02)',borderRadius:10,border:'0.5px solid '+BDR,cursor:pushStatus==='denied'?'default':'pointer'}}>
-              <Icon name="bell" size={16} color={pushStatus==='granted'?AZUL:MUTED}/>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:500,color:TXT}}>Notificaciones push</div>
-                <div style={{fontSize:11,color:MUTED}}>
-                  {pushStatus==='granted'?'Activadas en este dispositivo':
-                   pushStatus==='denied'?'Bloqueadas — actívalas desde los ajustes del navegador':
-                   pushStatus==='checking'?'Comprobando…':'Avisos de amigos, retos y comentarios'}
-                </div>
-              </div>
-              {pushStatus!=='denied'&&pushStatus!=='checking'&&(
-                <div style={{width:36,height:20,borderRadius:10,background:pushStatus==='granted'?AZUL:'rgba(0,0,0,0.12)',position:'relative',flexShrink:0}}>
-                  <div style={{position:'absolute',top:2,left:pushStatus==='granted'?18:2,width:16,height:16,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
-                </div>
-              )}
-            </div>
-          )}
 
           <div style={{display:'flex',gap:8}}>
             <Btn onClick={onClose} variant="ghost" full>Cancelar</Btn>
@@ -14219,7 +14268,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
 
       {/* Carpetas — las carpetas de trabajo (Retos, Poesía, Relato…) son del
           Escritorio. En la Biblioteca solo tiene sentido "Todos" y lo compartido. */}
-      <div style={{display:'flex',gap:7,padding:'14px 16px 0',flexShrink:0,flexWrap:'wrap',alignItems:'center'}}>
+      <div style={{display:'flex',gap:7,padding:'14px 16px 14px',flexShrink:0,flexWrap:'wrap',alignItems:'center'}}>
         {(isEscritorio?[['todos','Todos'],['sin','Sin carpeta'],...allFolders]:[['todos','Todos'],['compartidos','Compartidos']]).map(([id,name])=>{
           const active=folder===id;
           const sharedCount=id==='compartidos'?combinedLibrary.filter(e=>e.user_id!==user.id&&e.visibility!=='ejercicio'&&!e.deleted).length:0;
@@ -14250,7 +14299,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
       {/* Filter pills (visibilidad) — solo tiene sentido en el Escritorio, para
           separar tu trabajo por privado/amigos/abierto. En la Biblioteca los
           textos se ven directamente en tarjetas, sin este filtro fino. */}
-      {isEscritorio&&<div style={{display:'flex',gap:7,padding:'10px 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
+      {isEscritorio&&<div style={{display:'flex',gap:7,padding:'0 16px 12px',flexShrink:0,flexWrap:'wrap'}}>
         {FILTERS.map(([v,l])=>{
           const count=myTexts.filter(e=>inFolder(e)&&(v==='all'||visBucket(e)===v)).length;
           const active=filter===v;
