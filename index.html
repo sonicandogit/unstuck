@@ -1859,6 +1859,29 @@ const getSB = () => {
   return sb;
 };
 
+// País aproximado por IP — se calcula UNA sola vez por usuario (si el perfil
+// ya tiene país guardado, no se vuelve a llamar). Solo se guarda el país
+// resultante (p.ej. "España"); la IP en sí nunca se almacena ni se envía a
+// nadie más que al propio servicio de geolocalización, y esa llamada no
+// pasa por nuestro servidor — la hace directamente el navegador. Ver la
+// Política de Privacidad, sección "¿Qué datos recogemos?". Si falla (sin
+// red, servicio caído, bloqueado por el navegador), se ignora en silencio
+// y se reintentará en la próxima sesión.
+const captureCountryIfMissing = async (uid, alreadyHasCountry) => {
+  if (alreadyHasCountry) return;
+  try {
+    const res = await fetch('https://ipapi.co/json/');
+    if (!res.ok) return;
+    const geo = await res.json();
+    const country = geo?.country_name;
+    if (!country || typeof country !== 'string') return;
+    await getSB().from('profiles').update({ country }).eq('id', uid);
+  } catch (e) {
+    // silencioso a propósito — ver comentario de arriba
+  }
+};
+
+
 // DB helpers
 
 const SCREENPLAY_EXERCISE_BANK={
@@ -17819,13 +17842,13 @@ const PasswordResetModal=({onClose})=>{
 };
 
 /* ─── COOKIE BANNER ─────────────────────────────── */
-const CookieBanner=({onAccept,onDecline})=>(
+const CookieBanner=({onAccept,onDecline,onOpenPrivacy})=>(
   <div className="fi" style={{position:'fixed',bottom:0,left:0,right:0,zIndex:500,background:'#0A1B3D',color:'#fff',padding:'16px 20px',display:'flex',alignItems:'center',gap:16,flexWrap:'wrap',boxShadow:'0 -8px 30px -4px rgba(10,27,61,0.4)'}}>
     <div style={{flex:1,minWidth:200}}>
       <div style={{fontSize:13,fontWeight:600,marginBottom:4,fontFamily:"'Source Sans 3',sans-serif"}}>Usamos cookies analíticas</div>
       <div style={{fontSize:11,color:'rgba(255,255,255,0.55)',lineHeight:1.6}}>
         Pretexto usa Google Analytics para entender cómo se usa la app. No usamos cookies publicitarias. {' '}
-        <a href="/unstuck/privacidad.html" target="_blank" style={{color:'#1E9BF0',textDecoration:'underline'}}>Política de privacidad</a>
+        <button type="button" onClick={onOpenPrivacy} style={{background:'none',border:'none',padding:0,color:'#1E9BF0',textDecoration:'underline',cursor:'pointer',font:'inherit'}}>Política de privacidad</button>
       </div>
     </div>
     <div style={{display:'flex',gap:8,flexShrink:0}}>
@@ -17848,7 +17871,7 @@ const PrivacyModal=({onClose})=>(
 
         {[
           ['¿Quién es el responsable?','Pretexto es un servicio de escritura creativa operado por Lucas Sánchez (sonicandogit@gmail.com). Para cualquier consulta sobre privacidad, puedes escribirnos a ese correo.'],
-          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Son completamente privados por defecto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.'],
+          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Son completamente privados por defecto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.\n— País aproximado: al iniciar sesión, calculamos tu país a partir de tu dirección IP mediante un servicio externo de geolocalización. Guardamos únicamente el país resultante (por ejemplo, "España"); la dirección IP no se almacena en ningún momento. Lo usamos solo para entender de forma agregada desde dónde escribe la comunidad, nunca para identificarte individualmente ante terceros.'],
           ['¿Para qué usamos tus datos?','— Para proporcionarte el servicio de escritura y guardar tus textos.\n— Para mejorar la app mediante análisis de uso agregado y anónimo.\n— Nunca vendemos tus datos a terceros.\n— Nunca usamos tus textos para entrenar modelos de IA.'],
           ['¿Dónde se almacenan?','Tus datos se almacenan en Supabase (infraestructura AWS en Europa). Google Analytics almacena datos de uso en servidores de Google. Puedes consultar la política de Google en google.com/policies/privacy/partners.'],
           ['Cookies','Solo usamos cookies analíticas de Google Analytics, y únicamente si has dado tu consentimiento. Puedes rechazarlas sin que ello afecte al funcionamiento de la app.'],
@@ -18140,6 +18163,7 @@ const App=()=>{
           }
           S.set('pretexto:last_user_id',session.user.id);
           setUser({...session.user,...resolvedProfile});
+          captureCountryIfMissing(session.user.id,!!resolvedProfile.country).catch(()=>{}); // en segundo plano, nunca bloquea
           recoverPendingEntries(session.user.id).then(()=>loadUserData(session.user.id)).catch(()=>{}); // non-blocking
         }else{
           clearTimeout(timeout);
@@ -18178,6 +18202,7 @@ const App=()=>{
       setUser({...session.user,...profile});
       if(profile)S.set('pretexto:profile_cache:'+session.user.id,profile);
       S.set('pretexto:last_user_id',session.user.id);
+      captureCountryIfMissing(session.user.id,!!profile?.country).catch(()=>{}); // en segundo plano, nunca bloquea
       await recoverPendingEntries(session.user.id);
       await loadUserData(session.user.id);
       setView('dashboard');
@@ -18529,6 +18554,7 @@ const App=()=>{
    "return" anticipados que tiene App para cada vista. */
 const Root=()=>{
   const [consent,setConsent]=useState(()=>S.get('pretexto:cookie_consent'));
+  const [showCookiePrivacy,setShowCookiePrivacy]=useState(false);
   useEffect(()=>{
     // Registro del Service Worker: necesario tanto para el caché offline (PWA)
     // como para poder recibir notificaciones push más adelante.
@@ -18557,7 +18583,8 @@ const Root=()=>{
   };
   return(<>
     <App/>
-    {!consent&&<CookieBanner onAccept={accept} onDecline={decline}/>}
+    {!consent&&<CookieBanner onAccept={accept} onDecline={decline} onOpenPrivacy={()=>setShowCookiePrivacy(true)}/>}
+    {showCookiePrivacy&&<PrivacyModal onClose={()=>setShowCookiePrivacy(false)}/>}
     {consent&&<button onClick={()=>setConsent(null)} title="Preferencias de cookies"
       aria-label="Preferencias de cookies"
       style={{position:'fixed',bottom:8,right:8,zIndex:400,background:'rgba(10,27,61,0.55)',color:'rgba(255,255,255,0.75)',border:'none',borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',padding:0,cursor:'pointer',boxShadow:'0 2px 8px -2px rgba(10,27,61,0.4)'}}>
