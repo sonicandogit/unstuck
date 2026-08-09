@@ -9961,7 +9961,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       }else if(n.type==='new_follower'){
         const profile=await DB.getProfile(n.actor_id);
         if(profile)setNotifProfile(profile);
-      }else if(n.type==='challenge_received'){
+      }else if(n.type==='challenge_received'||n.type==='pending_challenge'){
         setShowChallengesHistory(true);
       }else if(n.type==='challenge_returned'){
         // Al abrir el reto devuelto desde la campanita, marcarlo como visto
@@ -9980,7 +9980,8 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         const entry=await DB.getEntryById(n.entity_id);
         if(entry)setReadingEntry(entry);
       }else if(n.type==='duet_your_turn'||n.type==='chain_nomination'
-               ||n.type==='collective_your_turn'||n.type==='collective_update'){
+               ||n.type==='collective_your_turn'||n.type==='collective_update'
+               ||n.type==='pending_turn'){
         // Estos viven en los widgets del propio Dashboard (DuetsHub/ChainsHub).
         // Antes no se hacía nada aquí, dando por supuesto que ya estarían
         // visibles — pero los hubs solo cargaban al montarse, así que lo normal
@@ -17513,6 +17514,7 @@ const NOTIF_ICON={
   new_comment:'chat-circle', collective_your_turn:'users-three', collective_update:'scroll',
   collab_invite:'user-plus', collab_accepted:'check-circle',
   streak_reminder:'flame', inactivity_nudge:'feather',
+  pending_turn:'hourglass', pending_challenge:'timer',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
@@ -17520,6 +17522,7 @@ const NOTIF_COLOR={
   new_comment:AZUL, collective_your_turn:AZUL, collective_update:MUTED,
   collab_invite:AZUL, collab_accepted:AZUL,
   streak_reminder:NARANJA, inactivity_nudge:AZULMED,
+  pending_turn:'#1A6B8A', pending_challenge:NARANJA,
 };
 
 const relNotifTime=iso=>{
