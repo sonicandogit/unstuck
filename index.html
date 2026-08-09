@@ -9376,7 +9376,7 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
   const weekWords=weekEntries.reduce((s,e)=>{const wa=e.words_added;return s+(wa!=null?wa:(e.word_count||e.wordCount||0));},0);
   const weekSessions=weekEntries.length;
   const totalElapsed=library.reduce((s,e)=>s+(e.elapsed||0),0);
-  return{totalWords,streak,thisWeek,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newlyBridged,newMilestone,todayActive};
+  return{totalWords,streak,thisWeek,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newlyBridged,newMilestone,todayActive,lastActiveDate:dates[0]||null};
 };
 
 // Hash simple y determinista (mismo input → mismo resultado siempre) para elegir
@@ -10016,6 +10016,23 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     return[];
   });
   const stats=useMemo(()=>computeStats(library,reflections,wildcards,wildcard_milestone,wildcardDays),[library,reflections,wildcards,wildcard_milestone,wildcardDays]);
+
+  // ── Guardar racha + último día activo en el perfil ──
+  // El cliente ya calcula esto correctamente (con sus umbrales por tipo de
+  // texto y su lógica de comodines); en vez de que la tarea programada de
+  // avisos ("llevas X días de racha") intente recalcularlo en SQL —con
+  // riesgo real de no coincidir con lo que ves aquí—, simplemente se guarda
+  // aquí el resultado ya bueno, para que el aviso programado solo lo LEA.
+  useEffect(()=>{
+    if(!user?.id)return;
+    const newStreak=stats.streak||0;
+    const newDate=stats.lastActiveDate||null;
+    if(user.current_streak===newStreak&&user.last_active_date===newDate)return; // sin cambios, no escribir
+    getSB().from('profiles').update({current_streak:newStreak,last_active_date:newDate}).eq('id',user.id)
+      .then(()=>{Object.assign(user,{current_streak:newStreak,last_active_date:newDate});})
+      .catch(e=>console.error('save streak snapshot:',e));
+  },[stats.streak,stats.lastActiveDate]);
+
   // Actualizar comodines cuando la racha los gana o gasta
   const wildcardUpdateRef=useRef(null);
   useEffect(()=>{
@@ -17495,12 +17512,14 @@ const NOTIF_ICON={
   challenge_returned:'check-circle', duet_your_turn:'hands-clapping', chain_nomination:'link',
   new_comment:'chat-circle', collective_your_turn:'users-three', collective_update:'scroll',
   collab_invite:'user-plus', collab_accepted:'check-circle',
+  streak_reminder:'flame', inactivity_nudge:'feather',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
   challenge_returned:AZUL, duet_your_turn:AZUL, chain_nomination:'#1A6B8A',
   new_comment:AZUL, collective_your_turn:AZUL, collective_update:MUTED,
   collab_invite:AZUL, collab_accepted:AZUL,
+  streak_reminder:NARANJA, inactivity_nudge:AZULMED,
 };
 
 const relNotifTime=iso=>{
