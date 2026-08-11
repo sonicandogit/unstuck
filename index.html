@@ -316,12 +316,12 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 <body>
 <div id="root"><div style="height:100vh;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6B6963">Cargando Pretexto…</div></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2/dist/umd/supabase.min.js" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.11/purify.min.js" integrity="sha384-o44XUELLEnv/iSlA1NWxBweqbD4TSR0qgq2VzVsxtkHS989JJjGKSE9vkfo5MN4K" crossorigin="anonymous"></script>
 <script type="module">import*as d from'https://esm.sh/docx@8.5.0';window.__docx=d;window.dispatchEvent(new Event('docxReady'));</script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js" integrity="sha384-1qlE7MZPM2pHD/pBZCU/yB8UCP52RYL8bge/qNdfNBCWToySp8/M+JL2waXU4hjJ" crossorigin="anonymous"></script>
 <script>
 const WEEKLY_CHALLENGES_64=[
   {id:"obs-w01",familia:"Observación y atención",titulo:"La ciudad a una hora",goal:450,mode:"normal",desc:`Describe una ciudad (real o inventada) tal como es exactamente a una hora del día: las 5:40 de la madrugada, o las 14:00 de un martes. No la ciudad en general — esa hora concreta.`,teoria:`Cada hora del día tiene su propia ciudad: quién está despierto, qué luz hay, qué sonidos predominan, qué huele. Describir "una ciudad" sin anclarla a una hora produce un retrato genérico, intercambiable con cualquier otra ciudad. Anclarla a una hora obliga a la especificidad: a las 5:40 no hay tráfico todavía, pero sí furgonetas de reparto y algún bar que ya ha abierto para los que salen de un turno de noche.
@@ -5104,7 +5104,7 @@ const exportZip=async(user,library,reflections,projects)=>{
   document.body.removeChild(a);URL.revokeObjectURL(url);
 };
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 
 
 <script>
@@ -9217,6 +9217,11 @@ const FEATURE_TEAMS_ENABLED = false;       // Equipos
 // disponible siempre, con su editor de guion correspondiente — eso es un
 // camino independiente que no depende de esta bandera.
 const FEATURE_SCREENPLAY_ENABLED = false;  // Modo Guion (interruptor global, no el editor de proyectos)
+// Transcripción de voz — retirada temporalmente (10 ago 2026): complicaba la
+// auditoría de seguridad de la Edge Function transcribe-audio (SAST-002) y
+// se prefiere resolverlo con calma más adelante en vez de dejarla a medias.
+// El componente VoiceButton y toda su lógica siguen intactos; solo se apagan.
+const FEATURE_VOICE_ENABLED = false;
 
 const AZUL='#1E9BF0';      // acento / interacción / signos / activo
 const AZULMED='#1B5FAA';   // enlaces, tarjetas de acento, estado 2.º
@@ -16593,7 +16598,6 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
   const [wc,setWc]=useState(0);
   const [submitting,setSubmitting]=useState(false);
   const [votingFinish,setVotingFinish]=useState(false);
-
   const isMyTurn=col.current_turn_user_id===user.id;
   const members=col.members||[];
   const turns=col.turns||[];
@@ -17329,6 +17333,13 @@ const VoiceButton=({onTranscript,dark=false,size=16,user})=>{
   const fmtSecs=s=>(s<60?s+'s':Math.floor(s/60)+'m'+('0'+(s%60)).slice(-2)+'s');
   const col=dark?'rgba(255,255,255,0.7)':'var(--muted,#6B6963)';
   const colRec='#E53935';
+
+  // Retirada temporal de la transcripción de voz (SAST-002 / decisión de
+  // producto): en vez de borrar el componente, se apaga aquí — así queda
+  // reactivarlo cambiando FEATURE_VOICE_ENABLED a true en un solo sitio,
+  // sin reconstruir nada. Se pone DESPUÉS de todos los hooks de arriba,
+  // como exigen las reglas de React (nunca antes de un hook).
+  if(!FEATURE_VOICE_ENABLED)return null;
 
   return(
     <>
