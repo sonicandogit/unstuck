@@ -11,6 +11,12 @@
 // "cors" de la petición. Subir la versión limpia esa caché vieja entera;
 // las nuevas entradas se guardarán ya correctamente en modo "cors" desde
 // el principio.
+//
+// Además, en esta misma revisión: (1) SAST-009, solo se cachea la
+// respuesta HTML si es válida (res.ok); (2) se ignoran peticiones con
+// esquemas que no sean http/https (chrome-extension://, etc. — provienen
+// de extensiones del navegador, no de la app, y la Cache API no las admite
+// y lanzaba un error sin capturar).
 
 const CACHE = 'pretexto-v6';
 const CDN_HOSTS = [
@@ -35,6 +41,17 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+
+  // Bug encontrado al probar con extensiones del navegador activas (p.ej.
+  // Grammarly): algunas hacen peticiones con esquemas como
+  // "chrome-extension://", que la Cache API no admite en absoluto — un
+  // intento de guardarlas lanzaba "TypeError: Failed to execute 'put' on
+  // 'Cache': Request scheme 'chrome-extension' is unsupported". Se ignoran
+  // aquí, antes de que lleguen a ninguna de las ramas de más abajo — no son
+  // peticiones de la propia app, no hay nada que cachear ni que servir.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return; // browser default
+  }
 
   // Never touch Supabase / API / analytics calls
   if (url.hostname.includes('supabase.co') || url.hostname.includes('anthropic.com') || url.hostname.includes('google-analytics') || url.hostname.includes('googletagmanager')) {
