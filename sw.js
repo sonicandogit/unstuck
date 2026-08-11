@@ -46,8 +46,14 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(e.request)
         .then(res => {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, copy));
+          // SAST-009: solo se cachea si la respuesta es válida (200-299). Antes
+          // se guardaba cualquier respuesta, incluida una página de error de
+          // GitHub Pages o un portal cautivo de wifi pública — y esa versión
+          // rota se serviría después en modo offline.
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, copy));
+          }
           return res;
         })
         .catch(() => caches.match(e.request))
