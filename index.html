@@ -17,6 +17,9 @@
   consola del navegador. Lección: un inventario por grep siempre puede
   tener huecos si algo se carga de forma menos obvia — la prueba real en el
   navegador es la que manda.
+  Actualización (11 ago 2026): se retiró googleapis.com — la copia de
+  seguridad en Google Drive se apagó (FEATURE_DRIVE_ENABLED=false, no se
+  usaba), así que ya no hace falta permitir ese origen.
   No incluye 'frame-ancestors': esa directiva concreta la ignoran los
   navegadores cuando la CSP va en un <meta> en vez de una cabecera HTTP, y
   GitHub Pages no permite cabeceras personalizadas — así que aquí no
@@ -31,7 +34,7 @@
   Si algo deja de funcionar tras subir esto, la forma más rápida de
   descartarlo como causa es borrar esta única etiqueta <meta> entera.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.googletagmanager.com https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://nzvzjyoavpqtjwkwgzch.supabase.co https://api.anthropic.com https://ipapi.co https://www.googleapis.com https://www.google-analytics.com https://www.googletagmanager.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.googletagmanager.com https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://nzvzjyoavpqtjwkwgzch.supabase.co https://api.anthropic.com https://ipapi.co https://www.google-analytics.com https://www.googletagmanager.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,500;1,600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -9265,6 +9268,13 @@ const FEATURE_SCREENPLAY_ENABLED = false;  // Modo Guion (interruptor global, no
 // se prefiere resolverlo con calma más adelante en vez de dejarla a medias.
 // El componente VoiceButton y toda su lógica siguen intactos; solo se apagan.
 const FEATURE_VOICE_ENABLED = false;
+// Copia de seguridad en Google Drive — retirada (11 ago 2026): se añadió
+// muy al principio del proyecto, antes de que Supabase fuera la base de
+// datos real de la app, y ya no se usa. Se apaga en vez de borrar el
+// código, por si algún día hiciera falta recuperarla. Al apagarla, también
+// se retiró su origen (googleapis.com) de la Content-Security-Policy, ya
+// que deja de hacer falta — menos superficie expuesta sin perder nada.
+const FEATURE_DRIVE_ENABLED = false;
 
 const AZUL='#1E9BF0';      // acento / interacción / signos / activo
 const AZULMED='#1B5FAA';   // enlaces, tarjetas de acento, estado 2.º
@@ -11695,7 +11705,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     <div style={{display:'flex',flexDirection:'column',height:'var(--app-height,100dvh)',background:'transparent',position:'relative'}}>{showProjIntro&&<ContextualPopup id='proyecto' onClose={dismissProjIntro}/>}{showModesIntro&&<ContextualPopup id='modos' onClose={dismissModesIntro}/>}
       {showUserMenu&&<div onClick={()=>setShowUserMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>}
       {showLib&&<ExerciseLibrary user={user} library={library} reflections={[]} onClose={()=>setShowLib(false)} writingMode={writingMode}/>}
-      {showDrive&&<DrivePanel user={user} driveState={driveData||{}} onUpdate={ns=>S.set('flujo:drive:'+user.id,ns)} onClose={()=>setShowDrive(false)} library={library}/>}
+      {FEATURE_DRIVE_ENABLED&&showDrive&&<DrivePanel user={user} driveState={driveData||{}} onUpdate={ns=>S.set('flujo:drive:'+user.id,ns)} onClose={()=>setShowDrive(false)} library={library}/>}
 
       {/* TOPBAR */}
       <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:46,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,gap:4,flexShrink:0,zIndex:10}}>
@@ -11705,7 +11715,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           {['check','reto','proyecto'].map(id=><button key={id} onClick={()=>{if(id!==sk){if(started&&plainTxt.trim()){if(!window.confirm('¿Cambiar de sección? El texto se guardará.'))return;saveNow(false);}onBack();}}} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:id!==sk?'pointer':'default',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
         </div>
         <button onClick={()=>setShowLib(true)} className="desk-only" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
-        <button onClick={()=>setShowDrive(true)} className="desk-only" style={{background:connected?'rgba(30,155,240,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(30,155,240,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#1E9BF0':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>
+        {FEATURE_DRIVE_ENABLED&&<button onClick={()=>setShowDrive(true)} className="desk-only" style={{background:connected?'rgba(30,155,240,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(30,155,240,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#1E9BF0':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>}
         <button onClick={handleFinishDay} style={{background:ADVANCE_BG,border:'none',borderRadius:7,padding:'5px 11px',fontSize:11.5,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer',flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>Terminar →</button>
         <div style={{position:'relative'}}>
           <button onClick={()=>setShowUserMenu(v=>!v)} style={{width:26,height:26,borderRadius:'50%',background:user.bg,border:'1.5px solid '+user.accent+'44',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:600,color:user.textCol}}>{user.initials}</button>
