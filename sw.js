@@ -1,7 +1,18 @@
-// Pretexto Service Worker v5
+// Pretexto Service Worker v6
 // Strategy: network-first for HTML (always fresh app), cache-first for CDN assets
+//
+// v6 (10 ago 2026): sube de v5 a v6 para forzar el borrado de la caché
+// antigua. Motivo: babel-standalone y jszip se guardaron en su día como
+// respuestas "opacas" (modo no-cors, sin crossorigin). Al añadir
+// crossorigin="anonymous" a los 4 scripts de CDN en index.html (necesario
+// para el hash de integridad SRI), esas dos URLs concretas — que no
+// cambiaron de versión, a diferencia de dompurify/supabase-js — seguían
+// sirviendo su copia vieja en caché, ahora inconsistente con el nuevo modo
+// "cors" de la petición. Subir la versión limpia esa caché vieja entera;
+// las nuevas entradas se guardarán ya correctamente en modo "cors" desde
+// el principio.
 
-const CACHE = 'pretexto-v5';
+const CACHE = 'pretexto-v6';
 const CDN_HOSTS = [
   'unpkg.com',
   'cdn.jsdelivr.net',
