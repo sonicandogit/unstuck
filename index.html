@@ -4,6 +4,49 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pretexto</title>
+<script>
+// ─── RED DE SEGURIDAD: auto-recuperación si la carga se queda atascada ───
+// Se añade el 12 ago 2026 tras detectar que, justo al desplegar una
+// actualización del service worker, alguien se quedó con la app en
+// "Cargando…" de forma indefinida (relacionado con el cambio de versión
+// del service worker durante una carga en curso — ver más abajo en sw.js).
+// Esto es una segunda capa de protección, independiente de esa causa
+// concreta: si por CUALQUIER motivo la app no termina de arrancar en un
+// tiempo razonable, se repara sola — sin que la persona tenga que saber
+// que existe algo llamado "caché" o "service worker", ni tocar nada.
+//
+// Cómo funciona: se arranca un cronómetro nada más abrir la página. Si el
+// script principal llega a arrancar React con normalidad, cancela el
+// cronómetro un poco más abajo en este mismo archivo (buscar
+// "cancelarVigiaDeCarga"). Si el cronómetro llega a su límite sin que eso
+// haya pasado, se asume que algo se quedó a medias — probablemente el
+// service worker o su caché — y se borra todo y se recarga una vez sola
+// (con sessionStorage se evita reintentarlo en bucle si el problema fuera
+// otro y persistiera).
+(function(){
+  var RECOVERY_KEY='pretexto:recovery_attempted';
+  var alreadyTried=false;
+  try{ alreadyTried=(sessionStorage.getItem(RECOVERY_KEY)==='1'); }catch(e){ /* si sessionStorage falla, seguimos igualmente: mejor intentar la reparación que quedarnos sin ella */ }
+  if(alreadyTried)return; // ya se intentó en esta sesión, no reintentar en bucle
+  window.__pretextoAppMounted=false;
+  window.__pretextoWatchdog=setTimeout(function(){
+    if(window.__pretextoAppMounted)return; // llegó a arrancar bien, no hacer nada
+    try{ sessionStorage.setItem(RECOVERY_KEY,'1'); }catch(e){}
+    var cleanup=[];
+    if('serviceWorker' in navigator){
+      cleanup.push(navigator.serviceWorker.getRegistrations().then(function(regs){
+        return Promise.all(regs.map(function(r){return r.unregister();}));
+      }).catch(function(){}));
+    }
+    if(window.caches){
+      cleanup.push(caches.keys().then(function(keys){
+        return Promise.all(keys.map(function(k){return caches.delete(k);}));
+      }).catch(function(){}));
+    }
+    Promise.all(cleanup).catch(function(){}).finally(function(){ location.reload(); });
+  },9000); // 9s de margen — más que de sobra en una conexión normal
+})();
+</script>
 <!--
   SAST-005 — Content-Security-Policy. Construida a partir de un inventario
   completo de todo lo que la app carga/llama (10 ago 2026): scripts CDN
@@ -4982,6 +5025,20 @@ const DB = {
     const{data,error}=await getSB().from('collectives').insert(col).select().single();
     if(error)throw error;return data;
   },
+  // Seguir colectivos sin escribir (FEATURE_FOLLOW_COLLECTIVES_ENABLED)
+  inviteCollectiveFollowers: async(collectiveId)=>{
+    const{error}=await getSB().rpc('invite_collective_followers',{p_collective_id:collectiveId});
+    if(error)throw error;
+  },
+  followCollective: async(collectiveId,uid)=>{
+    const{error}=await getSB().from('collective_followers').insert({collective_id:collectiveId,user_id:uid});
+    if(error)throw error;
+  },
+  unfollowCollective: async(collectiveId,uid)=>{
+    const{error}=await getSB().from('collective_followers').delete()
+      .eq('collective_id',collectiveId).eq('user_id',uid);
+    if(error)throw error;
+  },
   addCollectiveMembers: async(members)=>{
     const{error}=await getSB().from('collective_members').insert(members);
     if(error)throw error;
@@ -9275,6 +9332,12 @@ const FEATURE_VOICE_ENABLED = false;
 // se retiró su origen (googleapis.com) de la Content-Security-Policy, ya
 // que deja de hacer falta — menos superficie expuesta sin perder nada.
 const FEATURE_DRIVE_ENABLED = false;
+// Seguir relatos colectivos sin escribir — construida completa (esquema,
+// seguridad, invitación a seguir, panel de notificación con Sí/No) pero
+// oculta en el lanzamiento (12 ago 2026), a la espera de decidir cuándo
+// mostrarla. Mientras esté en false, todo colectivo nace 'privado' y
+// nadie ve el paso de visibilidad al crear uno — cero efecto visible.
+const FEATURE_FOLLOW_COLLECTIVES_ENABLED = false;
 
 const AZUL='#1E9BF0';      // acento / interacción / signos / activo
 const AZULMED='#1B5FAA';   // enlaces, tarjetas de acento, estado 2.º
@@ -16454,6 +16517,11 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
   const [minWords,setMinWords]=useState(100);
   const [targetRounds,setTargetRounds]=useState(3); // vueltas completas al equipo (0 = sin límite)
   const [members,setMembers]=useState([{id:user.id,name:user.name,username:user.username,isMe:true}]); // el creador entra como uno más y puede reordenarse
+  // Visibilidad — detrás de FEATURE_FOLLOW_COLLECTIVES_ENABLED (ver más
+  // abajo). Mientras esté apagada, todo colectivo nace 'privado' sin que
+  // se muestre ningún paso adicional; el selector ya está listo para
+  // cuando se active.
+  const [visibility,setVisibility]=useState('privado'); // privado | amigos | abierto
   const [searchQ,setSearchQ]=useState('');
   const [searchRes,setSearchRes]=useState([]);
   const [searching,setSearching]=useState(false);
@@ -16493,10 +16561,19 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
         title:title.trim(),premise:premise.trim(),min_words:minWords,target_rounds:targetRounds||null,
         created_by:user.id,current_turn_user_id:firstUserId,
         status:'active',turn_count:0,
+        ...(FEATURE_FOLLOW_COLLECTIVES_ENABLED?{visibility}:{}), // si la función está apagada, ni se manda: se queda en el 'privado' por defecto de la columna
       });
       await DB.addCollectiveMembers(allMembers.map((m,i)=>({
         collective_id:col.id,user_id:m.id,name:m.name,username:m.username,turn_order:i+1,
       })));
+      // Avisa a amigos/seguidores de todo el grupo inicial, si procede. La
+      // función del servidor ya es un no-op seguro para colectivos
+      // 'privado', así que esta llamada es inofensiva incluso con la
+      // bandera apagada — pero se evita igualmente para no gastar una
+      // llamada de red de balde mientras la función esté oculta.
+      if(FEATURE_FOLLOW_COLLECTIVES_ENABLED&&visibility!=='privado'){
+        DB.inviteCollectiveFollowers(col.id).catch(e=>console.error('inviteCollectiveFollowers:',e));
+      }
       onCreated(col,allMembers);
     }catch(e){alert('Error al crear: '+e.message);}
     setSaving(false);
@@ -16510,7 +16587,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:20}}>
           <Icon name="users-three" size={18} color={AZUL}/>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:16,color:TXT,flex:1}}>Nuevo relato colectivo</div>
-          <div style={{fontSize:11,color:FAINT}}>Paso {step} de 4</div>
+          <div style={{fontSize:11,color:FAINT}}>Paso {step} de {FEATURE_FOLLOW_COLLECTIVES_ENABLED?5:4}</div>
         </div>
 
         {/* Step 1: Premise */}
@@ -16631,6 +16708,37 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
           <div style={{fontSize:10,color:FAINT,marginTop:8}}>Quien quede primero abrirá el relato. Puedes ir en cualquier posición.</div>
           <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
             <Btn variant="ghost" onClick={()=>setStep(3)}>← Atrás</Btn>
+            {FEATURE_FOLLOW_COLLECTIVES_ENABLED
+              ?<Btn variant="primary" onClick={()=>setStep(5)}>Siguiente →</Btn>
+              :<Btn variant="primary" onClick={create} disabled={saving}>{saving?'Creando…':'Crear relato ✓'}</Btn>}
+          </div>
+        </>}
+
+        {/* Paso 5: visibilidad — solo existe tras la bandera de función */}
+        {step===5&&FEATURE_FOLLOW_COLLECTIVES_ENABLED&&<>
+          <div style={{fontSize:12,fontWeight:600,color:TXT,marginBottom:4}}>¿Quién puede verlo?</div>
+          <div style={{fontSize:11,color:MUTED,marginBottom:14}}>Esto no cambia quién puede escribir — eso ya lo decidiste. Solo decide quién más puede seguirlo sin participar.</div>
+          {[
+            {v:'privado',label:'Privado',hint:'Solo quienes escriben pueden verlo'},
+            {v:'amigos',label:'Amigos',hint:'Los amigos de cualquiera del grupo pueden seguirlo'},
+            {v:'abierto',label:'Abierto',hint:'Cualquiera que siga a alguien del grupo puede seguirlo'},
+          ].map(opt=>(
+            <div key={opt.v} onClick={()=>setVisibility(opt.v)}
+              style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',marginBottom:8,
+                borderRadius:10,border:'1.5px solid '+(visibility===opt.v?AZUL:BDR),
+                background:visibility===opt.v?'rgba(30,155,240,0.06)':'transparent',cursor:'pointer'}}>
+              <div style={{width:16,height:16,borderRadius:'50%',border:'2px solid '+(visibility===opt.v?AZUL:BDR),
+                display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                {visibility===opt.v&&<div style={{width:8,height:8,borderRadius:'50%',background:AZUL}}/>}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,fontWeight:600,color:TXT}}>{opt.label}</div>
+                <div style={{fontSize:10,color:FAINT}}>{opt.hint}</div>
+              </div>
+            </div>
+          ))}
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:20}}>
+            <Btn variant="ghost" onClick={()=>setStep(4)}>← Atrás</Btn>
             <Btn variant="primary" onClick={create} disabled={saving}>{saving?'Creando…':'Crear relato ✓'}</Btn>
           </div>
         </>}
@@ -17579,6 +17687,7 @@ const NOTIF_ICON={
   collab_invite:'user-plus', collab_accepted:'check-circle',
   streak_reminder:'flame', inactivity_nudge:'feather',
   pending_turn:'hourglass', pending_challenge:'timer',
+  collective_follow_invite:'eye',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
@@ -17587,6 +17696,7 @@ const NOTIF_COLOR={
   collab_invite:AZUL, collab_accepted:AZUL,
   streak_reminder:NARANJA, inactivity_nudge:AZULMED,
   pending_turn:'#1A6B8A', pending_challenge:NARANJA,
+  collective_follow_invite:AZULMED,
 };
 
 const relNotifTime=iso=>{
@@ -17667,6 +17777,28 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     onNavigate&&onNavigate(n);
   };
 
+  // Respuesta a "¿quieres seguir este relato?" — el primer tipo de aviso
+  // con decisión (no solo navegación) de toda la app. No cierra el panel
+  // al responder, para que se vea el cambio (✓ Siguiendo / Descartado) sin
+  // que la persona pierda el sitio en la lista.
+  const [followRespondedIds,setFollowRespondedIds]=useState({}); // {notifId: 'yes'|'no'}
+  const respondFollowInvite=async(n,accept)=>{
+    if(followRespondedIds[n.id])return; // evita doble clic
+    setFollowRespondedIds(prev=>({...prev,[n.id]:accept?'yes':'no'})); // optimista
+    try{
+      if(accept)await DB.followCollective(n.entity_id,user.id);
+      if(!n.read){
+        await DB.markNotificationRead(n.id);
+        setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
+        setUnread(prev=>Math.max(0,prev-1));
+      }
+    }catch(e){
+      console.error('respondFollowInvite:',e);
+      setFollowRespondedIds(prev=>{const c={...prev};delete c[n.id];return c;}); // revertir si falló
+      alert('No se pudo guardar tu respuesta, inténtalo de nuevo.');
+    }
+  };
+
   const markAllRead=async()=>{
     try{await DB.markAllNotificationsRead(user.id);}catch(e){}
     setItems(prev=>prev.map(x=>({...x,read:true})));
@@ -17688,7 +17820,30 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
             {unread>0&&<button onClick={markAllRead} style={{background:'transparent',border:'none',color:AZUL,fontSize:11,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Marcar todo leído</button>}
           </div>
           {loaded&&items.length===0&&<div style={{padding:'32px 16px',textAlign:'center',color:MUTED,fontSize:12.5}}>Aún no tienes notificaciones.</div>}
-          {items.map(n=>(
+          {items.map(n=>n.type==='collective_follow_invite'?(
+            // Fila especial: no navega al pulsar, tiene sus propios botones
+            // de decisión — por eso es un <div>, no un <button> (no se
+            // pueden anidar botones).
+            <div key={n.id} style={{display:'flex',gap:10,width:'100%',background:n.read?'transparent':'rgba(30,155,240,0.05)',borderBottom:'1px solid '+BDR,padding:'11px 14px',fontFamily:"'Source Sans 3',sans-serif"}}>
+              <div style={{width:28,height:28,borderRadius:'50%',background:(NOTIF_COLOR[n.type]||AZUL)+'18',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name={NOTIF_ICON[n.type]||'bell'} size={13} color={NOTIF_COLOR[n.type]||AZUL}/>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,color:TXT,fontWeight:n.read?400:600,lineHeight:1.4}}>{n.title}</div>
+                {n.body&&<div style={{fontSize:11.5,color:MUTED,marginTop:2}}>{n.body}</div>}
+                {followRespondedIds[n.id]
+                  ?<div style={{fontSize:11,color:followRespondedIds[n.id]==='yes'?'#1E7A34':FAINT,marginTop:6,fontWeight:600}}>
+                      {followRespondedIds[n.id]==='yes'?'✓ Ahora sigues esta historia':'Descartado'}
+                    </div>
+                  :<div style={{display:'flex',gap:6,marginTop:8}}>
+                      <button onClick={()=>respondFollowInvite(n,true)} style={{background:AZUL,border:'none',borderRadius:6,padding:'5px 12px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Seguir</button>
+                      <button onClick={()=>respondFollowInvite(n,false)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:6,padding:'5px 12px',fontSize:11,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>No, gracias</button>
+                    </div>}
+                <div style={{fontSize:10,color:FAINT,marginTop:6}}>{relNotifTime(n.created_at)}</div>
+              </div>
+              {!n.read&&<div style={{width:7,height:7,borderRadius:'50%',background:NARANJA,flexShrink:0,marginTop:5}}/>}
+            </div>
+          ):(
             <button key={n.id} onClick={()=>handleClick(n)} style={{display:'flex',gap:10,width:'100%',background:n.read?'transparent':'rgba(30,155,240,0.05)',border:'none',borderBottom:'1px solid '+BDR,padding:'11px 14px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
               <div style={{width:28,height:28,borderRadius:'50%',background:(NOTIF_COLOR[n.type]||AZUL)+'18',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                 <Icon name={NOTIF_ICON[n.type]||'bell'} size={13} color={NOTIF_COLOR[n.type]||AZUL}/>
@@ -18868,5 +19023,12 @@ const Root=()=>{
 };
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
+// cancelarVigiaDeCarga: si hemos llegado hasta aquí, todo el script cargó y
+// React arrancó con normalidad — se desactiva la red de seguridad del head.
+if(typeof window!=='undefined'){
+  window.__pretextoAppMounted=true;
+  if(window.__pretextoWatchdog)clearTimeout(window.__pretextoWatchdog);
+  try{ sessionStorage.removeItem('pretexto:recovery_attempted'); }catch(e){}
+}
 
 </script>
