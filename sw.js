@@ -1,5 +1,21 @@
-// Pretexto Service Worker v6
+// Pretexto Service Worker v7
 // Strategy: network-first for HTML (always fresh app), cache-first for CDN assets
+//
+// v7 (12 ago 2026): se quita self.clients.claim() del evento "activate".
+// Motivo: al desplegar la v6, alguien que tenía Pretexto abierta justo en
+// ese momento se quedó con la app en "Cargando…" sin terminar nunca —
+// causado por que el service worker nuevo tomaba el control de esa pestaña
+// A MEDIO CARGAR, con la caché vieja ya borrada pero la nueva aún sin
+// terminar de rellenarse. Sin clients.claim(), una pestaña que ya estaba
+// abierta sigue con el service worker con el que empezó a cargar hasta que
+// se cierra y se vuelve a abrir con normalidad; las pestañas nuevas usan la
+// versión nueva desde el principio. skipWaiting() en "install" SÍ se
+// mantiene — sigue siendo seguro y hace que la actualización esté lista
+// cuanto antes para la siguiente vez que se abra la app.
+// Además, index.html incorpora ahora una red de seguridad independiente de
+// esto: si la carga no termina en 9 segundos por cualquier motivo, se
+// autorrepara sola (borra caché y service worker, recarga una vez) sin que
+// la persona tenga que hacer nada manual.
 //
 // v6 (10 ago 2026): sube de v5 a v6 para forzar el borrado de la caché
 // antigua. Motivo: babel-standalone y jszip se guardaron en su día como
@@ -18,7 +34,7 @@
 // de extensiones del navegador, no de la app, y la Cache API no las admite
 // y lanzaba un error sin capturar).
 
-const CACHE = 'pretexto-v6';
+const CACHE = 'pretexto-v7';
 const CDN_HOSTS = [
   'unpkg.com',
   'cdn.jsdelivr.net',
@@ -32,10 +48,20 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
+  // 12 ago 2026 — se quita self.clients.claim() de aquí a propósito. Con
+  // skipWaiting() + clients.claim() juntos, un service worker nuevo podía
+  // tomar el control de una pestaña que YA estaba cargando en ese momento
+  // con el service worker antiguo — justo lo que le pasó a un usuario al
+  // desplegar la versión anterior: la app se quedó en "Cargando…" sin
+  // terminar nunca. Sin clients.claim(), las pestañas ya abiertas siguen
+  // con el service worker con el que empezaron a cargar hasta que se
+  // cierran y se vuelven a abrir con normalidad — más lento para recibir
+  // la actualización si la app ya estaba abierta, pero nunca se quedan a
+  // medias. Las pestañas nuevas sí usan la versión nueva desde el principio.
   e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    )
   );
 });
 
