@@ -5039,6 +5039,35 @@ const DB = {
       .eq('collective_id',collectiveId).eq('user_id',uid);
     if(error)throw error;
   },
+  getFollowedCollectives: async(uid)=>{
+    const{data:follows}=await getSB().from('collective_followers').select('collective_id').eq('user_id',uid);
+    const ids=(follows||[]).map(f=>f.collective_id);
+    if(!ids.length)return[];
+    const{data,error}=await getSB().from('collectives').select('*').in('id',ids).order('updated_at',{ascending:false});
+    if(error)throw error;
+    return data||[];
+  },
+  // Reacciones de colectivos — POR TURNO, no sobre la historia entera
+  // (corregido: la primera versión reaccionaba a la historia completa).
+  // getCollectiveTurnReactions trae las de TODOS los turnos de golpe (una
+  // sola llamada al abrir la vista de lectura), en vez de una por turno.
+  getCollectiveTurnReactions: async(turnIds)=>{
+    if(!turnIds?.length)return[];
+    const{data,error}=await getSB().from('collective_turn_reactions').select('turn_id, emoji, user_id').in('turn_id',turnIds);
+    if(error)throw error;
+    return data||[];
+  },
+  toggleCollectiveTurnReaction: async(turnId,userId,emoji)=>{
+    const{data:existing}=await getSB().from('collective_turn_reactions')
+      .select('id').eq('turn_id',turnId).eq('user_id',userId).eq('emoji',emoji).maybeSingle();
+    if(existing){
+      await getSB().from('collective_turn_reactions').delete().eq('id',existing.id);
+      return false;
+    }else{
+      await getSB().from('collective_turn_reactions').insert({turn_id:turnId,user_id:userId,emoji});
+      return true;
+    }
+  },
   addCollectiveMembers: async(members)=>{
     const{error}=await getSB().from('collective_members').insert(members);
     if(error)throw error;
@@ -10074,6 +10103,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showCollectives,setShowCollectives]=useState(false);
   const [showHamburger,setShowHamburger]=useState(false);
   const [collectiveDetail,setCollectiveDetail]=useState(null); // collective being edited/read // perfil abierto desde una notificación
+  const [followedCollectiveDetail,setFollowedCollectiveDetail]=useState(null); // FEATURE_FOLLOW_COLLECTIVES_ENABLED — colectivo abierto en modo lectura
   const handleNotificationNavigate=async(n)=>{
     try{
       if(n.type==='new_friend_text'||n.type==='new_comment'){
@@ -10318,6 +10348,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         onClose={()=>setCollectiveDetail(null)}
         onRefresh={onRefresh}
         onUpdate={updated=>setCollectiveDetail(updated)}/>}
+      {followedCollectiveDetail&&<CollectiveReaderView user={user} collective={followedCollectiveDetail}
+        onClose={()=>setFollowedCollectiveDetail(null)}
+        onUnfollowed={()=>setFollowedCollectiveDetail(null)}/>}
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
@@ -10520,6 +10553,13 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
             }catch(e){console.error('abrir colectivo:',e);}
           }}
           onNew={()=>setShowCollectives(true)}/>
+        <FollowedCollectivesHub user={user} refreshKey={refreshKey}
+          onOpen={async c=>{
+            try{
+              const detail=await DB.getCollectiveDetail(c.id);
+              setFollowedCollectiveDetail(detail);
+            }catch(e){console.error('abrir colectivo seguido:',e);}
+          }}/>
         <DuetsHub user={user} refreshKey={refreshKey}/>
         <ChainsHub user={user} refreshKey={refreshKey}/>
         <FeedbackWidget user={user} library={library}/>
@@ -17290,6 +17330,158 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
   );
 };
 
+
+// ── Historias que sigo (FEATURE_FOLLOW_COLLECTIVES_ENABLED) ──────────
+// Mismo patrón visual que CollectivesHub, pero para colectivos que el
+// usuario SIGUE sin escribir. Vive aparte a propósito: reutilizar
+// CollectivesHub habría significado sembrar condicionales de "¿esto es un
+// seguidor o un miembro?" por todo un componente que ya hace bastante.
+const FollowedCollectivesHub=({user,onOpen,refreshKey=0})=>{
+  const [items,setItems]=useState([]);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED){setLoading(false);return;}
+    DB.getFollowedCollectives(user.id).then(setItems).catch(()=>{}).finally(()=>setLoading(false));
+  },[user.id,refreshKey]);
+
+  if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED||loading||!items.length)return null;
+
+  return(
+    <div style={{marginBottom:16}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
+        <Icon name="eye" size={14} color={AZULMED}/>
+        <span style={{fontSize:11,fontWeight:600,color:TXT}}>Historias que sigo</span>
+      </div>
+      {items.map(c=>(
+        <div key={c.id}
+          style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
+            border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 14px',
+            marginBottom:6,textAlign:'left'}}>
+          <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name="eye" size={15} color={FAINT}/>
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
+            <div style={{fontSize:10.5,color:FAINT}}>{c.status==='finished'?'Terminado':'Parte '+c.turn_count}</div>
+          </div>
+          <button onClick={()=>onOpen(c)}
+            style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'7px 13px',fontSize:12,fontWeight:600,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+            Leer<Icon name="arrow-right" size={11} color={MUTED}/>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ── Vista de lectura para quien sigue sin escribir ────────────────────
+// Componente separado a propósito de CollectiveEditor: cero riesgo de que
+// un seguidor vea, ni por error, algún control de escritura — este
+// componente simplemente no tiene ninguno. Mismo estilo visual que el
+// listado de partes de CollectiveEditor (premisa + turnos), para que se
+// sienta como el mismo relato, no como una versión distinta.
+const CollectiveReaderView=({user,collective,onClose,onUnfollowed})=>{
+  const col=collective;
+  const turns=col.turns||[];
+  const [unfollowing,setUnfollowing]=useState(false);
+  const [reactions,setReactions]=useState([]); // [{turn_id,emoji,user_id}] — por turno, no por historia
+
+  useEffect(()=>{
+    const turnIds=turns.map(t=>t.id);
+    DB.getCollectiveTurnReactions(turnIds).then(setReactions).catch(()=>{});
+  },[col.id]); // eslint: turns viene de col, no cambia sin remontar el componente
+
+  const handleReaction=async(turnId,emoji)=>{
+    try{
+      const added=await DB.toggleCollectiveTurnReaction(turnId,user.id,emoji);
+      setReactions(prev=>added
+        ?[...prev,{turn_id:turnId,emoji,user_id:user.id}]
+        :prev.filter(r=>!(r.turn_id===turnId&&r.emoji===emoji&&r.user_id===user.id)));
+    }catch(e){console.error('reacción a turno:',e);}
+  };
+
+  const doUnfollow=async()=>{
+    if(unfollowing)return;
+    setUnfollowing(true);
+    try{
+      await DB.unfollowCollective(col.id,user.id);
+      onUnfollowed&&onUnfollowed(col.id);
+      onClose();
+    }catch(e){alert('No se pudo dejar de seguir: '+e.message);}
+    finally{setUnfollowing(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:200,background:PAGE_BG,display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,padding:'14px 16px',borderBottom:'1px solid '+BDR,background:CARD_BG}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,padding:4,display:'flex'}}>
+          <Icon name="arrow-left" size={18}/>
+        </button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{col.title}</div>
+          <div style={{fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}>
+            <Icon name="eye" size={11} color={FAINT}/>Siguiendo · sin escribir
+          </div>
+        </div>
+        <button onClick={doUnfollow} disabled={unfollowing}
+          style={{flexShrink:0,background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'6px 12px',fontSize:11,color:MUTED,cursor:unfollowing?'default':'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+          {unfollowing?'…':'Dejar de seguir'}
+        </button>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',padding:'20px 16px 40px',WebkitOverflowScrolling:'touch'}}>
+        <div style={{maxWidth:640,margin:'0 auto'}}>
+          <div style={{background:'rgba(30,155,240,0.05)',border:'1px solid rgba(30,155,240,0.15)',borderRadius:10,padding:'12px 16px',marginBottom:24}}>
+            <div style={{fontSize:9,fontWeight:700,color:AZUL,textTransform:'uppercase',letterSpacing:'.1em',marginBottom:6}}>Frase de apertura</div>
+            <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:14,color:TXT,lineHeight:1.6}}>&ldquo;{col.premise}&rdquo;</div>
+          </div>
+
+          {turns.map((t,i)=>{
+            const turnReactions=reactions.filter(r=>r.turn_id===t.id);
+            return(
+            <div key={t.id} style={{marginBottom:24,paddingBottom:24,borderBottom:i<turns.length-1?'1px dashed '+BDR:'none'}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
+                <div style={{width:4,height:4,borderRadius:'50%',background:AZUL}}/>
+                <span style={{fontSize:10,fontWeight:600,color:AZULMED}}>{t.author_name}</span>
+                <span style={{fontSize:9,color:FAINT}}>· Parte {t.turn_number}</span>
+              </div>
+              {t.passed?(
+                <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:FAINT,fontStyle:'italic'}}>
+                  <Icon name="arrow-bend-up-right" size={13} color={FAINT}/>{t.author_name} pasó su turno esta vez.
+                </div>
+              ):(<>
+                <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:PROSE_TEXT}}
+                  dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
+                {/* Reacciones — por turno, no sobre la historia entera. Solo
+                    quien sigue sin escribir puede pulsarlas; la política RLS
+                    lo exige igualmente del lado del servidor (defensa en
+                    profundidad), pero además este componente en sí solo lo
+                    ve quien sigue — a quien escribe se le abre CollectiveEditor,
+                    un componente distinto sin ningún botón de reacción. */}
+                <div style={{display:'flex',gap:6,marginTop:12,alignItems:'center'}}>
+                  {['👏','❤️','🔥'].map(emoji=>{
+                    const count=turnReactions.filter(r=>r.emoji===emoji).length;
+                    const mine=turnReactions.some(r=>r.emoji===emoji&&r.user_id===user.id);
+                    return(
+                      <button key={emoji} onClick={()=>handleReaction(t.id,emoji)}
+                        style={{display:'flex',alignItems:'center',gap:4,border:'0.5px solid '+(mine?'rgba(30,155,240,0.4)':BDR),borderRadius:16,padding:'4px 10px',background:mine?'rgba(30,155,240,0.08)':'transparent',cursor:'pointer',fontSize:13}}>
+                        <span>{emoji}</span>
+                        {count>0&&<span style={{fontSize:10.5,fontWeight:600,color:mine?'#1E9BF0':MUTED}}>{count}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>)}
+            </div>
+          );})}
+
+          {turns.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:FAINT,fontSize:13}}>Todavía no hay ninguna parte escrita.</div>}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ChainsHub=({user,refreshKey=0})=>{
   const [myNoms,setMyNoms]=useState([]);
