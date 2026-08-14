@@ -4762,7 +4762,19 @@ const DB = {
   },
   markChallengeCompleted: async (id, entryId) => {
     const { error } = await getSB().from('direct_challenges')
-      .update({ completed: true, seen: true, entry_id: entryId }).eq('id', id);
+      .update({ completed: true, seen: true, entry_id: entryId,
+        draft_html: null, draft_plain: null, draft_elapsed: null, draft_title: null, draft_updated_at: null }).eq('id', id);
+    if (error) throw error;
+  },
+  saveChallengeDraft: async (id, draft) => {
+    // Guardado a medias del contrarreloj — silencioso, sin bloquear a quien
+    // escribe. draft_elapsed congela el tiempo consumido: el cronómetro se
+    // calcula como 3600 - draft_elapsed al reabrir, y no avanza mientras
+    // el reto está cerrado.
+    const { error } = await getSB().from('direct_challenges').update({
+      draft_html: draft.html, draft_plain: draft.plain, draft_elapsed: draft.elapsed,
+      draft_title: draft.title, draft_updated_at: new Date().toISOString(),
+    }).eq('id', id);
     if (error) throw error;
   },
   shareBackChallenge: async (id) => {
@@ -12022,31 +12034,45 @@ const wordUsed=(text,word)=>{
 
 const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='literatura'})=>{
   const [words]=useState(()=>challenge?.words||pick5Words());
-  // Bloques para modo guión (sin depender de edRef)
-  const [scBlocks,setScBlocks]=useState(()=>[{id:uid(),type:'heading',text:''},{id:uid(),type:'action',text:''}]);
+  const hasDraft=!!(challenge?.draft_html||challenge?.draft_plain);
+  // Bloques para modo guión — si hay borrador guardado en modo guion, viene
+  // como JSON dentro de draft_html (mismo campo que el modo literario usa
+  // para HTML libre; un reto es de un modo u otro, nunca los dos a la vez).
+  const [scBlocks,setScBlocks]=useState(()=>{
+    if(hasDraft&&writingMode==='guion'){
+      try{const parsed=JSON.parse(challenge.draft_html);if(Array.isArray(parsed)&&parsed.length)return parsed;}catch(e){}
+    }
+    return[{id:uid(),type:'heading',text:''},{id:uid(),type:'action',text:''}];
+  });
   const scRefs=useRef({});
   const scFocusRef=useRef(null);
   const [scActiveType,setScActiveType]=useState('heading');
   const insertVoiceCuento=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
-  const [title,setTitle]=useState(challenge?('Para @'+(challenge.from_username||challenge.from_name)):'');
+  const [title,setTitle]=useState(challenge?.draft_title||(challenge?('Para @'+(challenge.from_username||challenge.from_name)):''));
   const [sharingBack,setSharingBack]=useState(false);
-  const [text,setText]=useState('');
-  const [chars,setChars]=useState(0);
-  const [timer,setTimer]=useState(3600); // 1 hour
-  const [running,setRunning]=useState(false);
-  const [started,setStarted]=useState(false);
+  const [text,setText]=useState(hasDraft&&writingMode!=='guion'?(challenge.draft_plain||''):'');
+  const [chars,setChars]=useState(hasDraft&&writingMode!=='guion'?(challenge.draft_plain||'').length:0);
+  const [timer,setTimer]=useState(hasDraft?Math.max(0,3600-(challenge.draft_elapsed||0)):3600); // 1 hour
+  const [running,setRunning]=useState(false); // nunca arranca solo al reabrir — solo con el siguiente input, igual que la primera vez
+  const [started,setStarted]=useState(hasDraft);
   const [published,setPublished]=useState(false);
   const [publishedEntry,setPublishedEntry]=useState(null);
-  const [elapsed,setElapsed]=useState(0);
+  const [elapsed,setElapsed]=useState(hasDraft?(challenge.draft_elapsed||0):0);
   const [saveStatus,setSaveStatus]=useState('idle');
+  const [draftSavedAt,setDraftSavedAt]=useState(null); // solo para el indicador discreto de "guardado"
+  const [showMinWordsWarning,setShowMinWordsWarning]=useState(false); // aviso "soft" al publicar por debajo del mínimo
   const edRef=useRef(null);
   const timerRef=useRef();
   const elapsedRef=useRef();
 
   const usedWords=words.map(w=>wordUsed(text,w));
   const allUsed=usedWords.every(Boolean);
-  const MIN_CHARS=2500;
-  const canPublish=allUsed&&chars>=MIN_CHARS&&timer>0&&!published;
+  const wordCount=text.trim()?text.trim().split(/\s+/).filter(Boolean).length:0;
+  const minWords=challenge?.min_words||null; // opcional — sin mínimo si no se pidió al enviar el reto
+  const meetsMinWords=!minWords||wordCount>=minWords;
+  // El mínimo (si existe) ya NO bloquea publicar — es "soft": se avisa antes
+  // de publicar por debajo, con opción de seguir escribiendo o publicar igual.
+  const canPublish=allUsed&&timer>0&&!published;
 
   const timerCol=()=>{
     if(timer>1800)return'#1E9BF0';
@@ -12062,17 +12088,57 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
     return()=>{clearInterval(timerRef.current);clearInterval(elapsedRef.current);};
   },[running]);
 
+  // Cargar el HTML del borrador en el editor al montar (modo literario —
+  // el modo guion ya se reconstruyó arriba directamente en scBlocks). Solo
+  // una vez: el editor vive en el DOM, no controlado por React tras esto.
+  useEffect(()=>{
+    if(hasDraft&&writingMode!=='guion'&&edRef.current&&challenge.draft_html){
+      edRef.current.innerHTML=challenge.draft_html;
+    }
+  },[]);
+
   const handleInput=()=>{
     const el=edRef.current;if(!el)return;
     const plain=el.innerText||'';
     setText(plain);
     setChars(plain.length);
-    if(!started){setStarted(true);setRunning(true);}
+    if(!started)setStarted(true);
+    if(!running)setRunning(true); // arranca en el primer input — igual la primera vez que al reanudar un borrador
   };
 
-  const publish=async()=>{
-    if(!canPublish)return;
+  // Referencia con el estado más reciente, actualizada en cada render sin
+  // useEffect — así el intervalo de autoguardado de abajo puede leer
+  // siempre el valor actual sin tener que reiniciarse en cada tecla (si
+  // dependiera de "text"/"elapsed" directamente, el intervalo se
+  // reiniciaría constantemente y nunca llegaría a dispararse de verdad).
+  const latestRef=useRef({});
+  latestRef.current={text,elapsed,title,scBlocks};
+
+  // Guardado a medias — silencioso, sin interrumpir la escritura. Se llama
+  // al salir y también de forma periódica (ver más abajo), por si se
+  // cierra la pestaña sin pasar por el botón "Salir".
+  const saveDraft=async()=>{
+    if(!challenge||published||!started)return;
+    try{
+      const{text:t,elapsed:e,title:ti,scBlocks:sb}=latestRef.current;
+      const draftHtml=writingMode==='guion'?JSON.stringify(sb):(edRef.current?.innerHTML||'');
+      await DB.saveChallengeDraft(challenge.id,{html:draftHtml,plain:t,elapsed:e,title:ti});
+      setDraftSavedAt(Date.now());
+    }catch(err){console.error('saveChallengeDraft:',err);}
+  };
+
+  // Autoguardado periódico — el intervalo se crea UNA vez (mientras la
+  // sesión esté en marcha) y no se reinicia con cada pulsación; lee el
+  // contenido más reciente vía latestRef en cada disparo.
+  useEffect(()=>{
+    if(!challenge||published||!started)return;
+    const iv=setInterval(saveDraft,20000); // cada 20s
+    return()=>clearInterval(iv);
+  },[challenge?.id,published,started]);
+
+  const doPublish=async()=>{
     setRunning(false);
+    setShowMinWordsWarning(false);
     const entry={
       id:'cuento_'+Date.now(),
       sk:'cuento',
@@ -12096,6 +12162,15 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
       setPublishedEntry(entry);
       setPublished(true);
     }catch(e){setSaveStatus('error');console.error(e);}
+  };
+
+  // Mínimo "soft": si no llega, se avisa ANTES de publicar en vez de
+  // bloquear el botón — la persona decide si sigue escribiendo o publica
+  // igual tal como está.
+  const publish=()=>{
+    if(!canPublish)return;
+    if(!meetsMinWords){setShowMinWordsWarning(true);return;}
+    doPublish();
   };
 
   const fmt=s=>{
@@ -12149,7 +12224,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
         </div>
         {/* Top bar */}
         <div style={{display:'flex',alignItems:'center',padding:'0 14px',height:44,borderBottom:'0.5px solid rgba(255,255,255,0.1)'}}>
-          <button onClick={()=>{if(!started||window.confirm('¿Salir? Perderás el progreso ' + (writingMode==='guion'?'de la escena.':'del cuento.')))onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir</button>
+          <button onClick={async()=>{if(started&&challenge){await saveDraft();}onBack();}} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>← Salir{started&&challenge?' (se guarda)':''}</button>
           <VoiceButton onTranscript={insertVoiceCuento} dark={true} size={15} user={user}/>
           <div style={{flex:1}}/>
           <div style={{textAlign:'center'}}>
@@ -12157,8 +12232,12 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
             {timer===0&&<div style={{fontSize:11,color:'#A82020',marginTop:2}}>Tiempo agotado</div>}
           </div>
           <div style={{flex:1,textAlign:'right'}}>
-            <div style={{fontSize:11,color:'rgba(255,255,255,0.4)'}}>{chars.toLocaleString()} car.</div>
-            <div style={{fontSize:10,color:chars>=MIN_CHARS?'#1E9BF0':'rgba(255,255,255,0.3)',marginTop:1}}>{chars>=MIN_CHARS?'✓ mín. ok':MIN_CHARS-chars+' faltan'}</div>
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.4)'}}>{wordCount.toLocaleString()} palabras</div>
+            {minWords?(
+              <div style={{fontSize:10,color:meetsMinWords?'#1E9BF0':'rgba(255,255,255,0.3)',marginTop:1}}>{meetsMinWords?'✓ mín. ok':(minWords-wordCount)+' faltan'}</div>
+            ):(
+              <div style={{fontSize:10,color:'rgba(255,255,255,0.25)',marginTop:1}}>sin mínimo</div>
+            )}
           </div>
         </div>
 
@@ -12184,9 +12263,9 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
           {allUsed&&<span style={{fontSize:11,color:'#4CAF82',fontWeight:500,marginLeft:4}}>¡Todas usadas!</span>}
         </div>
 
-        {/* Progress bar */}
+        {/* Progress bar — hacia el mínimo si se pidió uno; si no, hacia el tiempo consumido */}
         <div style={{height:2,background:'rgba(255,255,255,0.08)'}}>
-          <div style={{height:'100%',width:Math.min(100,(chars/MIN_CHARS)*100)+'%',background:chars>=MIN_CHARS?'#1E9BF0':'#1E9BF0',transition:'width 0.3s'}}/>
+          <div style={{height:'100%',width:(minWords?Math.min(100,(wordCount/minWords)*100):Math.min(100,(elapsed/3600)*100))+'%',background:'#1E9BF0',transition:'width 0.3s'}}/>
         </div>
       </div>
 
@@ -12271,11 +12350,11 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
       {/* Bottom publish bar */}
       <div style={{position:'absolute',bottom:0,left:0,right:0,padding:'12px 20px',background:canPublish?'rgba(30,155,240,0.97)':'rgba(26,25,22,0.95)',backdropFilter:'blur(8px)',display:'flex',alignItems:'center',gap:14,transition:'background 0.4s'}}>
         <div style={{flex:1}}>
-          {!started&&<p style={{fontSize:12,color:'rgba(255,255,255,0.5)',margin:0}}>Usa las 5 palabras y escribe {MIN_CHARS.toLocaleString()}+ caracteres para publicar</p>}
-          {started&&!allUsed&&<p style={{fontSize:12,color:'rgba(255,255,255,0.5)',margin:0}}>{usedWords.filter(Boolean).length}/5 palabras usadas · {Math.max(0,MIN_CHARS-chars)} caracteres para el mínimo</p>}
-          {started&&allUsed&&chars<MIN_CHARS&&<p style={{fontSize:12,color:'rgba(255,255,255,0.6)',margin:0}}>¡Todas las palabras! Faltan {(MIN_CHARS-chars).toLocaleString()} caracteres</p>}
+          {!started&&<p style={{fontSize:12,color:'rgba(255,255,255,0.5)',margin:0}}>Usa las 5 palabras{minWords?' y escribe unas '+minWords.toLocaleString()+' palabras':''} para publicar</p>}
+          {started&&!allUsed&&<p style={{fontSize:12,color:'rgba(255,255,255,0.5)',margin:0}}>{usedWords.filter(Boolean).length}/5 palabras usadas{minWords?' · '+wordCount+'/'+minWords+' palabras':''}</p>}
+          {started&&allUsed&&minWords&&!meetsMinWords&&<p style={{fontSize:12,color:'rgba(255,255,255,0.6)',margin:0}}>¡Todas las palabras! El reto pedía {minWords.toLocaleString()} — llevas {wordCount.toLocaleString()} (puedes publicar igual)</p>}
           {canPublish&&<p style={{fontSize:13,fontWeight:500,color:'#fff',margin:0}}>✦ ¡Listo para publicar!</p>}
-          {timer===0&&!published&&<p style={{fontSize:12,color:'rgba(255,80,80,0.9)',margin:0}}>Tiempo agotado — {allUsed&&chars>=MIN_CHARS?'puedes publicar igualmente':'no se puede publicar'}</p>}
+          {timer===0&&!published&&<p style={{fontSize:12,color:'rgba(255,80,80,0.9)',margin:0}}>Tiempo agotado{allUsed?' — guarda tu progreso si quieres, pero ya no se puede publicar':''}</p>}
         </div>
         <button onClick={publish} disabled={!canPublish} style={{
           background:canPublish?'#fff':'rgba(255,255,255,0.15)',
@@ -12290,6 +12369,30 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
           {saveStatus==='saving'?'Guardando…':(writingMode==='guion'?'Publicar escena':'Publicar cuento')}
         </button>
       </div>
+
+      {/* Aviso "soft" del mínimo — no bloquea, solo pregunta */}
+      {showMinWordsWarning&&(
+        <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.55)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+          onClick={e=>{if(e.target===e.currentTarget)setShowMinWordsWarning(false);}}>
+          <div style={{background:'#fff',borderRadius:14,padding:'22px 24px',maxWidth:340,width:'100%',textAlign:'center'}}>
+            <div style={{fontSize:28,marginBottom:10}}>✦</div>
+            <div style={{fontSize:15,fontWeight:600,color:'#0A1B3D',fontFamily:'"Playfair Display",serif',marginBottom:8}}>Tu reto pedía más texto</div>
+            <div style={{fontSize:13,color:'#5B6478',lineHeight:1.5,marginBottom:20}}>
+              Pedía al menos {minWords?.toLocaleString()} palabras y llevas {wordCount.toLocaleString()}. Es solo orientativo — tú decides.
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <button onClick={()=>setShowMinWordsWarning(false)}
+                style={{background:'transparent',border:'1px solid rgba(10,27,61,0.15)',borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:'#0A1B3D',cursor:'pointer'}}>
+                Vale, sigo escribiendo
+              </button>
+              <button onClick={doPublish}
+                style={{background:'#1E9BF0',border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+                Así está perfecto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -12301,6 +12404,8 @@ const SendChallengeModal=({user,onClose})=>{
   const [results,setResults]=useState([]);
   const [recipient,setRecipient]=useState(null);
   const [message,setMessage]=useState('');
+  const [hasMinWords,setHasMinWords]=useState(false);
+  const [minWords,setMinWords]=useState(300);
   const [status,setStatus]=useState('');
   const [sending,setSending]=useState(false);
   const searchRef=useRef();
@@ -12335,6 +12440,7 @@ const SendChallengeModal=({user,onClose})=>{
         to_user_id:recipient.id,
         words:words.map(w=>w.trim().toLowerCase()),
         message:message.trim()||null,
+        min_words:hasMinWords?Number(minWords)||null:null,
       });
       setStatus('¡Reto enviado a @'+recipient.username+'!');
       setTimeout(()=>onClose(),2000);
@@ -12405,6 +12511,26 @@ const SendChallengeModal=({user,onClose})=>{
           <div>
             <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Mensaje (opcional)</div>
             <textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="¡Te reto a escribir un cuento con estas palabras!" rows={2} style={{width:'100%',resize:'none'}}/>
+          </div>
+
+          {/* Mínimo de palabras — opcional, y siempre orientativo: se puede
+              publicar por debajo, avisando antes (ver CuentoContrareloj) */}
+          <div>
+            <div onClick={()=>setHasMinWords(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer'}}>
+              <div style={{width:32,height:18,borderRadius:9,background:hasMinWords?AZUL:'rgba(0,0,0,0.15)',position:'relative',flexShrink:0,transition:'background 0.15s'}}>
+                <div style={{position:'absolute',top:2,left:hasMinWords?16:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
+              </div>
+              <div>
+                <div style={{fontSize:12,fontWeight:500,color:TXT}}>Pedir un mínimo de palabras</div>
+                <div style={{fontSize:10.5,color:FAINT}}>Orientativo — se podrá publicar igual sin llegar</div>
+              </div>
+            </div>
+            {hasMinWords&&<div style={{display:'flex',alignItems:'center',gap:8,marginTop:10,paddingLeft:42}}>
+              <input type="number" min={50} max={5000} step={50} value={minWords}
+                onChange={e=>setMinWords(e.target.value)}
+                style={{width:90,fontSize:13,padding:'6px 9px'}}/>
+              <span style={{fontSize:12,color:MUTED}}>palabras</span>
+            </div>}
           </div>
 
           {/* Preview */}
