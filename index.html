@@ -4732,6 +4732,13 @@ const DB = {
     if (error) throw error;
     return data;
   },
+  updateChallenge: async (id, fields) => {
+    // Solo tiene sentido si el destinatario aún no ha empezado a escribir
+    // (ver EditChallengeModal) — cambiar las palabras semilla después de
+    // que ya hay texto escrito dejaría ese progreso sin encajar con el reto.
+    const { error } = await getSB().from('direct_challenges').update(fields).eq('id', id);
+    if (error) throw error;
+  },
   getReceivedChallenges: async (uid) => {
     // Solo lo que todavía necesita una decisión: ni visto/guardado, ni ignorado,
     // ni completado. Esto es lo que se muestra como aviso en el Dashboard.
@@ -12397,6 +12404,72 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
   );
 };
 
+/* ─── EDIT CHALLENGE MODAL (reto enviado, aún sin empezar) ────────── */
+const EditChallengeModal=({user,challenge,onClose,onSaved})=>{
+  const [words,setWords]=useState(challenge.words||['','','','','']);
+  const [message,setMessage]=useState(challenge.message||'');
+  const [hasMinWords,setHasMinWords]=useState(!!challenge.min_words);
+  const [minWords,setMinWords]=useState(challenge.min_words||300);
+  const [saving,setSaving]=useState(false);
+
+  const allWordsOk=words.every(w=>w.trim().length>=2);
+  const canSave=allWordsOk&&!saving;
+
+  const save=async()=>{
+    if(!canSave)return;
+    setSaving(true);
+    try{
+      const fields={
+        words:words.map(w=>w.trim().toLowerCase()),
+        message:message.trim()||null,
+        min_words:hasMinWords?Number(minWords)||null:null,
+      };
+      await DB.updateChallenge(challenge.id,fields);
+      onSaved({...challenge,...fields});
+    }catch(e){alert('No se pudo guardar: '+e.message);}
+    finally{setSaving(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:420,padding:'20px 22px',maxHeight:'85vh',overflowY:'auto'}}>
+        <div style={{display:'flex',alignItems:'center',marginBottom:4}}>
+          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT}}>Editar reto</div>
+          <div style={{flex:1}}/>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+        </div>
+        <div style={{fontSize:12,color:MUTED,marginBottom:16}}>Para {challenge.to_name||challenge.to_username} · aún no ha empezado a escribir</div>
+
+        <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Las 5 palabras</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16}}>
+          {words.map((w,i)=>(
+            <input key={i} value={w} onChange={e=>setWords(ws=>ws.map((x,j)=>j===i?e.target.value:x))}
+              style={{width:88,fontSize:12,padding:'6px 9px',border:'1px solid '+BDR,borderRadius:8}}/>
+          ))}
+        </div>
+
+        <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>Mensaje (opcional)</div>
+        <textarea value={message} onChange={e=>setMessage(e.target.value)} rows={2} style={{width:'100%',resize:'none',marginBottom:16}}/>
+
+        <div onClick={()=>setHasMinWords(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',marginBottom:hasMinWords?10:4}}>
+          <div style={{width:32,height:18,borderRadius:9,background:hasMinWords?AZUL:'rgba(0,0,0,0.15)',position:'relative',flexShrink:0,transition:'background 0.15s'}}>
+            <div style={{position:'absolute',top:2,left:hasMinWords?16:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 0.15s'}}/>
+          </div>
+          <div style={{fontSize:12,fontWeight:500,color:TXT}}>Pedir un mínimo de palabras</div>
+        </div>
+        {hasMinWords&&<div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,paddingLeft:42}}>
+          <input type="number" min={50} max={5000} step={50} value={minWords} onChange={e=>setMinWords(e.target.value)} style={{width:90,fontSize:13,padding:'6px 9px'}}/>
+          <span style={{fontSize:12,color:MUTED}}>palabras</span>
+        </div>}
+
+        <button onClick={save} disabled={!canSave} style={{width:'100%',background:canSave?AZUL:'rgba(0,0,0,0.1)',border:'none',borderRadius:10,padding:'11px',fontSize:13,fontWeight:600,color:canSave?'#fff':MUTED,cursor:canSave?'pointer':'default'}}>
+          {saving?'Guardando…':'Guardar cambios'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 /* ─── SEND CHALLENGE MODAL ───────────────────────── */
 const SendChallengeModal=({user,onClose})=>{
   const [words,setWords]=useState(['','','','','']);
@@ -13633,6 +13706,9 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
   const [tab,setTab]=useState('sent');
   const [loading,setLoading]=useState(true);
   const [responding,setResponding]=useState(null);
+  const [editingChallenge,setEditingChallenge]=useState(null);
+  const [readingEntry,setReadingEntry]=useState(null);
+  const [readingLoading,setReadingLoading]=useState(null); // id del reto cuya lectura se está cargando
 
   const [duets,setDuets]=useState([]);
   const [chains,setChains]=useState([]);
@@ -13678,6 +13754,19 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
     setResponding(null);
   };
 
+  // Leer un reto enviado que ya se completó Y se compartió — mismo patrón
+  // que SharedBackBanner. Si no se compartió, no hay nada que abrir: se
+  // respeta que quien lo escribió no haya querido enseñarlo.
+  const openSentEntry=async(ch)=>{
+    if(!ch.entry_id)return;
+    setReadingLoading(ch.id);
+    try{
+      const{data}=await getSB().from('entries').select('*').eq('id',ch.entry_id).single();
+      if(data)setReadingEntry(data);
+    }catch(e){console.error('abrir reto completado:',e);}
+    finally{setReadingLoading(null);}
+  };
+
   const items=tab==='sent'?sent:[];
   const receivedCount=received.length+receivedNoms.length;
   const enCurso=duets.length+chains.length;
@@ -13699,21 +13788,45 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
 
           {/* Tab: Enviados */}
           {tab==='sent'&&!loading&&items.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay retos aquí todavía.</div>}
-          {tab==='sent'&&items.map(ch=>(
+          {tab==='sent'&&items.map(ch=>{
+            const hasDraftInProgress=!!(ch.draft_plain||ch.draft_html);
+            return(
             <div key={ch.id} style={{background:CARD_BG,border:'1px solid '+(ch.completed?'rgba(30,155,240,0.3)':BDR),borderRadius:11,padding:'12px 16px'}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
                 <div style={{fontSize:11,fontWeight:500,color:TXT}}>→ {ch.to_name||ch.to_username}</div>
                 <div style={{flex:1}}/>
                 {ch.completed&&<span style={{fontSize:10,color:'#1E9BF0',fontWeight:500,background:'rgba(30,155,240,0.1)',borderRadius:10,padding:'2px 8px'}}>✓ Completado</span>}
-                {!ch.completed&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Pendiente</span>}
+                {!ch.completed&&hasDraftInProgress&&<span style={{fontSize:10,color:'#A85A20',background:'rgba(168,90,32,0.1)',borderRadius:10,padding:'2px 8px'}}>Ya en marcha</span>}
+                {!ch.completed&&!hasDraftInProgress&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Pendiente</span>}
               </div>
               <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
                 {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
               </div>
               {ch.message&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginTop:6}}>"{ch.message}"</div>}
-              <div style={{fontSize:10,color:FAINT,marginTop:6}}>{fmtDate(ch.created_at?.slice?.(0,10)||'')}</div>
+              <div style={{display:'flex',alignItems:'center',marginTop:8}}>
+                <div style={{fontSize:10,color:FAINT}}>{fmtDate(ch.created_at?.slice?.(0,10)||'')}</div>
+                <div style={{flex:1}}/>
+                {/* Pendiente y sin empezar todavía: se puede editar */}
+                {!ch.completed&&!hasDraftInProgress&&(
+                  <button onClick={()=>setEditingChallenge(ch)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'5px 12px',fontSize:11,fontWeight:600,color:MUTED,cursor:'pointer'}}>Editar</button>
+                )}
+                {/* Ya en marcha: no se puede editar — cambiar las palabras ahora dejaría sin sentido lo que ya ha escrito */}
+                {!ch.completed&&hasDraftInProgress&&(
+                  <div style={{fontSize:10,color:FAINT,fontStyle:'italic'}}>Ya escribiendo — no se puede editar</div>
+                )}
+                {/* Completado y compartido: se puede leer */}
+                {ch.completed&&ch.shared_back&&(
+                  <button onClick={()=>openSentEntry(ch)} disabled={readingLoading===ch.id} style={{background:AZUL,border:'none',borderRadius:7,padding:'5px 12px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+                    {readingLoading===ch.id?'Abriendo…':'Leer →'}
+                  </button>
+                )}
+                {/* Completado pero no compartido: se respeta, sin acceso */}
+                {ch.completed&&!ch.shared_back&&(
+                  <div style={{fontSize:10,color:FAINT,fontStyle:'italic'}}>Completado — sin compartir todavía</div>
+                )}
+              </div>
             </div>
-          ))}
+          );})}
 
           {/* Tab: Recibidos — retos directos + encadenados, siempre se puede aceptar o ignorar */}
           {tab==='received'&&(
@@ -13787,6 +13900,10 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
           )}
         </div>
       </div>
+      {editingChallenge&&<EditChallengeModal user={user} challenge={editingChallenge}
+        onClose={()=>setEditingChallenge(null)}
+        onSaved={updated=>{setSent(prev=>prev.map(c=>c.id===updated.id?updated:c));setEditingChallenge(null);}}/>}
+      {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)}/>}
     </div>
   );
 };
