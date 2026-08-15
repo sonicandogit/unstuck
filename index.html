@@ -1939,6 +1939,18 @@ function sanitizeHtml(dirty){
 }
 if(typeof window!=='undefined') window.sanitizeHtml=sanitizeHtml;
 
+// Pegar en cualquier editor de la app SIEMPRE hereda el estilo propio del
+// editor (tamaño, tipografía, interlineado) — se descarta cualquier
+// formato que traiga el origen (Word, una web, otra app). Se hace
+// insertando solo el texto plano del portapapeles, nunca el HTML, así el
+// contenido pegado queda exactamente igual que si se hubiera escrito a
+// mano dentro del editor.
+const handlePlainPaste=e=>{
+  e.preventDefault();
+  const text=(e.clipboardData||window.clipboardData)?.getData('text/plain')||'';
+  if(text)document.execCommand('insertText',false,text);
+};
+
 // Supabase client
 const _SB_URL = 'https://nzvzjyoavpqtjwkwgzch.supabase.co';
 const _SB_KEY = 'sb_publishable_MZita6X22w8fd8dAw9Cr_g_RSXTYACO';
@@ -9491,22 +9503,26 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
   const goalOf=e=>e.goal_words||e.goalWords||0;
   const skOf=e=>e.sk||'check';
   // Regla: cualquier sesión real mantiene la racha (checks, duetos, cadenas,
-  // colectivos y proyectos). Para checks, si hay un objetivo FIABLE guardado se
-  // usa; si no (entries antiguas, o objetivo corrupto de datos viejos), basta un
-  // umbral bajo — un check es una sesión corta por diseño. Los formatos largos
-  // (dueto/proyecto/cadena/colectivo) cuentan con cualquier aportación real.
-  const CHECK_MIN=20;   // suelo para checks
+  // colectivos y proyectos). Para checks/retos, se exige EXACTAMENTE el
+  // objetivo del propio ejercicio (el mismo número que muestra su barra de
+  // progreso) — sea cual sea, sin techo artificial. Antes había un
+  // Math.min(objetivo,20) que, para ejercicios con objetivo por debajo de
+  // 20 (p.ej. "escribe una frase", con un mínimo de 15 palabras), en la
+  // práctica podía dejar el umbral efectivo en 20 en vez de 15 si el
+  // objetivo no llegaba guardado por algún motivo — bloqueando el check a
+  // quien cumplía exactamente lo que el ejercicio pedía. CHECK_MIN se
+  // mantiene solo como red de seguridad para entries antiguas sin
+  // goal_words guardado, no como techo del objetivo real.
+  const CHECK_MIN=20;   // solo de respaldo si no hay objetivo guardado (datos antiguos)
   const LONG_MIN=20;    // suelo para formatos largos (siempre lo superan)
   const isActiveEntry=e=>{
     const w=effectiveWc(e);
     const sk=skOf(e);
     if(['dueto','chain','encadenado','colectivo','cadena'].includes(sk))return w>=LONG_MIN;
     if(sk==='proyecto')return w>=CHECK_MIN;
-    // checks y retos: cumplir objetivo si es de un corto, con techo sensato para
-    // no exigir de más por datos corruptos.
+    // checks y retos: el objetivo real del ejercicio, completo — sin tope.
     const g=goalOf(e);
-    if(g>0&&g<=120)return w>=Math.min(g,CHECK_MIN);
-    return w>=CHECK_MIN;
+    return g>0?w>=g:w>=CHECK_MIN;
   };
   const activeDayEntries=library.filter(isActiveEntry);
   const dates=[...new Set(activeDayEntries.map(e=>e.date?.slice(0,10)).filter(Boolean))].sort().reverse();
@@ -10632,7 +10648,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               {(()=>{
                 const now=new Date();const dow=now.getDay();
                 const monday=new Date(now);monday.setDate(now.getDate()-(dow===0?6:dow-1));
-                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const goalOf=e=>e.goal_words||e.goalWords||0;const skOf=e=>e.sk||'check';const isActive=e=>{const w=effectiveWc(e);const sk=skOf(e);if(['dueto','chain','encadenado','colectivo','cadena'].includes(sk))return w>=20;if(sk==='proyecto')return w>=20;const g=goalOf(e);if(g>0&&g<=120)return w>=Math.min(g,20);return w>=20;};const activeDates=new Set(library.filter(isActive).map(e=>e.date?.slice(0,10)).filter(Boolean));
+                const effectiveWc=e=>{const wa=e.words_added;return wa!=null?wa:(e.word_count||e.wordCount||0);};const goalOf=e=>e.goal_words||e.goalWords||0;const skOf=e=>e.sk||'check';const isActive=e=>{const w=effectiveWc(e);const sk=skOf(e);if(['dueto','chain','encadenado','colectivo','cadena'].includes(sk))return w>=20;if(sk==='proyecto')return w>=20;const g=goalOf(e);return g>0?w>=g:w>=20;};const activeDates=new Set(library.filter(isActive).map(e=>e.date?.slice(0,10)).filter(Boolean));
                 const DAY_LABELS=['L','M','X','J','V','S','D'];
                 return Array.from({length:7},(_,i)=>{
                   const d=new Date(monday);d.setDate(monday.getDate()+i);
@@ -10791,7 +10807,7 @@ const SectionCard=({accent,tag,title,children})=>(
 
 const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,writingMode='literatura'})=>{
   const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
-    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const sk=e.sk||'check';if(['dueto','chain','encadenado','colectivo','cadena','proyecto'].includes(sk))return w>=20;const g=e.goal_words||e.goalWords||0;return (g>0&&g<=120)?w>=Math.min(g,20):w>=20;});
+    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const sk=e.sk||'check';if(['dueto','chain','encadenado','colectivo','cadena','proyecto'].includes(sk))return w>=20;const g=e.goal_words||e.goalWords||0;return g>0?w>=g:w>=20;});
   const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
   const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds,writingMode));
   const checkDone=!!todayCheck?.done;
@@ -11945,7 +11961,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             {!plainTxt&&<div style={{position:'absolute',top:20,left:36,pointerEvents:'none',zIndex:2,fontSize:sz,fontFamily:fontObj.value,lineHeight:1.85,color:'rgba(26,25,22,0.28)'}}>{sk==='proyecto'?'Continúa donde lo dejaste…':'Empieza a escribir…'}</div>}
             {!started&&!plainTxt&&<div style={{position:'absolute',bottom:12,left:36,pointerEvents:'none',zIndex:2,fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}><span style={{width:4,height:4,borderRadius:'50%',background:headerAccent,opacity:0.6}}/>El temporizador arranca al escribir</div>}
             {ab==='limite'&&started&&(()=>{const h=limHint();return(<div style={{position:'absolute',top:8,left:36,pointerEvents:'none',zIndex:2,display:'flex',alignItems:'center',gap:4,fontSize:10,color:h.c}}>{Array.from({length:limDels}).map((_,i)=><span key={i} style={{width:6,height:6,borderRadius:'50%',background:i<delsLeft?'#1B5FAA':'rgba(0,0,0,0.1)',display:'inline-block'}}/>)}<span style={{marginLeft:2}}>{h.l}</span></div>)})()}
-            <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt} onPaste={e=>{if(sk!=='proyecto')e.preventDefault()}}
+            <div ref={edRef} contentEditable suppressContentEditableWarning onInput={e=>handleInput(e)} onKeyDown={handleKey} onSelect={syncFmt} onKeyUp={syncFmt} onPaste={e=>{if(sk!=='proyecto'){e.preventDefault();return;}handlePlainPaste(e);}}
               style={{position:'absolute',inset:0,overflowY:'auto',padding:'20px 18px 80px',outline:'none',boxSizing:'border-box',fontFamily:fontObj.value,fontSize:sz+'px',lineHeight:1.85,color:textCol(),caretColor:NARANJA,WebkitOverflowScrolling:'touch'}}/>
             {ab==='tunel'&&tunnelRects.map((r,i)=>(
               <div key={i} style={{position:'absolute',top:r.top,left:r.left,width:r.width,height:r.height,background:'#fff',opacity:0.94,backdropFilter:'blur(5.5px)',WebkitBackdropFilter:'blur(5.5px)',pointerEvents:'none',transition:'opacity 0.4s ease'}}/>
@@ -12294,7 +12310,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
         {!started&&writingMode!=='guion'&&<div style={{position:'absolute',top:24,left:36,pointerEvents:'none',zIndex:2,fontSize:17,color:'rgba(26,25,22,0.3)',fontFamily:'"Playfair Display",Georgia,serif',lineHeight:1.85}}>
           Empieza a escribir y arranca el contador…
         </div>}
-        {writingMode!=='guion'&&<div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+        {writingMode!=='guion'&&<div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput} onPaste={handlePlainPaste}
           style={{position:'absolute',inset:0,overflowY:'auto',padding:'24px 36px 100px',outline:'none',
             fontFamily:'"Playfair Display",Georgia,serif',fontSize:'18px',lineHeight:1.85,color:PROSE_TEXT,caretColor:NARANJA}}/>}
                 {writingMode==='guion'&&(
@@ -12311,6 +12327,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
                   <div
                     ref={el=>{if(el)scRefs.current[block.id]=el;else delete scRefs.current[block.id];}}
                     contentEditable suppressContentEditableWarning
+                    onPaste={handlePlainPaste}
                     data-ph={SBLOCK[block.type]?.ph||''}
                     onFocus={()=>{scFocusRef.current=block.id;setScActiveType(block.type);}}
                     onKeyDown={e=>{
@@ -12348,7 +12365,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
             </div>
           </div>
         )}
-        {writingMode!=='guion'&&<div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+        {writingMode!=='guion'&&<div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput} onPaste={handlePlainPaste}
           style={{position:'absolute',inset:0,overflowY:'auto',padding:'24px 36px 100px',outline:'none',
             fontFamily:'"Playfair Display",Georgia,serif',fontSize:'18px',lineHeight:1.85,color:PROSE_TEXT,caretColor:NARANJA}}/>}
         
@@ -16015,6 +16032,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
                 <div
                   ref={el=>{if(el)blockRefs.current[block.id]=el;else delete blockRefs.current[block.id];}}
                   contentEditable suppressContentEditableWarning
+                  onPaste={handlePlainPaste}
                   data-ph={SBLOCK[block.type]?.ph||''}
                   onFocus={()=>{setActiveType(block.type);focusedBlockIdRef.current=block.id;}}
                   onBlur={()=>setActiveType(null)}
@@ -16264,7 +16282,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
                     <span>Tu turno — continúa el relato</span>
                     <VoiceButton onTranscript={insertVoiceDuet} size={14} user={user}/>
                   </div>
-                <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+                <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput} onPaste={handlePlainPaste}
                   style={{minHeight:160,outline:'none',fontSize:16,lineHeight:1.85,fontFamily:'"Playfair Display",Georgia,serif',color:PROSE_TEXT,caretColor:NARANJA,padding:'4px 0'}}/>
               </div>
             )}
@@ -16710,7 +16728,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
                   <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:14,color:TXT,lineHeight:1.5}}>&ldquo;{requiredStart}&rdquo;</div>
                 </div>
               )}
-              <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput}
+              <div ref={edRef} contentEditable suppressContentEditableWarning onInput={handleInput} onPaste={handlePlainPaste}
                 style={{minHeight:200,outline:'none',fontSize:16,lineHeight:1.85,fontFamily:'"Playfair Display",serif',color:PROSE_TEXT,caretColor:NARANJA,padding:'4px 0'}}/>
             </>
           )}
@@ -17475,7 +17493,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
                 <span style={{fontSize:10,fontWeight:600,color:NARANJA}}>Tu turno — Parte {col.turn_count+1}</span>
                 <span style={{fontSize:9,color:FAINT}}>·  mín. {col.min_words} palabras</span>
               </div>
-              <div ref={edRef} contentEditable suppressContentEditableWarning
+              <div ref={edRef} contentEditable suppressContentEditableWarning onPaste={handlePlainPaste}
                 onInput={handleInput}
                 data-ph="Continúa el relato…"
                 style={{minHeight:180,outline:'none',fontSize:15,lineHeight:1.85,
