@@ -4228,6 +4228,10 @@ const DB = {
     if (error && error.code !== 'PGRST116') throw error;
     return data;
   },
+  acceptBetaDisclaimer: async (uid) => {
+    const { error } = await getSB().from('profiles').update({ beta_disclaimer_accepted_at: new Date().toISOString() }).eq('id', uid);
+    if (error) throw error;
+  },
   upsertProfile: async (profile) => {
     const { error } = await getSB().from('profiles').upsert(profile);
     if (error) throw error;
@@ -9398,6 +9402,13 @@ const FEATURE_DRIVE_ENABLED = false;
 // mostrarla. Mientras esté en false, todo colectivo nace 'privado' y
 // nadie ve el paso de visibilidad al crear uno — cero efecto visible.
 const FEATURE_FOLLOW_COLLECTIVES_ENABLED = false;
+// Aviso de fase de pruebas — se muestra a cualquiera (cuenta nueva o
+// antigua) que todavía no lo haya aceptado, bloqueando el resto de la app
+// hasta que pulse "Entendido". Al llegar el lanzamiento oficial, basta con
+// poner esto en false para que deje de aparecer — no hace falta borrar
+// nada más, el registro de quién lo aceptó y cuándo se queda en la base
+// de datos por si hiciera falta consultarlo más adelante.
+const SHOW_BETA_DISCLAIMER = true;
 
 const AZUL='#1E9BF0';      // acento / interacción / signos / activo
 const AZULMED='#1B5FAA';   // enlaces, tarjetas de acento, estado 2.º
@@ -9564,12 +9575,50 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
   return{totalWords,streak,thisWeek,totalSessions:library.length,last7status,weekElapsed,weekWords,weekSessions,totalElapsed,wildcardUsed,newlyBridged,newMilestone,todayActive,lastActiveDate:dates[0]||null};
 };
 
+// Otorga/descuenta comodines de forma CENTRALIZADA — antes esto solo vivía
+// en un efecto dentro del Dashboard, un componente que se desmonta y se
+// vuelve a montar en cada ciclo de sesión (view pasa por briefing/cuento/
+// postSession/sessionComplete y de vuelta a dashboard, y React trata cada
+// paso como un tipo de elemento distinto, así que Dashboard se destruye y
+// se recrea). Ese efecto actualizaba la base de datos y su propio estado
+// local, pero nunca el objeto `user` compartido — así que, al remontar,
+// Dashboard volvía a partir de un wildcard_milestone desactualizado, y un
+// comodín recién ganado podía no verse reflejado (aunque sí estuviera ya
+// guardado). Ahora se llama desde el propio flujo de fin de sesión, con
+// los datos más frescos posibles, y muta `user` directamente (mismo
+// patrón que el resto de la app) para que cualquier pantalla — incluido
+// un Dashboard recién montado — ya vea el valor correcto de inmediato.
+const applyStreakOutcome=async(user,freshLib,freshRefs)=>{
+  if(!user)return{streak:0,wildcardGranted:false};
+  const wildcards=user.wildcards||0;
+  const wildcard_milestone=user.wildcard_milestone||0;
+  const wildcardDays=Array.isArray(user.wildcard_days)?user.wildcard_days:[];
+  const stats=computeStats(freshLib||[],freshRefs||[],wildcards,wildcard_milestone,wildcardDays);
+  let newWc=wildcards,newMilestone=wildcard_milestone,newDays=wildcardDays;
+  let wildcardGranted=false;
+  if(stats.wildcardUsed>0){
+    newWc=Math.max(0,newWc-stats.wildcardUsed);
+    newDays=[...new Set([...wildcardDays,...(stats.newlyBridged||[])])];
+  }
+  if(stats.newMilestone>0&&stats.newMilestone>wildcard_milestone&&stats.todayActive){
+    newWc++;newMilestone=stats.newMilestone;wildcardGranted=true;
+  }
+  const daysChanged=newDays.length!==wildcardDays.length;
+  if(newWc!==wildcards||newMilestone!==wildcard_milestone||daysChanged){
+    Object.assign(user,{wildcards:newWc,wildcard_milestone:newMilestone,wildcard_days:newDays});
+    try{
+      await getSB().from('profiles').update({wildcards:newWc,wildcard_milestone:newMilestone,wildcard_days:newDays}).eq('id',user.id);
+    }catch(e){console.error('applyStreakOutcome:',e);}
+  }
+  return{streak:stats.streak,wildcardGranted};
+};
+
 // Hash simple y determinista (mismo input → mismo resultado siempre) para elegir
 // una variante de mensaje de racha. Con esto el mensaje no cambia en cada
 // re-render (usa la fecha de hoy + la racha como semilla), pero sí varía de un
 // día a otro en vez de repetir siempre la misma frase para el mismo tramo.
 const _hashStr=s=>{let h=0;for(let i=0;i<s.length;i++){h=(h<<5)-h+s.charCodeAt(i);h|=0;}return Math.abs(h);};
-const streakMessage=(streak,todayActive=true)=>{
+const streakMessage=(streak,wildcardGranted=false)=>{
   const pick=list=>list[_hashStr(today()+'|'+streak)%list.length];
   if(streak<=0)return{icon:'pencil-line',color:FAINT,text:pick([
     'Hoy es un buen día para empezar.',
@@ -9581,7 +9630,7 @@ const streakMessage=(streak,todayActive=true)=>{
     'Ya has empezado. Eso es lo que más cuesta.',
     'Día 1. Todo lo demás es seguir.',
   ])};
-  if(streak%7===0&&todayActive)return{icon:'gift',color:AZUL,text:pick([
+  if(streak%7===0&&wildcardGranted)return{icon:'gift',color:AZUL,text:pick([
     '¡Semana completa! Has ganado un comodín.',
     '7 días más. Comodín nuevo en el bolsillo.',
     'Otra semana redonda. Comodín conseguido.',
@@ -9824,6 +9873,67 @@ const LeccionModal=({reto,onClose,onStart})=>{
 };
 
 /* ─── USER SELECT ────────────────────────────────── */
+// ── Aviso de fase de pruebas (SHOW_BETA_DISCLAIMER) ──────────────────
+// A propósito, no tiene ninguna forma de cerrarse salvo el botón: sin
+// onClick en el fondo, sin tecla Escape, sin "×" en la esquina. El
+// objetivo es que quede constancia real de que la persona lo vio y lo
+// aceptó, no que se pueda descartar sin querer.
+const BetaDisclaimerModal=({user,onAccepted})=>{
+  const [saving,setSaving]=useState(false);
+  const accept=async()=>{
+    if(saving)return;
+    setSaving(true);
+    try{
+      await DB.acceptBetaDisclaimer(user.id);
+      onAccepted();
+    }catch(e){
+      alert('No se pudo guardar tu confirmación — comprueba tu conexión e inténtalo de nuevo.');
+      setSaving(false);
+    }
+  };
+  // "Avisar de un fallo" solo abre el correo — no cuenta como haber
+  // aceptado el aviso. Sigue habiendo que pulsar "Entendido" aparte.
+  const reportBug=()=>{
+    window.location.href='mailto:pretextoapp@gmail.com?subject='+encodeURIComponent('Fallo en Pretexto (beta)');
+  };
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(10,27,61,0.55)',backdropFilter:'blur(2px)',display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{position:'relative',width:'100%',maxWidth:360,background:'var(--card-bg)',borderRadius:16,padding:'30px 24px 26px',overflow:'hidden',boxShadow:'0 22px 54px -14px rgba(10,27,61,0.45)'}}>
+        {/* Signo asterisco decorativo, mismo lenguaje visual que el resto de la app */}
+        <div aria-hidden="true" style={{position:'absolute',right:-14,top:-46,fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontSize:170,lineHeight:0.8,color:'rgba(241,90,36,0.10)',pointerEvents:'none',userSelect:'none'}}>*</div>
+
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16}}>
+          <span style={{width:22,height:22,borderRadius:'50%',background:'rgba(241,90,36,0.12)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <Icon name="flask" size={12} color="#F15A24"/>
+          </span>
+          <span style={{font:"600 10px/1 'Source Sans 3'",letterSpacing:'.26em',textTransform:'uppercase',color:'#F15A24'}}>Versión beta</span>
+        </div>
+
+        <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:23,lineHeight:1.15,color:'var(--text)',marginBottom:14}}>
+          Esto todavía<br/>se está escribiendo.
+        </div>
+
+        <div style={{fontSize:13.5,color:'var(--text2)',lineHeight:1.6,marginBottom:14}}>
+          Pretexto está empezando: afinamos la app cada semana, así que todavía podría fallar algo o cambiar de un día para otro.
+        </div>
+
+        <div style={{borderLeft:'2px solid rgba(241,90,36,0.35)',paddingLeft:12,fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontSize:14,color:'var(--text)',lineHeight:1.5,marginBottom:22}}>
+          Como un borrador: mejora cada vez que alguien lo lee.
+        </div>
+
+        <button onClick={accept} disabled={saving}
+          style={{width:'100%',height:46,border:'none',borderRadius:11,background:'#F15A24',color:'#fff',font:"600 14.5px 'Source Sans 3'",cursor:saving?'default':'pointer',opacity:saving?0.7:1}}>
+          {saving?'Un momento…':'Entendido'}
+        </button>
+        <button onClick={reportBug} type="button"
+          style={{width:'100%',height:40,border:'none',background:'none',font:"500 13px 'Source Sans 3'",color:'var(--text2)',cursor:'pointer'}}>
+          Avisar de un fallo
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const AuthScreen=({onAuth})=>{
   const [mode,setMode]=useState('login');
   const [recoverSent,setRecoverSent]=useState(false); // 'login' | 'signup' | 'recover'
@@ -10226,27 +10336,19 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     const key=stats.streak+':'+stats.wildcardUsed+':'+stats.newMilestone;
     if(wildcardUpdateRef.current===key||!user?.id)return;
     wildcardUpdateRef.current=key;
-    let newWc=wildcards;
-    let newMilestone=wildcard_milestone;
-    let newDays=wildcardDays;
-    if(stats.wildcardUsed>0){
-      newWc=Math.max(0,newWc-stats.wildcardUsed);
-      // Apuntar qué días se han tapado para no volver a cobrarlos nunca más.
-      newDays=[...new Set([...wildcardDays,...(stats.newlyBridged||[])])];
-    }
-    if(stats.newMilestone>0&&stats.newMilestone>wildcard_milestone&&stats.todayActive){
-      newWc++;newMilestone=stats.newMilestone;
-      // Primera vez que se gana un comodín: explicar qué es.
-      if(!S.get(firstTimeKey('comodines',user?.id)))setActivePopup('comodines');
-    }
-    const daysChanged=newDays.length!==wildcardDays.length;
-    if(newWc!==wildcards||newMilestone!==wildcard_milestone||daysChanged){
-      setWildcards(newWc);
-      setWildcardMilestone(newMilestone);
-      if(daysChanged)setWildcardDays(newDays);
-      getSB().from('profiles').update({wildcards:newWc,wildcard_milestone:newMilestone,wildcard_days:newDays}).eq('id',user.id)
-        .then(r=>{ if(r?.error) console.error('wildcard update:',r.error); });
-    }
+    // Red de seguridad: por si algún flujo (p.ej. un turno de dueto o
+    // colectivo) no pasó por applyStreakOutcome en su propio punto de fin
+    // de sesión. Usa la MISMA función centralizada — nunca dos lógicas
+    // distintas calculando lo mismo de formas que puedan desincronizarse.
+    applyStreakOutcome(user,library,reflections).then(result=>{
+      // Sincroniza el estado local del propio Dashboard con lo que quedó
+      // en `user` — que puede haberse actualizado aquí mismo, o ya venir
+      // actualizado de antes si el flujo de fin de sesión ya lo hizo.
+      setWildcards(user.wildcards||0);
+      setWildcardMilestone(user.wildcard_milestone||0);
+      setWildcardDays(Array.isArray(user.wildcard_days)?user.wildcard_days:[]);
+      if(result.wildcardGranted&&!S.get(firstTimeKey('comodines',user?.id)))setActivePopup('comodines');
+    });
   },[stats.streak,stats.wildcardUsed,stats.newMilestone]);
   const em=energyMsg(energy);
   const recentNotes=reflections.filter(r=>r.notes?.trim()).slice(0,3);
@@ -10704,7 +10806,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
             </div>
             {/* Mensaje contextual debajo */}
             <div style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:MUTED,lineHeight:1.4,marginTop:10}}>
-              {(()=>{const m=streakMessage(stats.streak,stats.todayActive);return<><Icon name={m.icon} size={13} color={m.color}/><span>{m.text}</span></>;})()}
+              {(()=>{const m=streakMessage(stats.streak,wildcard_milestone>=stats.streak);return<><Icon name={m.icon} size={13} color={m.color}/><span>{m.text}</span></>;})()}
             </div>
           </div>
         </div>
@@ -11238,8 +11340,8 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
 /* ─── SESSION COMPLETE (pantalla de enhorabuena) ──── */
 const SessionCompleteModal=({summary,onClose,variant='session',note=''})=>{
   if(!summary)return null;
-  const{wordsAdded=0,elapsed=0,streak=0}=summary;
-  const sm=streakMessage(streak);
+  const{wordsAdded=0,elapsed=0,streak=0,wildcardGranted=false}=summary;
+  const sm=streakMessage(streak,wildcardGranted);
   // variant='turn' → cierre de un turno en dueto/encadenado/colectivo: no es el
   // final de una sesión propia, así que se celebra la aportación sin repetir la
   // racha (que ya se ve en el Dashboard).
@@ -18852,6 +18954,11 @@ const TermsModal=({onClose})=>(
 const App=()=>{
   const [user,setUser]=useState(null);
   const [loading,setLoading]=useState(true);
+  // Solo para forzar un re-render tras aceptar el aviso de fase de pruebas:
+  // como el resto de la app muta "user" directamente en vez de reemplazarlo
+  // (Object.assign, patrón ya usado en toda la app), React no detecta el
+  // cambio por sí solo — este tick es el empujón mínimo para que se note.
+  const [betaAcceptedTick,setBetaAcceptedTick]=useState(0);
   const [view,setView]=useState('dashboard');
   const [energy,setEnergy]=useState(5);
   const [library,setLibrary]=useState([]);
@@ -19268,11 +19375,18 @@ const App=()=>{
     // para que racha, estadísticas y palabras aparezcan actualizados sin recargar
     const fresh=await loadUserData(user.id).catch(()=>null);
     if(ref&&user){
-      const freshStats=fresh?computeStats(fresh.lib,fresh.refs,user?.wildcards||0,user?.wildcard_milestone||0,Array.isArray(user?.wildcard_days)?user.wildcard_days:[]):null;
+      // Otorga/descuenta comodines AQUÍ MISMO, con los datos más frescos
+      // posibles — no se deja en manos de que el Dashboard llegue a
+      // montarse y recalcular a tiempo. wildcardGranted es el dato REAL
+      // (no una suposición de "es múltiplo de 7"), así que la pantalla de
+      // felicitación solo dice "has ganado un comodín" cuando de verdad
+      // se ha guardado uno.
+      const{streak,wildcardGranted}=fresh?await applyStreakOutcome(user,fresh.lib,fresh.refs):{streak:0,wildcardGranted:false};
       setSessionSummary({
         wordsAdded:ref.wordsAdded??ref.word_count??ref.wordCount??0,
         elapsed:ref.elapsed||0,
-        streak:freshStats?.streak??0,
+        streak,
+        wildcardGranted,
       });
       setView('sessionComplete');
     }else{
@@ -19364,6 +19478,9 @@ const App=()=>{
 
   if(!user)return<AuthScreen onAuth={handleAuth}/>;
 
+  if(SHOW_BETA_DISCLAIMER&&!user.beta_disclaimer_accepted_at)return<BetaDisclaimerModal user={user}
+    onAccepted={()=>{Object.assign(user,{beta_disclaimer_accepted_at:new Date().toISOString()});setBetaAcceptedTick(t=>t+1);}}/>;
+
   // Edit existing entry — abre el mismo editor con el que se creó: si el HTML
   // guardado lleva el marcador de bloques de guión, se reconstruye en ScriptEditor;
   // si no, es prosa normal y va al Editor de siempre.
@@ -19402,11 +19519,12 @@ const App=()=>{
       // cerrar con la pantalla de "¡Enhorabuena!" y racha actualizada, no
       // saltar directo al Dashboard como hacía antes.
       const fresh=await loadUserData(user.id).catch(()=>null);
-      const freshStats=fresh?computeStats(fresh.lib,fresh.refs,user?.wildcards||0,user?.wildcard_milestone||0,Array.isArray(user?.wildcard_days)?user.wildcard_days:[]):null;
+      const{streak,wildcardGranted}=fresh?await applyStreakOutcome(user,fresh.lib,fresh.refs):{streak:0,wildcardGranted:false};
       setSessionSummary({
         wordsAdded:stats?.wordsAdded||0,
         elapsed:stats?.elapsed||0,
-        streak:freshStats?.streak??0,
+        streak,
+        wildcardGranted,
       });
       setView('sessionComplete');
     }}
