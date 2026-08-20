@@ -4340,6 +4340,17 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  // Título ÚNICAMENTE, para el preview de una invitación de colaboración
+  // sin aceptar todavía — nunca html/plain. Sustituye a getEntriesByIds en
+  // este caso concreto: antes se pedía el texto completo solo para leer
+  // el título, y el contenido llegaba igual en la respuesta de red aunque
+  // la interfaz no lo mostrara (hallazgo #6 de la auditoría de julio).
+  getPendingInviteTitles: async (entryIds) => {
+    if (!entryIds?.length) return [];
+    const { data, error } = await getSB().rpc('get_pending_invite_titles', { p_entry_ids: entryIds });
+    if (error) throw error;
+    return data || [];
+  },
   getRecentlyAcceptedCollabs: async (uid, sinceISO) => {
     const { data, error } = await getSB().from('entry_collaborators')
       .select('*').eq('owner_id', uid).eq('status', 'aceptado').gte('responded_at', sinceISO)
@@ -4591,7 +4602,7 @@ const DB = {
     if (e1) throw e1;
     if (!fids?.length) return [];
     const ids = fids.map(f => f.following_id);
-    const { data: profiles, error: e2 } = await getSB().from('profiles').select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
+    const { data: profiles, error: e2 } = await getSB().from('profiles').select('id, name, username, initials, accent, bg, avatar, text_col, total_words').in('id', ids);
     if (e2) throw e2;
     return (profiles || []).map(p => ({ following_id: p.id, profiles: p }));
   },
@@ -4600,7 +4611,7 @@ const DB = {
     if (e1) throw e1;
     if (!fids?.length) return [];
     const ids = fids.map(f => f.follower_id);
-    const { data: profiles, error: e2 } = await getSB().from('profiles').select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
+    const { data: profiles, error: e2 } = await getSB().from('profiles').select('id, name, username, initials, accent, bg, avatar, text_col, total_words').in('id', ids);
     if (e2) throw e2;
     return (profiles || []).map(p => ({ follower_id: p.id, profiles: p }));
   },
@@ -4673,6 +4684,26 @@ const DB = {
   },
 
   // Usernames
+  // Amigos = seguimiento mutuo real, mismo criterio que en toda la app.
+  // Se usa para restringir a quién se puede retar — antes ningún tipo de
+  // reto (ni contrarreloj ni dueto) lo comprobaba, buscaban en toda la
+  // base de usuarios.
+  getMutualFriends: async (uid) => {
+    const [followingRes, followersRes] = await Promise.all([
+      getSB().from('follows').select('following_id').eq('follower_id', uid),
+      getSB().from('follows').select('follower_id').eq('following_id', uid),
+    ]);
+    if (followingRes.error) throw followingRes.error;
+    if (followersRes.error) throw followersRes.error;
+    const followingIds = new Set((followingRes.data||[]).map(f => f.following_id));
+    const followerIds = new Set((followersRes.data||[]).map(f => f.follower_id));
+    const mutualIds = [...followingIds].filter(id => followerIds.has(id));
+    if (!mutualIds.length) return [];
+    const { data, error } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg, avatar, text_col').in('id', mutualIds);
+    if (error) throw error;
+    return data || [];
+  },
   searchByUsername: async (username) => {
     const q = username.startsWith('@') ? username.slice(1) : username;
     const { data, error } = await getSB().from('profiles')
@@ -4706,8 +4737,19 @@ const DB = {
       result.following = fwing?.length || 0;
     } catch(e) {}
     try {
-      const { data: pub } = await getSB().from('entries').select('id').eq('user_id', uid).in('visibility', ['abierto','amigos']);
-      result.publicTexts = pub?.length || 0;
+      // Sin filtro de visibility en la CONSULTA a propósito — RLS
+      // (entries_select) ya solo devuelve lo que YO puedo leer de verdad,
+      // con la comprobación de amistad MUTUA real para 'amigos', no solo
+      // "yo le sigo a él". Antes este .in('visibility',['abierto','amigos'])
+      // contaba cualquier texto 'amigos' del perfil visitado sin comprobar
+      // mutualidad — el mismo fallo que se corrigió en la auditoría de
+      // privacidad, aquí sin que nadie lo hubiera visto hasta ahora.
+      // Eso sí: si uid es mi propio perfil, RLS me deja ver también mis
+      // privados/ejercicios (tengo acceso total a lo mío) — esos no cuentan
+      // como "publicado", así que se descartan aquí, ya sobre los datos que
+      // RLS entregó, sin reconstruir ninguna lógica de amistad por mi cuenta.
+      const { data: pub } = await getSB().from('entries').select('id, visibility').eq('user_id', uid);
+      result.publicTexts = (pub||[]).filter(e=>e.visibility!=='privado'&&e.visibility!=='ejercicio').length;
     } catch(e) {}
     try {
       // Pre-computed totals on profiles table — publicly readable, no RLS problem
@@ -4716,13 +4758,58 @@ const DB = {
       result.totalElapsed = prof?.total_elapsed || 0;
     } catch(e) {}
     try {
-      const { data: entIds } = await getSB().from('entries').select('id').eq('user_id', uid).in('visibility', ['abierto','amigos']);
-      if (entIds?.length) {
-        const { data: ratings } = await getSB().from('text_ratings').select('rating').in('entry_id', entIds.map(e=>e.id));
+      const { data: entRows } = await getSB().from('entries').select('id, visibility').eq('user_id', uid);
+      const entIds = (entRows||[]).filter(e=>e.visibility!=='privado'&&e.visibility!=='ejercicio').map(e=>e.id);
+      if (entIds.length) {
+        const { data: ratings } = await getSB().from('text_ratings').select('rating').in('entry_id', entIds);
         if (ratings?.length) result.avgRating = Math.round(ratings.reduce((s,r)=>s+r.rating,0)/ratings.length*10)/10;
       }
     } catch(e) {}
     return result;
+  },
+  // Cuántos textos de cada autor puedo leer YO — apoyado enteramente en
+  // entries_select (RLS), no en una réplica de la lógica de amistad aquí.
+  // Misma razón que en getProfileStats: si alguno de los ids es mi propio
+  // perfil, descarto privado/ejercicio de lo que RLS me deja ver de mí
+  // mismo, para no contar borradores como "publicado".
+  getReadableTextCounts: async (authorIds) => {
+    if (!authorIds?.length) return {};
+    const { data, error } = await getSB().from('entries').select('user_id, visibility').in('user_id', authorIds);
+    if (error) throw error;
+    const counts = {};
+    (data||[]).forEach(e => {
+      if (e.visibility==='privado' || e.visibility==='ejercicio') return;
+      counts[e.user_id] = (counts[e.user_id]||0) + 1;
+    });
+    return counts;
+  },
+  // Seguidores y seguidos de CADA persona de una lista, en dos consultas
+  // (no una por fila). Mismo patrón que ya usa getProfileStats para un
+  // perfil individual — follows ya permite leer relaciones de terceros.
+  getFollowCountsForUsers: async (userIds) => {
+    if (!userIds?.length) return {};
+    const [followersRes, followingRes] = await Promise.all([
+      getSB().from('follows').select('following_id').in('following_id', userIds),
+      getSB().from('follows').select('follower_id').in('follower_id', userIds),
+    ]);
+    if (followersRes.error) throw followersRes.error;
+    if (followingRes.error) throw followingRes.error;
+    const counts = {};
+    userIds.forEach(id => { counts[id] = { followers: 0, following: 0 }; });
+    (followersRes.data||[]).forEach(f => { if (counts[f.following_id]) counts[f.following_id].followers++; });
+    (followingRes.data||[]).forEach(f => { if (counts[f.follower_id]) counts[f.follower_id].following++; });
+    return counts;
+  },
+  // Quién de esta lista ha escrito hoy — también apoyado en RLS: si no
+  // puedo ver ninguna entrada de hoy de alguien, no cuenta como "escribió
+  // hoy" para mi vista (coherente con no filtrar nunca por más de lo que
+  // de verdad puedo leer).
+  getTodayWriterIds: async (authorIds) => {
+    if (!authorIds?.length) return new Set();
+    const today = new Date().toISOString().slice(0,10);
+    const { data, error } = await getSB().from('entries').select('user_id').in('user_id', authorIds).eq('date', today);
+    if (error) throw error;
+    return new Set((data||[]).map(e => e.user_id));
   },
   followUser: async (followerId, followingId) => {
     const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
@@ -4785,20 +4872,38 @@ const DB = {
   },
   markChallengeCompleted: async (id, entryId) => {
     const { error } = await getSB().from('direct_challenges')
-      .update({ completed: true, seen: true, entry_id: entryId,
-        draft_html: null, draft_plain: null, draft_elapsed: null, draft_title: null, draft_updated_at: null }).eq('id', id);
+      .update({ completed: true, seen: true, entry_id: entryId, has_draft: false }).eq('id', id);
     if (error) throw error;
+    // El borrador (si lo había) ya no hace falta — el texto terminado vive en
+    // la entry. Se borra por higiene; si falla no es grave (política RLS lo
+    // sigue protegiendo igualmente para cualquiera que no sea el autor).
+    await getSB().from('direct_challenge_drafts').delete().eq('challenge_id', id).then(()=>{},()=>{});
+  },
+  // El contenido del borrador vive en su propia tabla, con su propia
+  // política — SOLO el destinatario del reto (quien escribe) puede leerla
+  // o tocarla. Quien envió el reto nunca tiene acceso a esto, ni con
+  // select('*') ni de ninguna otra forma: la fila de direct_challenges en
+  // sí ya no contiene el contenido, solo un booleano (has_draft) que dice
+  // si existe, sin revelar qué hay escrito.
+  getChallengeDraft: async (challengeId) => {
+    const { data, error } = await getSB().from('direct_challenge_drafts')
+      .select('*').eq('challenge_id', challengeId).maybeSingle();
+    if (error) { console.error('getChallengeDraft:', error.message); return null; }
+    return data;
   },
   saveChallengeDraft: async (id, draft) => {
     // Guardado a medias del contrarreloj — silencioso, sin bloquear a quien
     // escribe. draft_elapsed congela el tiempo consumido: el cronómetro se
     // calcula como 3600 - draft_elapsed al reabrir, y no avanza mientras
     // el reto está cerrado.
-    const { error } = await getSB().from('direct_challenges').update({
-      draft_html: draft.html, draft_plain: draft.plain, draft_elapsed: draft.elapsed,
-      draft_title: draft.title, draft_updated_at: new Date().toISOString(),
-    }).eq('id', id);
+    const { error } = await getSB().from('direct_challenge_drafts').upsert({
+      challenge_id: id, draft_html: draft.html, draft_plain: draft.plain,
+      draft_elapsed: draft.elapsed, draft_title: draft.title, updated_at: new Date().toISOString(),
+    });
     if (error) throw error;
+    // has_draft en direct_challenges es lo único que ve quien envió el
+    // reto — un booleano, nunca el contenido.
+    await getSB().from('direct_challenges').update({ has_draft: true }).eq('id', id).then(()=>{},()=>{});
   },
   shareBackChallenge: async (id) => {
     const { error } = await getSB().from('direct_challenges').update({ shared_back: true }).eq('id', id);
@@ -9216,6 +9321,14 @@ const S={
 
 const getExercises=(energy,mode='literatura')=>{const bank=mode==='guion'?SCREENPLAY_EXERCISE_BANK:EXERCISE_BANK;if(energy<=3)return bank.low;if(energy<=6)return bank.mid;return bank.high;};
 const pickExercise=(energy,usedIds=[],mode='literatura')=>{const bank=getExercises(energy,mode);const avail=bank.filter(e=>!usedIds.includes(e.id));return avail.length?avail[Math.floor(Math.random()*avail.length)]:bank[Math.floor(Math.random()*bank.length)]};
+// Busca un ejercicio por id en los tres rangos de energía combinados del
+// banco correspondiente — necesario para abrir un check concreto (p.ej.
+// desde un reto aceptado) sin depender de qué energía tenga seleccionada
+// quien lo abre ahora mismo.
+const findExerciseById=(id,mode='literatura')=>{
+  const bank=mode==='guion'?SCREENPLAY_EXERCISE_BANK:EXERCISE_BANK;
+  return bank.low.find(e=>e.id===id)||bank.mid.find(e=>e.id===id)||bank.high.find(e=>e.id===id)||null;
+};
 const PROJECT_TYPES=['Novela','Relato corto','Poemario','Ensayo','Microrrelatos','Película','Cortometraje','Diario creativo'];
 const MODES=[
   {id:'normal',name:'Normal',sym:'○',icon:'circle',color:'#44433F',short:'Edición libre',full:'Sin restricciones. Escribe y edita con total libertad.'},
@@ -9841,7 +9954,7 @@ const ApiKeyPanel=({onClose,userId})=>{
 };
 
 /* ─── LECCIÓN MODAL ──────────────────────────────── */
-const LeccionModal=({reto,onClose,onStart})=>{
+const LeccionModal=({reto,onClose,onStart,startLabel,onChallenge})=>{
   if(!reto)return null;
   const lines=(reto.teoria||'').split('\n').filter(l=>l.trim());
   return(
@@ -9865,12 +9978,97 @@ const LeccionModal=({reto,onClose,onStart})=>{
         </div>
         <div style={{borderTop:'1px solid '+BDR,padding:'12px 24px',flexShrink:0,display:'flex',justifyContent:'flex-end',gap:10,position:'relative',zIndex:1}}>
           <button onClick={onClose} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px 16px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{onStart?'Cerrar':'Entendido'}</button>
-          {onStart&&<button onClick={onStart} style={{background:reto.tipo==='Reto'?NARANJA:AZULMED,border:'none',borderRadius:9,padding:'10px 18px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{reto.tipo==='Reto'?'Iniciar reto →':'Empezar check →'}</button>}
+          {onChallenge&&reto.tipo==='Check'&&<button onClick={onChallenge} style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'1px solid rgba(241,90,36,0.35)',borderRadius:9,padding:'10px 16px',fontSize:13,fontWeight:600,color:NARANJA,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}><Icon name="target" size={14} color={NARANJA}/>Retar</button>}
+          {onStart&&<button onClick={onStart} style={{background:reto.tipo==='Reto'?NARANJA:AZULMED,border:'none',borderRadius:9,padding:'10px 18px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{startLabel||(reto.tipo==='Reto'?'Iniciar reto →':'Empezar check →')}</button>}
         </div>
       </div>
     </div>
   );
 };
+
+/* ─── FRIEND PICKER ─── buscador de destinatario restringido a amigos
+   reales (mutuo) — reutilizado por los tres tipos de reto, para que
+   "solo puedes retar a tus amigos" se cumpla siempre igual, en un único
+   sitio, en vez de tres copias que podrían desincronizarse. */
+const FriendPickerModal=({user,title,onClose,onPick})=>{
+  const [friends,setFriends]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [query,setQuery]=useState('');
+
+  useEffect(()=>{
+    DB.getMutualFriends(user.id).then(setFriends).catch(e=>console.error('getMutualFriends:',e)).finally(()=>setLoading(false));
+  },[user.id]);
+
+  const filtered=query.trim()
+    ?friends.filter(f=>(f.name||'').toLowerCase().includes(query.toLowerCase())||(f.username||'').toLowerCase().includes(query.toLowerCase()))
+    :friends;
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:260,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:400,maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
+        <div style={{padding:'16px 20px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+          <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>{title||'¿A quién retas?'}</div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+        </div>
+        <div style={{padding:'12px 20px',borderBottom:'1px solid '+BDR,flexShrink:0}}>
+          <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar entre tus amigos…"
+            style={{width:'100%',fontSize:13,padding:'8px 10px'}}/>
+        </div>
+        <div style={{flex:1,overflowY:'auto',padding:'8px 12px'}}>
+          {loading&&<div style={{textAlign:'center',padding:24,color:MUTED,fontSize:13}}>Cargando…</div>}
+          {!loading&&friends.length===0&&(
+            <div style={{textAlign:'center',padding:24,color:FAINT,fontSize:12.5,lineHeight:1.6}}>Todavía no tienes amigos mutuos — solo puedes retar a quien te sigue y sigues de vuelta.</div>
+          )}
+          {!loading&&friends.length>0&&filtered.length===0&&(
+            <div style={{textAlign:'center',padding:24,color:FAINT,fontSize:12.5}}>Sin resultados para «{query}».</div>
+          )}
+          {filtered.map(f=>(
+            <button key={f.id} onClick={()=>onPick(f)}
+              style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',borderRadius:9,padding:'9px 8px',cursor:'pointer',textAlign:'left'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(30,155,240,0.06)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              <UserAvatar user={f} size={34}/>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name}</div>
+                <div style={{fontSize:11,color:FAINT}}>@{f.username||'—'}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── CHALLENGE TYPE SELECTOR ─── al pulsar "Retar" con la persona ya
+   elegida, decide qué tipo de reto se envía. */
+const ChallengeTypeModal=({user,recipient,onClose,onPickContrarreloj,onPickCheck,onPickDueto})=>{
+  const OPTIONS=[
+    {k:'contrarreloj',icon:'timer',label:'Contrarreloj',desc:'5 palabras semilla, 1 hora de reloj',color:'#A82020',action:onPickContrarreloj},
+    {k:'check',icon:'pencil-simple',label:'Un check',desc:'Elige un ejercicio concreto de la biblioteca',color:AZUL,action:onPickCheck},
+    {k:'dueto',icon:'hands-clapping',label:'A cuatro manos',desc:'Escribid un relato entre los dos, por turnos',color:'#1B5FAA',action:onPickDueto},
+  ];
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:255,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:380,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',padding:'20px 20px 12px'}}>
+        <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:2}}>Retar a {recipient?.name}</div>
+        <div style={{fontSize:12,color:MUTED,marginBottom:16}}>¿Qué tipo de reto le mandas?</div>
+        {OPTIONS.map(o=>(
+          <button key={o.k} onClick={o.action}
+            style={{display:'flex',alignItems:'center',gap:12,width:'100%',background:'transparent',border:'1px solid '+BDR,borderRadius:10,padding:'12px 14px',marginBottom:8,cursor:'pointer',textAlign:'left'}}>
+            <div style={{width:34,height:34,borderRadius:9,background:o.color+'14',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Icon name={o.icon} size={16} color={o.color}/>
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:TXT}}>{o.label}</div>
+              <div style={{fontSize:11,color:FAINT,marginTop:1}}>{o.desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 
 /* ─── USER SELECT ────────────────────────────────── */
 // ── Aviso de fase de pruebas (SHOW_BETA_DISCLAIMER) ──────────────────
@@ -10473,7 +10671,10 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
       {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
       {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
-      {notifProfile&&<PublicProfile user={notifProfile} onClose={()=>setNotifProfile(null)}/>}
+      {notifProfile&&<PublicProfile user={notifProfile} onClose={()=>setNotifProfile(null)}
+        isFollowing={following.some(f=>f.id===notifProfile.id)}
+        onFollow={async(id)=>{if(onFollow)await onFollow(id,false);}}
+        onUnfollow={async(id)=>{if(onFollow)await onFollow(id,true);}}/>}
       {showCollectives&&!collectiveDetail&&<StartCollectiveModal user={user}
         onClose={()=>setShowCollectives(false)}
         onCreated={async(col,members)=>{
@@ -11186,6 +11387,11 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
   const [fbError,setFbError]=useState('');
   const [feedback,setFeedback]=useState('');
   const [showKey,setShowKey]=useState(false);
+  // Compartir de vuelta con quien te retó con este check — decisión propia
+  // del autor al terminar, igual que en Contrarreloj ("Devolver relato").
+  // Independiente de la visibilidad general que elijas arriba: puedes
+  // dejarlo privado para todos y aun así compartirlo solo con esa persona.
+  const [shareBack,setShareBack]=useState(false);
 
   const runFeedback=async()=>{
     if(!sessionData.text?.trim()){setFbState('no_text');return}
@@ -11205,7 +11411,8 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
   const save=()=>{
     const r={id:uid(),ts:Date.now(),date:today(),rating:null,notes:'',sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,wordsAdded:sessionData.wordsAdded??sessionData.wordCount??0,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',entryAlreadyInLibrary:alreadyInLibrary,
       saveToLibrary:isCollabContribution?false:saveToLib,visibility:isCollabContribution?null:(saveToLib?pubVis:'ejercicio'),chainStart:!isCollabContribution&&saveToLib&&chainStart,
-      entryId:sessionData.entryId||null,isCollabContribution};
+      entryId:sessionData.entryId||null,isCollabContribution,
+      shareBackChallenge:!!sessionData?.challengeFrom&&shareBack};
     onComplete(r);
   };
 
@@ -11306,6 +11513,17 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
                   </div>
                 </div>
               )}
+              {sessionData?.challengeFrom&&(
+                <div onClick={()=>setShareBack(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',background:'rgba(241,90,36,0.04)',borderRadius:10,cursor:'pointer',border:'0.5px solid '+(shareBack?'rgba(241,90,36,0.35)':BDR)}}>
+                  <div style={{width:18,height:18,borderRadius:4,border:'1.5px solid '+(shareBack?NARANJA:BDR),background:shareBack?NARANJA:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
+                    {shareBack&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:500,color:TXT}}>Devolver a @{sessionData.challengeFrom.username||sessionData.challengeFrom.name}</div>
+                    <div style={{fontSize:11,color:MUTED}}>Le avisa y le deja leer este check, aunque lo dejes privado para el resto</div>
+                  </div>
+                </div>
+              )}
               {!isCollabContribution&&saveToLib&&(
                 <div>
                   <div style={{fontSize:11,fontWeight:600,color:MUTED,marginBottom:6}}>¿Quién podrá verlo en tu biblioteca?</div>
@@ -11387,12 +11605,18 @@ const SessionCompleteModal=({summary,onClose,variant='session',note=''})=>{
 };
 
 /* ─── EXERCISE LIBRARY ───────────────────────────── */
-const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntry,filterType,onStartLesson,writingMode='literatura'})=>{
+const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntry,filterType,onStartLesson,writingMode='literatura',challengeRecipient=null})=>{
   const [showLibIntro,dismissLibIntro]=useFirstTime('biblioteca',user?.id,!filterType);
   // filterType: 'check' -> solo los 128 checks · 'reto' -> solo los 128 semanales · undefined/null -> los 256
+  // challengeRecipient: si viene, esto ya no es "elige qué vas a escribir tú"
+  // sino "elige qué reto le mandas a esta persona" — solo tiene sentido
+  // con checks diarios, así que fuerza filterType='check'.
   const [openLesson,setOpenLesson]=useState(null);
+  const [sendingChallenge,setSendingChallenge]=useState(false);
+  const [challengeSentMsg,setChallengeSentMsg]=useState('');
   const [theme]=useTheme();
   const doneIds=useMemo(()=>new Set(library.filter(e=>e.week_id||e.weekId).map(e=>e.week_id||e.weekId)),[library]);
+  const effectiveFilterType=challengeRecipient?'check':filterType;
 
   const allLessons=useMemo(()=>{
     const fromChecks=(writingMode==='guion'?SCREENPLAY_EXERCISE_BANK:EXERCISE_BANK).low.map(e=>({
@@ -11403,19 +11627,39 @@ const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntr
       id:r.id,familia:r.familia,titulo:r.titulo,desc:r.desc,mode:r.mode,
       goal:r.goal,teoria:r.teoria,tipo:'Reto',
     }));
-    if(filterType==='check')return fromChecks;
-    if(filterType==='reto')return fromRetos;
+    if(effectiveFilterType==='check')return fromChecks;
+    if(effectiveFilterType==='reto')return fromRetos;
     return [...fromChecks,...fromRetos];
-  },[filterType]);
+  },[effectiveFilterType]);
 
-  const screenTitle=filterType==='check'?'Checks diarios':filterType==='reto'?'Retos semanales':'Lecciones de escritura';
+  const screenTitle=challengeRecipient?('Retar a @'+(challengeRecipient.username||challengeRecipient.name)+' con un check'):effectiveFilterType==='check'?'Checks diarios':effectiveFilterType==='reto'?'Retos semanales':'Lecciones de escritura';
+
+  const sendCheckChallenge=async(lesson)=>{
+    if(sendingChallenge)return;
+    setSendingChallenge(true);
+    try{
+      await DB.sendChallenge({
+        from_user_id:user.id,from_name:user.name,from_username:user.username||user.name,
+        to_user_id:challengeRecipient.id,
+        challenge_type:'check',
+        exercise_id:lesson.id,exercise_title:lesson.titulo,exercise_mode:writingMode,
+        words:[],message:null,min_words:null,
+      });
+      setChallengeSentMsg('¡Reto enviado a @'+(challengeRecipient.username||challengeRecipient.name)+'!');
+      setOpenLesson(null);
+      setTimeout(()=>onClose(),1500);
+    }catch(e){console.error('sendCheckChallenge:',e);setChallengeSentMsg('No se pudo enviar — inténtalo de nuevo.');setSendingChallenge(false);}
+  };
 
   const MODE_LABEL={normal:'Normal',rio:'Río',limite:'Límite',tunel:'Túnel',presion:'Presión'};
+  // Retar "al revés": viendo el detalle de un ejercicio (sin estar ya en
+  // modo challengeRecipient), elegir un amigo y mandárselo directamente.
+  const [pickingFriendFor,setPickingFriendFor]=useState(null);
 
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.45)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>{showLibIntro&&<ContextualPopup id='biblioteca' onClose={dismissLibIntro}/>}
       {openLesson&&<LeccionModal reto={openLesson} onClose={()=>setOpenLesson(null)}
-        onStart={onStartLesson?()=>{
+        onStart={challengeRecipient?(()=>sendCheckChallenge(openLesson)):(onStartLesson?()=>{
           const lesson=openLesson;
           setOpenLesson(null);
           onClose();
@@ -11424,7 +11668,28 @@ const ExerciseLibrary=({user,library,reflections,onDelete,onClose,setReadingEntr
           }else{
             onStartLesson({type:'reto',writingMode,reto:{id:lesson.id,titulo:lesson.titulo,familia:lesson.familia,goal:lesson.goal,mode:lesson.mode,teoria:lesson.teoria},weekId:lesson.id});
           }
-        }:null}/>}
+        }:null)}
+        startLabel={challengeRecipient?(sendingChallenge?'Enviando…':'Enviar reto →'):undefined}
+        onChallenge={challengeRecipient?null:(()=>setPickingFriendFor(openLesson))}/>}
+      {pickingFriendFor&&<FriendPickerModal user={user} title={'Retar con «'+pickingFriendFor.titulo+'»'}
+        onClose={()=>setPickingFriendFor(null)}
+        onPick={async(friend)=>{
+          const lesson=pickingFriendFor;
+          setPickingFriendFor(null);
+          try{
+            await DB.sendChallenge({
+              from_user_id:user.id,from_name:user.name,from_username:user.username||user.name,
+              to_user_id:friend.id,
+              challenge_type:'check',
+              exercise_id:lesson.id,exercise_title:lesson.titulo,exercise_mode:writingMode,
+              words:[],message:null,min_words:null,
+            });
+            setOpenLesson(null);
+            setChallengeSentMsg('¡Reto enviado a @'+(friend.username||friend.name)+'!');
+            setTimeout(()=>setChallengeSentMsg(''),2500);
+          }catch(e){console.error('retar al revés:',e);setChallengeSentMsg('No se pudo enviar — inténtalo de nuevo.');setTimeout(()=>setChallengeSentMsg(''),2500);}
+        }}/>}
+      {challengeSentMsg&&<div style={{position:'fixed',bottom:20,left:'50%',transform:'translateX(-50%)',background:NAVY,color:'#fff',padding:'10px 18px',borderRadius:9,fontSize:13,fontWeight:500,zIndex:300,boxShadow:'0 8px 24px rgba(0,0,0,0.25)'}}>{challengeSentMsg}</div>}
       <div className="fi" style={{background:PAGE_BG,width:'100%',maxWidth:900,maxHeight:'88vh',borderRadius:'16px 16px 0 0',overflow:'hidden',display:'flex',flexDirection:'column',boxShadow:'0 -8px 50px -8px rgba(10,27,61,0.25)'}}>
         <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,position:'relative',overflow:'hidden'}}>
           <Signo char="¶" size={80} top={-22} left={150} color="azul"/>
@@ -11918,7 +12183,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const si=siL();
   const TBTN=on=>({background:on?'rgba(0,0,0,0.08)':'transparent',border:'none',borderRadius:5,cursor:'pointer',color:on?TXT:MUTED,display:'flex',alignItems:'center',justifyContent:'center',width:26,height:26,flexShrink:0});
   const handleFinishDay=async()=>{
-    const finishPayload={sk,title:effectiveTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null};
+    const finishPayload={sk,title:effectiveTitle,wordCount:wc,elapsed,mode:ab,xp:sessionXP,text:edRef.current?.innerText||'',entryId:entryIdRef.current,wordsAdded:Math.max(0,wc-initialWcRef.current),exerciseTitle:customExercise?.title||customReto?.titulo||customReto?.title||null,exerciseDesc:customExercise?.desc||customReto?.desc||null,challengeFrom:sessionConfig.challengeFrom||null};
     if(started){
       // Texto compartido: comprobamos si alguien más ha guardado mientras lo teníamos
       // abierto, para no sobrescribirlo a lo bruto sin avisar (no hay tiempo real, así
@@ -12159,36 +12424,56 @@ const wordUsed=(text,word)=>{
 
 const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='literatura'})=>{
   const [words]=useState(()=>challenge?.words||pick5Words());
-  const hasDraft=!!(challenge?.draft_html||challenge?.draft_plain);
-  // Bloques para modo guión — si hay borrador guardado en modo guion, viene
-  // como JSON dentro de draft_html (mismo campo que el modo literario usa
-  // para HTML libre; un reto es de un modo u otro, nunca los dos a la vez).
-  const [scBlocks,setScBlocks]=useState(()=>{
-    if(hasDraft&&writingMode==='guion'){
-      try{const parsed=JSON.parse(challenge.draft_html);if(Array.isArray(parsed)&&parsed.length)return parsed;}catch(e){}
-    }
-    return[{id:uid(),type:'heading',text:''},{id:uid(),type:'action',text:''}];
-  });
+  // El borrador ya NO viaja embebido en `challenge` — se carga aparte, de
+  // su propia tabla protegida (solo el destinatario del reto puede leerla;
+  // ver auditoría de privacidad). Antes vivía en columnas de
+  // direct_challenges, una fila que el remitente del reto también podía
+  // leer entera — eso dejaba el texto sin terminar de alguien visible
+  // para quien le retó, sin que esa persona lo hubiera compartido nunca.
+  const [scBlocks,setScBlocks]=useState(()=>[{id:uid(),type:'heading',text:''},{id:uid(),type:'action',text:''}]);
   const scRefs=useRef({});
   const scFocusRef=useRef(null);
   const [scActiveType,setScActiveType]=useState('heading');
   const insertVoiceCuento=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
-  const [title,setTitle]=useState(challenge?.draft_title||(challenge?('Para @'+(challenge.from_username||challenge.from_name)):''));
+  const [title,setTitle]=useState(challenge?('Para @'+(challenge.from_username||challenge.from_name)):'');
   const [sharingBack,setSharingBack]=useState(false);
-  const [text,setText]=useState(hasDraft&&writingMode!=='guion'?(challenge.draft_plain||''):'');
-  const [chars,setChars]=useState(hasDraft&&writingMode!=='guion'?(challenge.draft_plain||'').length:0);
-  const [timer,setTimer]=useState(hasDraft?Math.max(0,3600-(challenge.draft_elapsed||0)):3600); // 1 hour
+  const [text,setText]=useState('');
+  const [chars,setChars]=useState(0);
+  const [timer,setTimer]=useState(3600); // 1 hour
   const [running,setRunning]=useState(false); // nunca arranca solo al reabrir — solo con el siguiente input, igual que la primera vez
-  const [started,setStarted]=useState(hasDraft);
+  const [started,setStarted]=useState(false);
   const [published,setPublished]=useState(false);
   const [publishedEntry,setPublishedEntry]=useState(null);
-  const [elapsed,setElapsed]=useState(hasDraft?(challenge.draft_elapsed||0):0);
+  const [elapsed,setElapsed]=useState(0);
   const [saveStatus,setSaveStatus]=useState('idle');
   const [draftSavedAt,setDraftSavedAt]=useState(null); // solo para el indicador discreto de "guardado"
   const [showMinWordsWarning,setShowMinWordsWarning]=useState(false); // aviso "soft" al publicar por debajo del mínimo
   const edRef=useRef(null);
   const timerRef=useRef();
   const elapsedRef=useRef();
+
+  // Cargar el borrador, si existe — asíncrono a propósito: vive en su
+  // propia tabla, no en el objeto challenge, así que hace falta pedirlo.
+  useEffect(()=>{
+    if(!challenge?.id)return;
+    DB.getChallengeDraft(challenge.id).then(draft=>{
+      if(!draft)return;
+      if(writingMode==='guion'){
+        try{
+          const parsed=JSON.parse(draft.draft_html);
+          if(Array.isArray(parsed)&&parsed.length)setScBlocks(parsed);
+        }catch(e){}
+      }else{
+        setText(draft.draft_plain||'');
+        setChars((draft.draft_plain||'').length);
+        if(edRef.current&&draft.draft_html)edRef.current.innerHTML=draft.draft_html;
+      }
+      if(draft.draft_title)setTitle(draft.draft_title);
+      setElapsed(draft.draft_elapsed||0);
+      setTimer(Math.max(0,3600-(draft.draft_elapsed||0)));
+      setStarted(true);
+    }).catch(e=>console.error('getChallengeDraft:',e));
+  },[challenge?.id]);
 
   const usedWords=words.map(w=>wordUsed(text,w));
   const allUsed=usedWords.every(Boolean);
@@ -12212,15 +12497,6 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
     }
     return()=>{clearInterval(timerRef.current);clearInterval(elapsedRef.current);};
   },[running]);
-
-  // Cargar el HTML del borrador en el editor al montar (modo literario —
-  // el modo guion ya se reconstruyó arriba directamente en scBlocks). Solo
-  // una vez: el editor vive en el DOM, no controlado por React tras esto.
-  useEffect(()=>{
-    if(hasDraft&&writingMode!=='guion'&&edRef.current&&challenge.draft_html){
-      edRef.current.innerHTML=challenge.draft_html;
-    }
-  },[]);
 
   const handleInput=()=>{
     const el=edRef.current;if(!el)return;
@@ -12590,11 +12866,12 @@ const EditChallengeModal=({user,challenge,onClose,onSaved})=>{
 };
 
 /* ─── SEND CHALLENGE MODAL ───────────────────────── */
-const SendChallengeModal=({user,onClose})=>{
+const SendChallengeModal=({user,onClose,presetRecipient=null})=>{
   const [words,setWords]=useState(['','','','','']);
   const [query,setQuery]=useState('');
+  const [friends,setFriends]=useState([]);
   const [results,setResults]=useState([]);
-  const [recipient,setRecipient]=useState(null);
+  const [recipient,setRecipient]=useState(presetRecipient);
   const [message,setMessage]=useState('');
   const [hasMinWords,setHasMinWords]=useState(false);
   const [minWords,setMinWords]=useState(300);
@@ -12609,14 +12886,18 @@ const SendChallengeModal=({user,onClose})=>{
     setWords(picked);
   };
 
+  // Solo se puede retar a amigos (seguimiento mutuo) — se cargan una vez y
+  // se filtran en el cliente, en vez de buscar en toda la base de usuarios
+  // como hacía antes con searchByUsername.
+  useEffect(()=>{
+    DB.getMutualFriends(user.id).then(setFriends).catch(e=>console.error('getMutualFriends:',e));
+  },[user.id]);
+
   useEffect(()=>{
     if(query.length<2){setResults([]);return;}
-    const t=setTimeout(async()=>{
-      try{const r=await DB.searchByUsername(query);setResults(r.filter(u=>u.id!==user.id));}
-      catch{}
-    },300);
-    return()=>clearTimeout(t);
-  },[query]);
+    const q=query.toLowerCase();
+    setResults(friends.filter(f=>(f.name||'').toLowerCase().includes(q)||(f.username||'').toLowerCase().includes(q)));
+  },[query,friends]);
 
   const allWordsOk=words.every(w=>w.trim().length>=2);
   const canSend=allWordsOk&&recipient&&!sending;
@@ -12683,8 +12964,8 @@ const SendChallengeModal=({user,onClose})=>{
             ):(
               <div style={{position:'relative'}}>
                 <input ref={searchRef} type="text" value={query} onChange={e=>setQuery(e.target.value)}
-                  placeholder="@nombre_de_usuario" style={{width:'100%',paddingLeft:28}}/>
-                <span style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)',fontSize:13,color:MUTED,pointerEvents:'none'}}>@</span>
+                  placeholder="Buscar entre tus amigos…" style={{width:'100%',paddingLeft:28}}/>
+                <Icon name="magnifying-glass" size={13} color={MUTED} style={{position:'absolute',left:9,top:'50%',transform:'translateY(-50%)',pointerEvents:'none'}}/>
                 {results.length>0&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,boxShadow:'0 12px 30px -8px rgba(10,27,61,0.25)',overflow:'hidden',zIndex:10}}>
                   {results.map(r=>(
                     <button key={r.id} onClick={()=>{setRecipient(r);setQuery('');setResults([]);}}
@@ -12694,7 +12975,8 @@ const SendChallengeModal=({user,onClose})=>{
                     </button>
                   ))}
                 </div>}
-                {query.length>=2&&results.length===0&&<div style={{fontSize:11,color:FAINT,marginTop:5}}>No se encontró ningún usuario con ese nombre</div>}
+                {query.length>=2&&results.length===0&&<div style={{fontSize:11,color:FAINT,marginTop:5}}>Ninguno de tus amigos coincide con «{query}»</div>}
+                {query.length<2&&friends.length===0&&<div style={{fontSize:11,color:FAINT,marginTop:5}}>Solo puedes retar a amigos — todavía no tienes ninguno mutuo.</div>}
               </div>
             )}
           </div>
@@ -12815,10 +13097,12 @@ const SharedBackBanner=({user,refreshKey=0})=>{
         <div style={{flex:1}}>
           <div style={{display:'flex',alignItems:'center',gap:6,fontSize:10,fontWeight:500,color:'rgba(255,255,255,0.4)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4}}>
             <Icon name="check-circle" size={12} color="#1E9BF0"/>
-            Tu contrarreloj está listo
+            {ch.challenge_type==='check'?'Tu reto está listo':'Tu contrarreloj está listo'}
           </div>
           <div style={{fontSize:13,color:'rgba(255,255,255,0.85)'}}>
-            Tu amigo ha terminado y compartido el cuento contrarreloj que le retaste a escribir.
+            {ch.challenge_type==='check'
+              ?('Tu amigo ha terminado y compartido «'+(ch.exercise_title||'el check')+'» que le retaste a escribir.')
+              :'Tu amigo ha terminado y compartido el cuento contrarreloj que le retaste a escribir.'}
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
@@ -12843,7 +13127,7 @@ const CollabInviteBanner=({user,onAccepted,refreshKey=0})=>{
       const entryIds=[...new Set(raw.map(i=>i.entry_id))];
       const ownerIds=[...new Set(raw.map(i=>i.owner_id))];
       const [entries,owners]=await Promise.all([
-        DB.getEntriesByIds(entryIds).catch(e=>{console.error('CollabInviteBanner: getEntriesByIds falló:',e?.message||e);return[];}),
+        DB.getPendingInviteTitles(entryIds).catch(e=>{console.error('CollabInviteBanner: getPendingInviteTitles falló:',e?.message||e);return[];}),
         DB.getProfilesByIds(ownerIds).catch(e=>{console.error('CollabInviteBanner: getProfilesByIds falló:',e?.message||e);return[];}),
       ]);
       if(entries.length<entryIds.length){
@@ -13908,7 +14192,7 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
           {/* Tab: Enviados */}
           {tab==='sent'&&!loading&&items.length===0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>No hay retos aquí todavía.</div>}
           {tab==='sent'&&items.map(ch=>{
-            const hasDraftInProgress=!!(ch.draft_plain||ch.draft_html);
+            const hasDraftInProgress=!!ch.has_draft;
             return(
             <div key={ch.id} style={{background:CARD_BG,border:'1px solid '+(ch.completed?'rgba(30,155,240,0.3)':BDR),borderRadius:11,padding:'12px 16px'}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
@@ -13919,15 +14203,21 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
                 {!ch.completed&&!hasDraftInProgress&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Pendiente</span>}
               </div>
               <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
-                {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
+                {ch.challenge_type==='check'
+                  ?<span style={{fontSize:12.5,color:TXT,fontWeight:500}}>«{ch.exercise_title}»</span>
+                  :(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
               </div>
               {ch.message&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginTop:6}}>"{ch.message}"</div>}
               <div style={{display:'flex',alignItems:'center',marginTop:8}}>
                 <div style={{fontSize:10,color:FAINT}}>{fmtDate(ch.created_at?.slice?.(0,10)||'')}</div>
                 <div style={{flex:1}}/>
-                {/* Pendiente y sin empezar todavía: se puede editar */}
-                {!ch.completed&&!hasDraftInProgress&&(
+                {/* Pendiente y sin empezar todavía: se puede editar (solo Contrarreloj — un
+                    check retado no tiene palabras/mínimo que editar de esta forma) */}
+                {!ch.completed&&!hasDraftInProgress&&ch.challenge_type!=='check'&&(
                   <button onClick={()=>setEditingChallenge(ch)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'5px 12px',fontSize:11,fontWeight:600,color:MUTED,cursor:'pointer'}}>Editar</button>
+                )}
+                {!ch.completed&&!hasDraftInProgress&&ch.challenge_type==='check'&&(
+                  <div style={{fontSize:10,color:FAINT,fontStyle:'italic'}}>Esperando a que lo haga</div>
                 )}
                 {/* Ya en marcha: no se puede editar — cambiar las palabras ahora dejaría sin sentido lo que ya ha escrito */}
                 {!ch.completed&&hasDraftInProgress&&(
@@ -13954,16 +14244,20 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
               {received.map(ch=>(
                 <div key={ch.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:11,padding:'12px 16px'}}>
                   <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-                    <Icon name="timer" size={14} color={NARANJA}/>
+                    <Icon name={ch.challenge_type==='check'?'pencil-simple':'timer'} size={14} color={ch.challenge_type==='check'?AZUL:NARANJA}/>
                     <div style={{fontSize:11,fontWeight:500,color:TXT}}>← {ch.from_name||ch.from_username}</div>
                     {ch.seen&&<span style={{fontSize:10,color:MUTED,background:'rgba(0,0,0,0.05)',borderRadius:10,padding:'2px 8px'}}>Guardado</span>}
                   </div>
-                  <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:8}}>
-                    {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
-                  </div>
+                  {ch.challenge_type==='check'?(
+                    <div style={{fontSize:12.5,color:TXT,fontWeight:500,marginBottom:8}}>«{ch.exercise_title}»</div>
+                  ):(
+                    <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:8}}>
+                      {(ch.words||[]).map((w,i)=><span key={i} style={{background:'rgba(168,32,32,0.07)',border:'0.5px solid rgba(168,32,32,0.2)',borderRadius:20,padding:'2px 9px',fontSize:11,color:'#A82020'}}>{w}</span>)}
+                    </div>
+                  )}
                   {ch.message&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"{ch.message}"</div>}
                   <div style={{display:'flex',gap:8}}>
-                    <button onClick={()=>onAcceptChallenge(ch)} style={{background:NARANJA,border:'none',borderRadius:7,padding:'6px 14px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer'}}>Hacerlo ahora →</button>
+                    <button onClick={()=>onAcceptChallenge(ch)} style={{background:ch.challenge_type==='check'?AZUL:NARANJA,border:'none',borderRadius:7,padding:'6px 14px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer'}}>Hacerlo ahora →</button>
                     <button onClick={()=>declineChallenge(ch.id)} disabled={responding==='ch_'+ch.id} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'6px 12px',fontSize:11,color:MUTED,cursor:'pointer'}}>Ignorar</button>
                   </div>
                 </div>
@@ -14028,9 +14322,11 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
 };
 
 /* ─── PUBLIC PROFILE ─────────────────────────────── */
-const PublicProfile=({user,onClose,isFollowing=false,onUnfollow,library,reflections})=>{
+const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library,reflections})=>{
   const [unfollowing,setUnfollowing]=useState(false);
+  const [following,setFollowing]=useState(false);
   const [copied,setCopied]=useState(false);
+  const [confirmUnfollow,setConfirmUnfollow]=useState(false);
   const [stats,setStats]=useState(null);
   const [loading,setLoading]=useState(true);
   const [showTexts,setShowTexts]=useState(false);
@@ -14130,22 +14426,53 @@ const PublicProfile=({user,onClose,isFollowing=false,onUnfollow,library,reflecti
         )}
         {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
 
-        {/* Acciones: copiar enlace + (si procede) dejar de seguir */}
+        {/* Acciones: seguir/dejar de seguir es lo primero — copiar enlace queda
+            como opción secundaria, más discreta. */}
         <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:10}}>
-          <div style={{display:'flex',gap:8}}>
-            <button onClick={()=>{navigator.clipboard?.writeText(profileUrl).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1800);});}}
-              style={{flex:1,display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:ADVANCE_BG,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer'}}>
-              <Icon name={copied?'check':'link-simple'} size={15} color={ADVANCE_TXT}/>{copied?'¡Enlace copiado!':'Copiar link'}
+          {isFollowing&&onUnfollow&&(
+            <button onClick={()=>setConfirmUnfollow(true)}
+              style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:MUTED,cursor:'pointer'}}>
+              <Icon name="user-minus" size={15} color={MUTED}/>Dejar de seguir
             </button>
-            {isFollowing&&onUnfollow&&(
-              <button onClick={async()=>{if(unfollowing)return;setUnfollowing(true);try{await onUnfollow(user.id);onClose();}catch(e){setUnfollowing(false);}}}
-                style={{flex:1,display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:MUTED,cursor:unfollowing?'wait':'pointer'}}>
-                <Icon name="user-minus" size={15} color={MUTED}/>{unfollowing?'…':'Dejar de seguir'}
-              </button>
-            )}
-          </div>
+          )}
+          {!isFollowing&&onFollow&&(
+            <button onClick={async()=>{if(following)return;setFollowing(true);try{await onFollow(user.id);}finally{setFollowing(false);}}}
+              style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:ADVANCE_BG,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:ADVANCE_TXT,cursor:following?'wait':'pointer'}}>
+              <Icon name="user-plus" size={15} color={ADVANCE_TXT}/>{following?'…':'Seguir'}
+            </button>
+          )}
+          <button onClick={()=>{navigator.clipboard?.writeText(profileUrl).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1800);});}}
+            style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:'transparent',border:'none',borderRadius:9,padding:'6px',fontSize:12.5,fontWeight:500,color:FAINT,cursor:'pointer'}}>
+            <Icon name={copied?'check':'link-simple'} size={13} color={FAINT}/>{copied?'¡Enlace copiado!':'Copiar link'}
+          </button>
           <button onClick={onClose} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'9px',fontSize:13,color:MUTED,cursor:'pointer'}}>Cerrar</button>
         </div>
+
+        {/* Confirmación antes de dejar de seguir de verdad */}
+        {confirmUnfollow&&(
+          <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+            onClick={e=>{if(e.target===e.currentTarget)setConfirmUnfollow(false);}}>
+            <div style={{background:CARD_BG,borderRadius:14,padding:'22px 24px',maxWidth:320,width:'100%',textAlign:'center'}}>
+              <div style={{fontSize:14,color:TXT,lineHeight:1.5,marginBottom:20}}>
+                ¿Dejar de seguir a <strong>{user.name||user.username}</strong>?
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>setConfirmUnfollow(false)}
+                  style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer'}}>
+                  Cancelar
+                </button>
+                <button onClick={async()=>{
+                    if(unfollowing)return;setUnfollowing(true);
+                    try{await onUnfollow(user.id);setConfirmUnfollow(false);onClose();}
+                    catch(e){setUnfollowing(false);}
+                  }}
+                  style={{flex:1,background:'#A82020',border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:unfollowing?'wait':'pointer'}}>
+                  {unfollowing?'…':'Dejar de seguir'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -14587,7 +14914,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
       const entryIds=[...new Set(invites.map(i=>i.entry_id))];
       const ownerIds=[...new Set(invites.map(i=>i.owner_id))];
       const [entries,owners]=await Promise.all([
-        DB.getEntriesByIds(entryIds).catch(e=>{console.error('loadPendingInvites: getEntriesByIds falló:',e?.message||e);return[];}),
+        DB.getPendingInviteTitles(entryIds).catch(e=>{console.error('loadPendingInvites: getPendingInviteTitles falló:',e?.message||e);return[];}),
         DB.getProfilesByIds(ownerIds).catch(e=>{console.error('loadPendingInvites: getProfilesByIds falló:',e?.message||e);return[];}),
       ]);
       if(entries.length<entryIds.length){
@@ -15230,6 +15557,30 @@ const AmigosScreen=({user,onClose})=>{
   const [searching,setSearching]=useState(false);
   const [viewingProfile,setViewingProfile]=useState(null);
   const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState('seguidos'); // 'seguidos' | 'seguidores' | 'descubrir'
+  const [challengeRecipient,setChallengeRecipient]=useState(null); // persona elegida al pulsar "Retar"
+  const [challengeStep,setChallengeStep]=useState(null); // null | 'type' | 'contrarreloj' | 'check' | 'dueto'
+  // Datos extra para la tabla nueva — nunca calculados replicando la
+  // lógica de amistad aquí: siempre pedidos a funciones que se apoyan en
+  // RLS (entries_select) para que el número sea exactamente lo que cada
+  // fila puede leer de verdad, ni más ni menos.
+  const [textCounts,setTextCounts]=useState({});     // {userId: nº de textos que YO puedo leer}
+  const [followCounts,setFollowCounts]=useState({}); // {userId: {followers,following}}
+  const [todayWriters,setTodayWriters]=useState(new Set());
+
+  const loadExtras=async(ids)=>{
+    if(!ids?.length)return;
+    try{
+      const[counts,fCounts,writers]=await Promise.all([
+        DB.getReadableTextCounts(ids),
+        DB.getFollowCountsForUsers(ids),
+        DB.getTodayWriterIds(ids),
+      ]);
+      setTextCounts(prev=>({...prev,...counts}));
+      setFollowCounts(prev=>({...prev,...fCounts}));
+      setTodayWriters(prev=>new Set([...prev,...writers]));
+    }catch(e){console.error('loadExtras:',e);}
+  };
 
   useEffect(()=>{
     const init=async()=>{
@@ -15247,6 +15598,8 @@ const AmigosScreen=({user,onClose})=>{
         setFollowingIds(new Set(fwingObjs.map(f=>f.id)));
         setFollowerIds(new Set(fwersObjs.map(f=>f.id)));
         setTotalUsers(total);
+        const allIds=[...new Set([...fwingObjs.map(f=>f.id),...fwersObjs.map(f=>f.id)])];
+        await loadExtras(allIds);
       }catch(e){console.error(e);}
       setLoading(false);
     };
@@ -15257,8 +15610,12 @@ const AmigosScreen=({user,onClose})=>{
     if(query.length<2){setSearchResults([]);return;}
     const t=setTimeout(async()=>{
       setSearching(true);
-      try{const r=await DB.searchUsers(query);setSearchResults(r.filter(u=>u.id!==user.id));}
-      catch(e){console.error(e);}
+      try{
+        const r=await DB.searchUsers(query);
+        const filtered=r.filter(u=>u.id!==user.id);
+        setSearchResults(filtered);
+        await loadExtras(filtered.map(u=>u.id));
+      }catch(e){console.error(e);}
       setSearching(false);
     },300);
     return()=>clearTimeout(t);
@@ -15274,143 +15631,164 @@ const AmigosScreen=({user,onClose})=>{
         await DB.followUser(user.id,targetId);
         setFollowingIds(prev=>new Set([...prev,targetId]));
         if(targetUser)setFollowing(prev=>prev.find(f=>f.id===targetId)?prev:[...prev,{...targetUser,id:targetId}]);
+        loadExtras([targetId]);
       }
     }catch(e){console.error('follow error:',e);}
   };
 
   const isFriend=id=>followingIds.has(id)&&followerIds.has(id);
 
-  const PersonRow=({u,showUnfollow=false,showFollowBack=false})=>{
+  // Agregados de cabecera — amigos = seguimiento mutuo real, coherente con
+  // el resto de la app (nunca "solo le sigo" ni "solo me sigue").
+  const amigosList=following.filter(f=>isFriend(f.id));
+  const amigosCount=amigosList.length;
+  const amigosWords=amigosList.reduce((s,f)=>s+(f.total_words||0),0);
+  const wroteTodayCount=amigosList.filter(f=>todayWriters.has(f.id)).length;
+  const fmtK=n=>n>=1000?Math.round(n/1000)+'k':String(n);
+
+  const listFor=tab==='seguidos'?following:tab==='seguidores'?followers:searchResults;
+  const sortedList=[...listFor].sort((a,b)=>(textCounts[b.id]||0)-(textCounts[a.id]||0));
+
+  const Row=({u,rank})=>{
     const friend=isFriend(u.id);
     const isFollowing=followingIds.has(u.id);
+    const texts=textCounts[u.id]||0;
+    const canRead=texts>0;
+    const fc=followCounts[u.id]||{followers:0,following:0};
     return(
-      <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:'0.5px solid '+BDR}}>
-        <UserAvatar user={u} size={36}/>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:'flex',alignItems:'center',gap:6}}>
-            <span style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.name}</span>
-            {friend&&<span style={{fontSize:9,fontWeight:700,color:AZUL,background:'rgba(30,155,240,0.1)',border:'0.5px solid rgba(30,155,240,0.3)',borderRadius:4,padding:'2px 5px',letterSpacing:'.06em',textTransform:'uppercase',flexShrink:0}}>Amigo</span>}
+      <div style={{display:'grid',gridTemplateColumns:'28px 1fr 76px auto',gap:12,alignItems:'center',padding:'12px 20px',borderBottom:'1px solid '+BDR}}>
+        <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:15,color:rank<=3?NARANJA:'rgba(10,27,61,0.28)',textAlign:'center'}}>{rank}</div>
+        <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0,cursor:'pointer'}} onClick={()=>setViewingProfile(u)}>
+          <UserAvatar user={u} size={38}/>
+          <div style={{minWidth:0}}>
+            <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:600,fontSize:14.5,display:'flex',alignItems:'baseline',gap:6,whiteSpace:'nowrap'}}>
+              <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{u.name}</span>
+              <span style={{fontFamily:"'Source Sans 3',sans-serif",fontWeight:500,fontSize:11,color:FAINT}}>@{u.username||'—'}</span>
+            </div>
+            <div style={{fontSize:10.5,color:FAINT,marginTop:2}}>{fc.followers.toLocaleString()} seguidores <span style={{opacity:0.4}}>|</span> {fc.following.toLocaleString()} seguidos</div>
           </div>
-          <div style={{fontSize:11,color:FAINT}}>@{u.username||'—'}</div>
         </div>
-        <div style={{display:'flex',gap:5,flexShrink:0}}>
-          <button onClick={()=>setViewingProfile(u)}
-            style={{background:'rgba(30,155,240,0.07)',border:'1px solid rgba(30,155,240,0.2)',borderRadius:6,padding:'4px 9px',fontSize:10,fontWeight:600,color:AZUL,cursor:'pointer'}}>
-            Ver
+        <button onClick={()=>canRead&&setViewingProfile(u)} disabled={!canRead}
+          style={{display:'flex',alignItems:'center',gap:5,fontSize:13,fontWeight:600,color:canRead?'#1B5FAA':'rgba(10,27,61,0.3)',background:'transparent',border:'none',cursor:canRead?'pointer':'default',padding:0}}>
+          <Icon name={canRead?'book-open':'lock-simple'} size={13} color={canRead?'#1B5FAA':'rgba(10,27,61,0.3)'}/>
+          {canRead?texts:'—'}
+        </button>
+        <div style={{display:'flex',alignItems:'center',gap:5,justifySelf:'end'}}>
+          <button onClick={()=>!isFollowing&&handleFollow(u.id,false,u)} disabled={isFollowing}
+            style={{fontSize:10.5,fontWeight:600,padding:'6px 10px',borderRadius:7,border:'1px solid '+BDR,color:isFollowing?'rgba(10,27,61,0.25)':MUTED,background:CARD_BG,cursor:isFollowing?'default':'pointer',opacity:isFollowing?0.5:1,whiteSpace:'nowrap'}}>
+            Seguir
           </button>
-          {showFollowBack&&!isFollowing&&(
-            <button onClick={()=>handleFollow(u.id,false,u)}
-              style={{background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.25)',borderRadius:6,padding:'4px 9px',fontSize:10,fontWeight:600,color:AZUL,cursor:'pointer'}}>
-              Seguir
-            </button>
-          )}
+          <button onClick={()=>isFollowing&&handleFollow(u.id,true)} disabled={!isFollowing}
+            style={{fontSize:10.5,fontWeight:600,padding:'6px 10px',borderRadius:7,border:'1px solid '+BDR,color:!isFollowing?'rgba(10,27,61,0.25)':MUTED,background:CARD_BG,cursor:!isFollowing?'default':'pointer',opacity:!isFollowing?0.5:1,whiteSpace:'nowrap'}}>
+            Dejar de seguir
+          </button>
+          <button onClick={()=>{setChallengeRecipient(u);setChallengeStep('type');}}
+            style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,fontWeight:600,padding:'6px 10px',borderRadius:7,border:'1px solid rgba(241,90,36,0.32)',color:NARANJA,background:CARD_BG,cursor:'pointer',whiteSpace:'nowrap'}}>
+            <Icon name="target" size={12} color={NARANJA}/>Retar
+          </button>
         </div>
       </div>
     );
   };
 
-  const ColEmpty=({msg})=>(
-    <div style={{textAlign:'center',padding:'32px 12px',color:FAINT,fontSize:12,lineHeight:1.6}}>{msg}</div>
-  );
-
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.45)',zIndex:200,display:'flex',alignItems:'stretch',justifyContent:'center'}}>
-      <div style={{background:PAGE_BG,width:'100%',maxWidth:860,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div style={{background:PAGE_BG,width:'100%',maxWidth:900,display:'flex',flexDirection:'column',overflow:'hidden'}}>
 
-        {/* Header */}
-        <div style={{background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,padding:'14px 20px',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
-          <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
-          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:17,color:TXT}}>Amigos</div>
-          {/* Total writers */}
-          {totalUsers!==null&&(
-            <div style={{marginLeft:'auto',display:'flex',alignItems:'baseline',gap:5}}>
-              <span style={{fontFamily:'"Playfair Display",serif',fontSize:22,fontWeight:700,color:NAVY,letterSpacing:'-0.03em'}}>{totalUsers.toLocaleString()}</span>
-              <span style={{fontSize:11,color:MUTED}}>escritores en Pretexto</span>
-            </div>
-          )}
-        </div>
-
-        {/* Search bar */}
-        <div style={{padding:'12px 20px',borderBottom:'1px solid '+BDR,flexShrink:0,background:'var(--topbar-bg,#fff)'}}>
-          <div style={{position:'relative',maxWidth:480}}>
-            <Icon name="magnifying-glass" size={14} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
-            <input type="text" value={query} onChange={e=>setQuery(e.target.value)}
+        {/* Hero */}
+        <div style={{position:'relative',background:NAVY,padding:'22px 24px 20px',overflow:'hidden',flexShrink:0}}>
+          <div aria-hidden="true" style={{position:'absolute',right:14,top:-64,fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontSize:210,lineHeight:0.75,color:'rgba(30,155,240,0.13)',pointerEvents:'none',userSelect:'none'}}>&amp;</div>
+          <button onClick={onClose} style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,fontWeight:500,color:'rgba(245,241,232,0.6)',background:'transparent',border:'none',cursor:'pointer',position:'relative',zIndex:2,padding:0}}>
+            <Icon name="arrow-left" size={13} color="rgba(245,241,232,0.6)"/>Menú
+          </button>
+          <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:30,lineHeight:1.1,color:'#F5F1E8',margin:'10px 0 4px',position:'relative',zIndex:2}}>Amigos</div>
+          <div style={{fontSize:12.5,color:'rgba(245,241,232,0.55)',position:'relative',zIndex:2,marginBottom:16}}>{following.length} seguidos · {followers.length} seguidores</div>
+          <div style={{display:'flex',alignItems:'center',gap:9,height:42,padding:'0 14px',background:'rgba(245,241,232,0.09)',border:'1px solid rgba(245,241,232,0.16)',borderRadius:10,position:'relative',zIndex:2}}>
+            <Icon name="magnifying-glass" size={15} color="rgba(245,241,232,0.5)"/>
+            <input value={query} onChange={e=>{setQuery(e.target.value);if(e.target.value.length>=2)setTab('descubrir');}}
               placeholder="Buscar escritores por nombre o @usuario…"
-              style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'8px 10px 8px 32px',fontSize:12,outline:'none',fontFamily:'inherit',background:CARD_BG,color:TXT,boxSizing:'border-box'}}/>
-            {searching&&<span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',fontSize:11,color:MUTED}}>…</span>}
+              style={{flex:1,background:'transparent',border:'none',outline:'none',fontSize:13,color:'#F5F1E8',fontFamily:"'Source Sans 3',sans-serif"}}/>
+            {searching&&<span style={{fontSize:11,color:'rgba(245,241,232,0.5)'}}>…</span>}
           </div>
-          {/* Search results */}
-          {query.length>=2&&!searching&&searchResults.length===0&&(
-            <div style={{fontSize:12,color:MUTED,marginTop:8}}>Sin resultados para «{query}»</div>
-          )}
-          {query.length>=2&&searchResults.length>0&&(
-            <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:10}}>
-              {searchResults.map(u=>{
-                const isFollowing=followingIds.has(u.id);
-                return(
-                  <div key={u.id} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,padding:'8px 12px',display:'flex',alignItems:'center',gap:8,minWidth:180}}>
-                    <UserAvatar user={u} size={30}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.name}</div>
-                      <div style={{fontSize:10,color:MUTED}}>@{u.username||'—'}</div>
-                    </div>
-                    <div style={{display:'flex',gap:4}}>
-                      <button onClick={()=>handleFollow(u.id,isFollowing,u)}
-                        style={{background:isFollowing?'transparent':'rgba(30,155,240,0.08)',border:'1px solid '+(isFollowing?BDR:'rgba(30,155,240,0.25)'),borderRadius:6,padding:'4px 8px',fontSize:10,fontWeight:600,color:isFollowing?MUTED:AZUL,cursor:'pointer'}}>
-                        {isFollowing?'✓':'Seguir'}
-                      </button>
-                      <button onClick={()=>setViewingProfile(u)}
-                        style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:5,padding:'4px 8px',fontSize:10,color:MUTED,cursor:'pointer'}}>
-                        Ver
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+          <div style={{display:'flex',gap:0,marginTop:16,position:'relative',zIndex:2}}>
+            <div style={{paddingRight:22,marginRight:22,borderRight:'1px solid rgba(245,241,232,0.15)'}}>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:20,lineHeight:1,color:NARANJA}}>{wroteTodayCount}/{amigosCount}</div>
+              <div style={{fontSize:9,fontWeight:500,letterSpacing:'.14em',textTransform:'uppercase',color:'rgba(245,241,232,0.45)',marginTop:5}}>Escribieron hoy</div>
             </div>
-          )}
+            <div style={{paddingRight:22,marginRight:22,borderRight:'1px solid rgba(245,241,232,0.15)'}}>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:20,lineHeight:1,color:'#F5F1E8'}}>{amigosCount}</div>
+              <div style={{fontSize:9,fontWeight:500,letterSpacing:'.14em',textTransform:'uppercase',color:'rgba(245,241,232,0.45)',marginTop:5}}>Amigos</div>
+            </div>
+            <div>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:20,lineHeight:1,color:'#F5F1E8'}}>{fmtK(amigosWords)}</div>
+              <div style={{fontSize:9,fontWeight:500,letterSpacing:'.14em',textTransform:'uppercase',color:'rgba(245,241,232,0.45)',marginTop:5}}>Palabras de amigos</div>
+            </div>
+          </div>
         </div>
 
-        {/* Two columns */}
-        <div className="amigos-cols" style={{flex:1,overflow:'hidden',display:'flex'}}>
-          {loading?(
-            <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',color:MUTED,fontSize:13}}>Cargando…</div>
-          ):(
-            <>
-              {/* LEFT: Seguidos */}
-              <div className="amigos-col amigos-col-left" style={{flex:1,overflowY:'auto',padding:'16px 16px 16px 20px',borderRight:'1px solid '+BDR}}>
-                <div style={{fontSize:11,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',marginBottom:12}}>
-                  Seguidos · {following.length}
-                </div>
-                {following.length===0
-                  ?<ColEmpty msg="No sigues a nadie todavía. Búscalos arriba."/>
-                  :following.map(f=><PersonRow key={f.id} u={f}/>)
-                }
-              </div>
+        {/* Tabs */}
+        <div style={{display:'flex',gap:22,padding:'0 24px',borderBottom:'1px solid '+BDR,background:CARD_BG,flexShrink:0}}>
+          {[
+            {k:'seguidos',label:'Seguidos',n:following.length},
+            {k:'seguidores',label:'Seguidores',n:followers.length},
+            {k:'descubrir',label:'Descubrir',n:searchResults.length},
+          ].map(t=>(
+            <div key={t.k} onClick={()=>setTab(t.k)}
+              style={{padding:'14px 0 12px',fontSize:11.5,fontWeight:600,letterSpacing:'.09em',textTransform:'uppercase',color:tab===t.k?TXT:FAINT,borderBottom:'2px solid '+(tab===t.k?NARANJA:'transparent'),cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+              {t.label}
+              <span style={{fontSize:9.5,fontWeight:600,background:tab===t.k?'rgba(241,90,36,0.12)':'rgba(10,27,61,0.07)',color:tab===t.k?NARANJA:MUTED,borderRadius:20,padding:'2px 6px'}}>{t.n}</span>
+            </div>
+          ))}
+        </div>
 
-              {/* RIGHT: Seguidores */}
-              <div className="amigos-col" style={{flex:1,overflowY:'auto',padding:'16px 20px 16px 16px'}}>
-                <div style={{fontSize:11,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',marginBottom:12}}>
-                  Seguidores · {followers.length}
-                </div>
-                {followers.length===0
-                  ?<ColEmpty msg="Aún nadie te sigue. Comparte tu perfil."/>
-                  :followers.map(f=><PersonRow key={f.id} u={f} showFollowBack/>)
-                }
-              </div>
-            </>
-          )}
+        {/* Table */}
+        <div style={{flex:1,overflowY:'auto'}}>
+          {loading?(
+            <div style={{padding:40,textAlign:'center',color:MUTED,fontSize:13}}>Cargando…</div>
+          ):(<>
+            <div style={{display:'grid',gridTemplateColumns:'28px 1fr 76px auto',gap:12,alignItems:'center',padding:'10px 20px',borderBottom:'1px solid '+BDR,fontSize:9.5,fontWeight:600,letterSpacing:'.14em',textTransform:'uppercase',color:FAINT,background:CARD_BG}}>
+              <div style={{textAlign:'center'}}>#</div>
+              <div>Escritor</div>
+              <div>Textos</div>
+              <div></div>
+            </div>
+            {tab==='descubrir'&&query.length<2&&(
+              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5,lineHeight:1.6}}>Escribe un nombre o @usuario arriba para buscar escritores.</div>
+            )}
+            {tab==='descubrir'&&query.length>=2&&!searching&&sortedList.length===0&&(
+              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5}}>Sin resultados para «{query}».</div>
+            )}
+            {tab==='seguidos'&&sortedList.length===0&&(
+              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5}}>No sigues a nadie todavía. Búscalos arriba.</div>
+            )}
+            {tab==='seguidores'&&sortedList.length===0&&(
+              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5}}>Aún nadie te sigue. Comparte tu perfil.</div>
+            )}
+            {sortedList.map((u,i)=><Row key={u.id} u={u} rank={i+1}/>)}
+          </>)}
         </div>
       </div>
 
       {viewingProfile&&<PublicProfile user={viewingProfile}
         isFollowing={followingIds.has(viewingProfile.id)}
+        onFollow={async(id)=>{await handleFollow(id,false);}}
         onUnfollow={async(id)=>{await handleFollow(id,true);}}
         onClose={()=>setViewingProfile(null)}/>}
+      {challengeStep==='type'&&<ChallengeTypeModal user={user} recipient={challengeRecipient}
+        onClose={()=>{setChallengeRecipient(null);setChallengeStep(null);}}
+        onPickContrarreloj={()=>setChallengeStep('contrarreloj')}
+        onPickCheck={()=>setChallengeStep('check')}
+        onPickDueto={()=>setChallengeStep('dueto')}/>}
+      {challengeStep==='contrarreloj'&&<SendChallengeModal user={user} presetRecipient={challengeRecipient}
+        onClose={()=>{setChallengeRecipient(null);setChallengeStep(null);}}/>}
+      {challengeStep==='dueto'&&<SendDuetModal user={user} presetRecipient={challengeRecipient}
+        onClose={()=>{setChallengeRecipient(null);setChallengeStep(null);}}/>}
+      {challengeStep==='check'&&<ExerciseLibrary user={user} library={[]} reflections={[]} writingMode="literatura"
+        challengeRecipient={challengeRecipient}
+        onClose={()=>{setChallengeRecipient(null);setChallengeStep(null);}}/>}
     </div>
   );
 };
-
 
 const EstadísticasScreen=({library,reflections,onClose,stats})=>{
   const {totalWords,totalSessions,totalElapsed,weekWords,weekSessions}=stats;
@@ -15531,23 +15909,28 @@ const _dm=_sl.toLowerCase();const k=e.sk==='dueto'?'A cuatro manos':e.sk==='cuen
 
 
 /* ─── SEND DUET MODAL ───────────────────────────────────────── */
-const SendDuetModal=({user,onClose,onCreated})=>{
+const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
   const [query,setQuery]=useState('');
+  const [friends,setFriends]=useState([]);
   const [results,setResults]=useState([]);
-  const [recipient,setRecipient]=useState(null);
+  const [recipient,setRecipient]=useState(presetRecipient);
   const [title,setTitle]=useState('');
   const [premise,setPremise]=useState('');
   const [minWords,setMinWords]=useState(100);
   const [sending,setSending]=useState(false);
   const [status,setStatus]=useState('');
 
+  // Solo se puede invitar a un dueto a amigos (seguimiento mutuo) — mismo
+  // criterio que el resto de tipos de reto.
+  useEffect(()=>{
+    DB.getMutualFriends(user.id).then(setFriends).catch(e=>console.error('getMutualFriends:',e));
+  },[user.id]);
+
   useEffect(()=>{
     if(query.length<2){setResults([]);return;}
-    const t=setTimeout(async()=>{
-      try{const r=await DB.searchUsers(query);setResults(r.filter(u=>u.id!==user.id));}catch(e){}
-    },300);
-    return()=>clearTimeout(t);
-  },[query]);
+    const q=query.toLowerCase();
+    setResults(friends.filter(f=>(f.name||'').toLowerCase().includes(q)||(f.username||'').toLowerCase().includes(q)));
+  },[query,friends]);
 
   const send=async()=>{
     if(!recipient||sending)return;
@@ -15590,7 +15973,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
               </div>
             ):(
               <div style={{position:'relative'}}>
-                <input type="text" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nombre o @usuario…" style={{width:'100%'}}/>
+                <input type="text" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar entre tus amigos…" style={{width:'100%'}}/>
                 {results.length>0&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,boxShadow:'0 12px 30px -8px rgba(10,27,61,0.25)',overflow:'hidden',zIndex:10}}>
                   {results.map(r=>(
                     <button key={r.id} onClick={()=>{setRecipient(r);setQuery('');setResults([]);}}
@@ -15600,6 +15983,7 @@ const SendDuetModal=({user,onClose,onCreated})=>{
                     </button>
                   ))}
                 </div>}
+                {query.length<2&&friends.length===0&&<div style={{fontSize:11,color:FAINT,marginTop:5}}>Solo puedes invitar a amigos — todavía no tienes ninguno mutuo.</div>}
               </div>
             )}
           </div>
@@ -18959,6 +19343,7 @@ const App=()=>{
   // (Object.assign, patrón ya usado en toda la app), React no detecta el
   // cambio por sí solo — este tick es el empujón mínimo para que se note.
   const [betaAcceptedTick,setBetaAcceptedTick]=useState(0);
+  const [pendingCheckChallenge,setPendingCheckChallenge]=useState(null); // reto tipo 'check' aceptado, esperando a que termine la sesión para marcarse completado
   const [view,setView]=useState('dashboard');
   const [energy,setEnergy]=useState(5);
   const [library,setLibrary]=useState([]);
@@ -19371,6 +19756,20 @@ const App=()=>{
         }catch(e){console.error('apply visibility',e);}
       }
     }
+    // Si esta sesión viene de un reto tipo "check" aceptado, marca ese
+    // reto como completado ahora que ya sabemos el entryId real — el
+    // flujo normal de check (a diferencia del Contrarreloj) no tenía
+    // ninguna noción de "esto viene de un reto pendiente".
+    if(ref?.entryId&&pendingCheckChallenge){
+      DB.markChallengeCompleted(pendingCheckChallenge.id,ref.entryId).catch(e=>console.error('markChallengeCompleted (check):',e));
+      // Compartir de vuelta es una decisión del autor, marcada en PostSession
+      // (mismo criterio que "Devolver relato" en Contrarreloj) — independiente
+      // de la visibilidad general que haya elegido para el texto.
+      if(ref.shareBackChallenge){
+        DB.shareBackChallenge(pendingCheckChallenge.id).catch(e=>console.error('shareBackChallenge (check):',e));
+      }
+      setPendingCheckChallenge(null);
+    }
     // Cargar datos frescos de Supabase ANTES de ir al dashboard
     // para que racha, estadísticas y palabras aparezcan actualizados sin recargar
     const fresh=await loadUserData(user.id).catch(()=>null);
@@ -19568,7 +19967,25 @@ const App=()=>{
       onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
       onRefresh={()=>loadUserData(user.id)}
       receivedChallenges={receivedChallenges}
-      onAcceptChallenge={async(ch)=>{await DB.markChallengeSeen(ch.id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));startCuentoWithChallenge(ch);}}
+      onAcceptChallenge={async(ch)=>{
+        await DB.markChallengeSeen(ch.id);
+        setReceivedChallenges(prev=>prev.filter(c=>c.id!==ch.id));
+        if(ch.challenge_type==='check'){
+          // Reto de un ejercicio concreto — nunca el Contrarreloj. Se busca
+          // en el banco correspondiente (modo en el que se envió el reto,
+          // no el modo actual de quien lo acepta) y se lanza como un check
+          // normal, marcando el reto pendiente para cerrarlo al terminar.
+          const exercise=findExerciseById(ch.exercise_id,ch.exercise_mode||'literatura');
+          if(!exercise){alert('No se encontró el ejercicio de este reto.');return;}
+          setPendingCheckChallenge(ch);
+          startSession({type:'check',writingMode:ch.exercise_mode||'literatura',
+            exercise:{id:exercise.id,title:exercise.title,family:exercise.family,mode:exercise.mode,min:exercise.minLargo||exercise.min,teoria:exercise.teoria},
+            weekId:exercise.id,
+            challengeFrom:{id:ch.from_user_id,name:ch.from_name,username:ch.from_username}});
+        }else{
+          startCuentoWithChallenge(ch);
+        }
+      }}
       onSaveChallenge={async(id)=>{await DB.markChallengeSeen(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
       onDeclineChallenge={async(id)=>{await DB.declineChallenge(id);setReceivedChallenges(prev=>prev.filter(c=>c.id!==id));}}
       onEditEntry={e=>setEditingEntry(e)}
