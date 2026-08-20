@@ -4811,6 +4811,40 @@ const DB = {
     if (error) throw error;
     return new Set((data||[]).map(e => e.user_id));
   },
+  // ── Reportes y moderación ──
+  isAdmin: async () => {
+    const { data, error } = await getSB().rpc('admin_is_authorized');
+    if (error) { console.error('isAdmin:', error); return false; }
+    return !!data;
+  },
+  reportContent: async ({ reporterId, targetType, targetId, reason, detail }) => {
+    const { error } = await getSB().from('reports').insert({
+      reporter_id: reporterId, target_type: targetType, target_id: targetId,
+      reason, detail: detail?.trim() || null,
+    });
+    if (error) throw error;
+  },
+  // Para deshabilitar el botón si ya se reportó — nunca revela reportes
+  // ajenos, la política RLS solo deja ver los propios.
+  hasReported: async (reporterId, targetType, targetId) => {
+    const { data, error } = await getSB().from('reports').select('id')
+      .eq('reporter_id', reporterId).eq('target_type', targetType).eq('target_id', targetId).maybeSingle();
+    if (error) { console.error('hasReported:', error); return false; }
+    return !!data;
+  },
+  adminGetReportsQueue: async () => {
+    const { data, error } = await getSB().rpc('admin_get_reports_queue');
+    if (error) throw error;
+    return data || [];
+  },
+  adminResolveReport: async (targetType, targetId, action) => {
+    const { error } = await getSB().rpc('admin_resolve_report', { p_target_type: targetType, p_target_id: targetId, p_action: action });
+    if (error) throw error;
+  },
+  adminUnhideEntry: async (targetId) => {
+    const { error } = await getSB().rpc('admin_unhide_entry', { p_target_id: targetId });
+    if (error) throw error;
+  },
   followUser: async (followerId, followingId) => {
     const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
     if (error && !error.message?.includes('duplicate')) throw error;
@@ -10069,6 +10103,183 @@ const ChallengeTypeModal=({user,recipient,onClose,onPickContrarreloj,onPickCheck
   );
 };
 
+/* ─── REPORT MODAL ─── reutilizable para reportar un texto o un usuario.
+   Nunca oculta nada por sí solo — solo registra el reporte. La política
+   RLS solo deja ver a cada quien sus propios reportes, así que el
+   anonimato de quien reporta es real, no solo una promesa de interfaz. */
+const REPORT_REASONS=[
+  {v:'odio',label:'Odio o discriminación'},
+  {v:'danino',label:'Contenido dañino o peligroso'},
+  {v:'plagio',label:'Plagio'},
+  {v:'acoso',label:'Acoso a otra persona'},
+  {v:'spam',label:'Spam o no tiene que ver con la app'},
+  {v:'otro',label:'Otro'},
+];
+/* ─── MODERATION SCREEN ─── cola de reportes, solo para el admin. La
+   propia RPC ya comprueba admin_is_authorized() del lado del servidor —
+   esta pantalla nunca es la barrera de seguridad real, solo evita que
+   alguien sin permiso vea la entrada de menú. */
+const REASON_LABELS={odio:'Odio',danino:'Dañino',plagio:'Plagio',acoso:'Acoso',spam:'Spam',otro:'Otro'};
+const ModerationScreen=({onClose})=>{
+  const [queue,setQueue]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  const [showResolved,setShowResolved]=useState(false);
+  const [actingOn,setActingOn]=useState(null); // target_id en curso, para deshabilitar botones mientras actúa
+
+  const load=()=>{
+    setLoading(true);
+    DB.adminGetReportsQueue().then(setQueue).catch(e=>{console.error('adminGetReportsQueue:',e);setError('No se pudo cargar la cola de reportes.');}).finally(()=>setLoading(false));
+  };
+  useEffect(load,[]);
+
+  const act=async(item,action)=>{
+    const key=item.target_type+':'+item.target_id;
+    setActingOn(key);
+    try{
+      if(action==='unhide')await DB.adminUnhideEntry(item.target_id);
+      else await DB.adminResolveReport(item.target_type,item.target_id,action);
+      await load();
+    }catch(e){console.error('moderation action:',e);alert('No se pudo aplicar la acción: '+e.message);}
+    setActingOn(null);
+  };
+
+  const visible=showResolved?queue:queue.filter(q=>q.status==='pending');
+  const STATUS_LABEL={pending:'Pendiente',dismissed:'Descartado',hidden:'Oculto',resolved:'Resuelto'};
+  const STATUS_COLOR={pending:'#A82020',dismissed:MUTED,hidden:'#A85A20',resolved:AZUL};
+
+  return(
+    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:150,display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0,gap:12}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,fontFamily:"'Source Sans 3',sans-serif"}}>← Menú</button>
+        <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:17,color:TXT}}>Moderación</div>
+        <div style={{flex:1}}/>
+        <button onClick={()=>setShowResolved(v=>!v)}
+          style={{background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'6px 12px',fontSize:12,color:MUTED,cursor:'pointer'}}>
+          {showResolved?'Solo pendientes':'Ver todos'}
+        </button>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'16px 20px',maxWidth:760,width:'100%',margin:'0 auto',boxSizing:'border-box'}}>
+        {loading&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando…</div>}
+        {error&&<div style={{textAlign:'center',padding:40,color:'#A82020',fontSize:13}}>{error}</div>}
+        {!loading&&!error&&visible.length===0&&(
+          <div style={{textAlign:'center',padding:40,color:FAINT,fontSize:13}}>
+            {showResolved?'No hay ningún reporte todavía.':'Sin reportes pendientes — todo al día.'}
+          </div>
+        )}
+        {visible.map(item=>{
+          const key=item.target_type+':'+item.target_id;
+          const acting=actingOn===key;
+          const label=item.target_type==='entry'?('«'+(item.preview_title||'Sin título')+'»'):('@'+(item.preview_username||item.preview_name||'—'));
+          return(
+            <div key={key} style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,padding:'14px 16px',marginBottom:10}}>
+              <div style={{display:'flex',alignItems:'flex-start',gap:10,marginBottom:8}}>
+                <Icon name={item.target_type==='entry'?'book-open':'users'} size={15} color={MUTED} style={{marginTop:2}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13.5,fontWeight:600,color:TXT}}>{label}</div>
+                  <div style={{fontSize:11,color:MUTED,marginTop:2}}>
+                    {item.total_reports} {item.total_reports===1?'reporte':'reportes'} · {(item.reasons||[]).map(r=>REASON_LABELS[r]||r).join(', ')} · último {fmtDate(item.last_reported_at?.slice?.(0,10)||'')}
+                  </div>
+                </div>
+                <span style={{fontSize:10,fontWeight:600,color:STATUS_COLOR[item.status]||MUTED,background:(STATUS_COLOR[item.status]||MUTED)+'1A',borderRadius:20,padding:'3px 10px',flexShrink:0}}>
+                  {STATUS_LABEL[item.status]||item.status}
+                </span>
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                {item.status==='pending'&&(<>
+                  <button disabled={acting} onClick={()=>act(item,'dismiss')} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'6px 12px',fontSize:11.5,fontWeight:600,color:MUTED,cursor:acting?'default':'pointer'}}>Descartar</button>
+                  {item.target_type==='entry'&&<button disabled={acting} onClick={()=>act(item,'hide')} style={{background:'transparent',border:'1px solid rgba(168,90,32,0.35)',borderRadius:7,padding:'6px 12px',fontSize:11.5,fontWeight:600,color:'#A85A20',cursor:acting?'default':'pointer'}}>Ocultar</button>}
+                  <button disabled={acting} onClick={()=>act(item,'resolve')} style={{background:AZUL,border:'none',borderRadius:7,padding:'6px 12px',fontSize:11.5,fontWeight:600,color:'#fff',cursor:acting?'default':'pointer'}}>Marcar resuelto</button>
+                </>)}
+                {item.status==='hidden'&&(
+                  <button disabled={acting} onClick={()=>act(item,'unhide')} style={{background:'transparent',border:'1px solid rgba(30,155,240,0.35)',borderRadius:7,padding:'6px 12px',fontSize:11.5,fontWeight:600,color:AZUL,cursor:acting?'default':'pointer'}}>Deshacer ocultación</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+const ReportModal=({user,targetType,targetId,targetLabel,onClose})=>{
+  const [reason,setReason]=useState(null);
+  const [detail,setDetail]=useState('');
+  const [sending,setSending]=useState(false);
+  const [status,setStatus]=useState('');
+  const [error,setError]=useState('');
+
+  const canSend=reason&&(reason!=='otro'||detail.trim().length>0)&&!sending;
+
+  const send=async()=>{
+    if(!canSend)return;
+    setSending(true);setError('');
+    try{
+      await DB.reportContent({reporterId:user.id,targetType,targetId,reason,detail});
+      setStatus('sent');
+      setTimeout(()=>onClose(),1800);
+    }catch(e){
+      if(e.message?.includes('duplicate')||e.code==='23505'){setError('Ya habías reportado esto — gracias, lo tenemos en cuenta.');}
+      else{setError('No se pudo enviar el reporte. Inténtalo de nuevo.');}
+      setSending(false);
+    }
+  };
+
+  if(status==='sent')return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:270,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:360,padding:'28px 24px',textAlign:'center'}}>
+        <Icon name="check-circle" size={30} color={AZUL}/>
+        <div style={{fontSize:14,color:TXT,fontWeight:600,marginTop:10}}>Reporte enviado</div>
+        <div style={{fontSize:12,color:MUTED,marginTop:4}}>Gracias por avisar. Lo revisaremos.</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:270,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:420,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
+        <div style={{padding:'16px 20px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Reportar {targetType==='user'?'a este usuario':'este texto'}</div>
+            {targetLabel&&<div style={{fontSize:11,color:MUTED,marginTop:2}}>{targetLabel}</div>}
+          </div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+        </div>
+        <div style={{padding:'18px 20px',display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{fontSize:12,color:MUTED,lineHeight:1.5}}>Tu reporte es anónimo — la persona reportada nunca sabrá que fuiste tú.</div>
+          <div>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:8}}>¿Cuál es el motivo?</div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {REPORT_REASONS.map(r=>(
+                <button key={r.v} onClick={()=>setReason(r.v)}
+                  style={{display:'flex',alignItems:'center',gap:10,background:reason===r.v?'rgba(30,155,240,0.06)':'transparent',border:'1px solid '+(reason===r.v?'rgba(30,155,240,0.35)':BDR),borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left'}}>
+                  <div style={{width:15,height:15,borderRadius:'50%',border:'1.5px solid '+(reason===r.v?AZUL:BDR),display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    {reason===r.v&&<div style={{width:7,height:7,borderRadius:'50%',background:AZUL}}/>}
+                  </div>
+                  <span style={{fontSize:13,color:TXT}}>{r.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:6}}>
+              Detalle {reason==='otro'?'(obligatorio)':'(opcional)'}
+            </div>
+            <textarea value={detail} onChange={e=>setDetail(e.target.value)} rows={3}
+              placeholder="Cuéntanos qué has visto…" style={{width:'100%',resize:'none'}}/>
+          </div>
+          {error&&<div style={{fontSize:12,color:'#A82020'}}>{error}</div>}
+          <button onClick={send} disabled={!canSend}
+            style={{background:canSend?'#A82020':'rgba(168,32,32,0.3)',border:'none',borderRadius:9,padding:'11px',fontSize:13,fontWeight:600,color:'#fff',cursor:canSend?'pointer':'default'}}>
+            {sending?'Enviando…':'Enviar reporte'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 
 /* ─── USER SELECT ────────────────────────────────── */
 // ── Aviso de fase de pruebas (SHOW_BETA_DISCLAIMER) ──────────────────
@@ -10423,6 +10634,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showBiblioteca,setShowBiblioteca]=useState(false);
   const [showEscritorio,setShowEscritorio]=useState(false);
   const [showStats,setShowStats]=useState(false);
+  const [showModeration,setShowModeration]=useState(false);
+  const [isAdmin,setIsAdmin]=useState(false);
+  useEffect(()=>{ DB.isAdmin().then(setIsAdmin).catch(()=>setIsAdmin(false)); },[user.id]);
   const [showAmigos,setShowAmigos]=useState(false);
   const [notifProfile,setNotifProfile]=useState(null);
   const [followersSeenTick,setFollowersSeenTick]=useState(0); // fuerza re-render al marcar seguidores como vistos
@@ -10671,7 +10885,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
       {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
       {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
-      {notifProfile&&<PublicProfile user={notifProfile} onClose={()=>setNotifProfile(null)}
+      {notifProfile&&<PublicProfile user={notifProfile} viewer={user} onClose={()=>setNotifProfile(null)}
         isFollowing={following.some(f=>f.id===notifProfile.id)}
         onFollow={async(id)=>{if(onFollow)await onFollow(id,false);}}
         onUnfollow={async(id)=>{if(onFollow)await onFollow(id,true);}}/>}
@@ -10691,12 +10905,13 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         onUnfollowed={()=>setFollowedCollectiveDetail(null)}/>}
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
+      {showModeration&&<ModerationScreen onClose={()=>setShowModeration(false)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="biblioteca"/>}
       {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="escritorio"/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
-      {showProfile&&<PublicProfile user={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
+      {showProfile&&<PublicProfile user={user} viewer={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
@@ -10848,6 +11063,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                   {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);if(!S.get(firstTimeKey('revisionia',user?.id)))setActivePopup('revisionia');},dot:getApiKey(user.id)?AZUL:null},
                   {icon:'download-simple',label:'Backup (.zip)',action:()=>{exportZip(user,library,reflections,projects);setShowUserMenu(false);}},
                   {icon:'link-simple',label:'Mi perfil público',action:()=>{setShowProfile(true);setShowUserMenu(false);}},
+                  ...(isAdmin?[{icon:'warning-circle',label:'Moderación',action:()=>{setShowModeration(true);setShowUserMenu(false);}}]:[]),
                 ].map(item=>(
                   <button key={item.label} onClick={item.action} style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                     <span style={{width:20,textAlign:'center',flexShrink:0,display:'inline-flex',justifyContent:'center'}}><Icon name={item.icon} size={16} color={MUTED}/></span>
@@ -13756,6 +13972,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
   const [showEncadenar,setShowEncadenar]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [deleting,setDeleting]=useState(false);
+  const [showReport,setShowReport]=useState(false);
   const [comments,setComments]=useState([]);
   const [ratings,setRatings]=useState([]);
   const [reactions,setReactions]=useState([]);
@@ -14095,7 +14312,16 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
             )}
           </div>
         )}
+        {user&&!isOwn&&(
+          <div style={{textAlign:'center',padding:'4px 0 16px'}}>
+            <button onClick={()=>setShowReport(true)}
+              style={{background:'transparent',border:'none',fontSize:11,color:FAINT,cursor:'pointer',textDecoration:'underline'}}>
+              Reportar este texto
+            </button>
+          </div>
+        )}
       </div>
+      {showReport&&<ReportModal user={user} targetType="entry" targetId={entry.id} targetLabel={entry.title||'Sin título'} onClose={()=>setShowReport(false)}/>}
     </div>
   );
 };
@@ -14322,11 +14548,13 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
 };
 
 /* ─── PUBLIC PROFILE ─────────────────────────────── */
-const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library,reflections})=>{
+const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library,reflections,viewer})=>{
   const [unfollowing,setUnfollowing]=useState(false);
   const [following,setFollowing]=useState(false);
   const [copied,setCopied]=useState(false);
   const [confirmUnfollow,setConfirmUnfollow]=useState(false);
+  const [showReport,setShowReport]=useState(false);
+  const isOwnProfile=viewer?.id===user.id;
   const [stats,setStats]=useState(null);
   const [loading,setLoading]=useState(true);
   const [showTexts,setShowTexts]=useState(false);
@@ -14446,7 +14674,14 @@ const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library
             <Icon name={copied?'check':'link-simple'} size={13} color={FAINT}/>{copied?'¡Enlace copiado!':'Copiar link'}
           </button>
           <button onClick={onClose} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'9px',fontSize:13,color:MUTED,cursor:'pointer'}}>Cerrar</button>
+          {viewer&&!isOwnProfile&&(
+            <button onClick={()=>setShowReport(true)}
+              style={{background:'transparent',border:'none',fontSize:11,color:FAINT,cursor:'pointer',textDecoration:'underline',padding:'4px 0'}}>
+              Reportar este usuario
+            </button>
+          )}
         </div>
+        {showReport&&<ReportModal user={viewer} targetType="user" targetId={user.id} targetLabel={'@'+(user.username||user.name)} onClose={()=>setShowReport(false)}/>}
 
         {/* Confirmación antes de dejar de seguir de verdad */}
         {confirmUnfollow&&(
@@ -15655,7 +15890,31 @@ const AmigosScreen=({user,onClose})=>{
     const texts=textCounts[u.id]||0;
     const canRead=texts>0;
     const fc=followCounts[u.id]||{followers:0,following:0};
-    return(
+    const isMobile=window.innerWidth<600;
+
+    const followBtn=isFollowing?(
+      <button onClick={()=>handleFollow(u.id,true)}
+        style={{flex:isMobile?1:undefined,fontSize:isMobile?11:10.5,fontWeight:600,padding:isMobile?'7px 10px':'6px 10px',borderRadius:7,border:'1px solid '+BDR,color:MUTED,background:CARD_BG,cursor:'pointer',whiteSpace:'nowrap'}}>
+        Dejar de seguir
+      </button>
+    ):(
+      <button onClick={()=>handleFollow(u.id,false,u)}
+        style={{flex:isMobile?1:undefined,fontSize:isMobile?11:10.5,fontWeight:600,padding:isMobile?'7px 10px':'6px 10px',borderRadius:7,border:'1px solid '+BDR,color:MUTED,background:CARD_BG,cursor:'pointer',whiteSpace:'nowrap'}}>
+        Seguir
+      </button>
+    );
+    const retarBtn=(
+      <button onClick={()=>{setChallengeRecipient(u);setChallengeStep('type');}}
+        style={{flex:isMobile?1:undefined,display:'flex',alignItems:'center',justifyContent:'center',gap:5,fontSize:isMobile?11:10.5,fontWeight:600,padding:isMobile?'7px 10px':'6px 10px',borderRadius:7,border:'1px solid rgba(241,90,36,0.32)',color:NARANJA,background:CARD_BG,cursor:'pointer',whiteSpace:'nowrap'}}>
+        <Icon name="target" size={12} color={NARANJA}/>Retar
+      </button>
+    );
+
+    // Escritorio: la fila compacta de una sola línea, tal como estaba
+    // antes de adaptar la pantalla a móvil — con un solo botón de
+    // seguimiento (no dos, uno siempre deshabilitado, como tenía al
+    // principio) para no volver a desperdiciar ancho de más.
+    if(!isMobile)return(
       <div style={{display:'grid',gridTemplateColumns:'28px 1fr 76px auto',gap:12,alignItems:'center',padding:'12px 20px',borderBottom:'1px solid '+BDR}}>
         <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:15,color:rank<=3?NARANJA:'rgba(10,27,61,0.28)',textAlign:'center'}}>{rank}</div>
         <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0,cursor:'pointer'}} onClick={()=>setViewingProfile(u)}>
@@ -15674,18 +15933,37 @@ const AmigosScreen=({user,onClose})=>{
           {canRead?texts:'—'}
         </button>
         <div style={{display:'flex',alignItems:'center',gap:5,justifySelf:'end'}}>
-          <button onClick={()=>!isFollowing&&handleFollow(u.id,false,u)} disabled={isFollowing}
-            style={{fontSize:10.5,fontWeight:600,padding:'6px 10px',borderRadius:7,border:'1px solid '+BDR,color:isFollowing?'rgba(10,27,61,0.25)':MUTED,background:CARD_BG,cursor:isFollowing?'default':'pointer',opacity:isFollowing?0.5:1,whiteSpace:'nowrap'}}>
-            Seguir
+          {followBtn}
+          {retarBtn}
+        </div>
+      </div>
+    );
+
+    // Móvil: tarjeta apilada — una fila de 4 columnas fijas no cabe en una
+    // pantalla estrecha (el nombre y los botones se cortaban).
+    return(
+      <div style={{padding:'12px 16px',borderBottom:'1px solid '+BDR,display:'flex',flexDirection:'column',gap:9}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:14,color:rank<=3?NARANJA:'rgba(10,27,61,0.28)',width:16,flexShrink:0,textAlign:'center'}}>{rank}</div>
+          <div style={{display:'flex',alignItems:'center',gap:9,minWidth:0,flex:1,cursor:'pointer'}} onClick={()=>setViewingProfile(u)}>
+            <UserAvatar user={u} size={36}/>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:600,fontSize:14,display:'flex',alignItems:'baseline',gap:5,minWidth:0}}>
+                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',minWidth:0,flex:1}}>{u.name}</span>
+                <span style={{fontFamily:"'Source Sans 3',sans-serif",fontWeight:500,fontSize:10.5,color:FAINT,flexShrink:0}}>@{u.username||'—'}</span>
+              </div>
+              <div style={{fontSize:10,color:FAINT,marginTop:1,whiteSpace:'nowrap'}}>{fc.followers.toLocaleString()} seguidores · {fc.following.toLocaleString()} seguidos</div>
+            </div>
+          </div>
+          <button onClick={()=>canRead&&setViewingProfile(u)} disabled={!canRead}
+            style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1,fontSize:12,fontWeight:600,color:canRead?'#1B5FAA':'rgba(10,27,61,0.3)',background:'transparent',border:'none',cursor:canRead?'pointer':'default',padding:0,flexShrink:0}}>
+            <Icon name={canRead?'book-open':'lock-simple'} size={15} color={canRead?'#1B5FAA':'rgba(10,27,61,0.3)'}/>
+            {canRead?texts:'—'}
           </button>
-          <button onClick={()=>isFollowing&&handleFollow(u.id,true)} disabled={!isFollowing}
-            style={{fontSize:10.5,fontWeight:600,padding:'6px 10px',borderRadius:7,border:'1px solid '+BDR,color:!isFollowing?'rgba(10,27,61,0.25)':MUTED,background:CARD_BG,cursor:!isFollowing?'default':'pointer',opacity:!isFollowing?0.5:1,whiteSpace:'nowrap'}}>
-            Dejar de seguir
-          </button>
-          <button onClick={()=>{setChallengeRecipient(u);setChallengeStep('type');}}
-            style={{display:'flex',alignItems:'center',gap:5,fontSize:10.5,fontWeight:600,padding:'6px 10px',borderRadius:7,border:'1px solid rgba(241,90,36,0.32)',color:NARANJA,background:CARD_BG,cursor:'pointer',whiteSpace:'nowrap'}}>
-            <Icon name="target" size={12} color={NARANJA}/>Retar
-          </button>
+        </div>
+        <div style={{display:'flex',gap:6,marginLeft:26}}>
+          {followBtn}
+          {retarBtn}
         </div>
       </div>
     );
@@ -15746,12 +16024,14 @@ const AmigosScreen=({user,onClose})=>{
           {loading?(
             <div style={{padding:40,textAlign:'center',color:MUTED,fontSize:13}}>Cargando…</div>
           ):(<>
-            <div style={{display:'grid',gridTemplateColumns:'28px 1fr 76px auto',gap:12,alignItems:'center',padding:'10px 20px',borderBottom:'1px solid '+BDR,fontSize:9.5,fontWeight:600,letterSpacing:'.14em',textTransform:'uppercase',color:FAINT,background:CARD_BG}}>
-              <div style={{textAlign:'center'}}>#</div>
-              <div>Escritor</div>
-              <div>Textos</div>
-              <div></div>
-            </div>
+            {window.innerWidth>=600&&(
+              <div style={{display:'grid',gridTemplateColumns:'28px 1fr 76px auto',gap:12,alignItems:'center',padding:'10px 20px',borderBottom:'1px solid '+BDR,fontSize:9.5,fontWeight:600,letterSpacing:'.14em',textTransform:'uppercase',color:FAINT,background:CARD_BG}}>
+                <div style={{textAlign:'center'}}>#</div>
+                <div>Escritor</div>
+                <div>Textos</div>
+                <div></div>
+              </div>
+            )}
             {tab==='descubrir'&&query.length<2&&(
               <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5,lineHeight:1.6}}>Escribe un nombre o @usuario arriba para buscar escritores.</div>
             )}
@@ -15769,7 +16049,7 @@ const AmigosScreen=({user,onClose})=>{
         </div>
       </div>
 
-      {viewingProfile&&<PublicProfile user={viewingProfile}
+      {viewingProfile&&<PublicProfile user={viewingProfile} viewer={user}
         isFollowing={followingIds.has(viewingProfile.id)}
         onFollow={async(id)=>{await handleFollow(id,false);}}
         onUnfollow={async(id)=>{await handleFollow(id,true);}}
