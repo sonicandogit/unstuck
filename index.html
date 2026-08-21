@@ -14570,6 +14570,7 @@ const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library
   const [copied,setCopied]=useState(false);
   const [confirmUnfollow,setConfirmUnfollow]=useState(false);
   const [showReport,setShowReport]=useState(false);
+  const [viewingFollowList,setViewingFollowList]=useState(null); // 'followers' | 'following' | null
   const isOwnProfile=viewer?.id===user.id;
   const [stats,setStats]=useState(null);
   const [loading,setLoading]=useState(true);
@@ -14632,9 +14633,10 @@ const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library
         {/* Stats 3×2 grid */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'1px',background:BDR}}>
           {statCards.map(s=>{
-            const clickable=s.l==='Textos'&&stats?.publicTexts>0;
+            const clickable=(s.l==='Textos'&&stats?.publicTexts>0)||((s.l==='Seguidores'||s.l==='Siguiendo')&&s.v>0);
+            const onClick=s.l==='Textos'?openTexts:s.l==='Seguidores'?(()=>setViewingFollowList('followers')):s.l==='Siguiendo'?(()=>setViewingFollowList('following')):undefined;
             return(
-              <div key={s.l} onClick={clickable?openTexts:undefined} style={{background:CARD_BG,padding:'14px 6px',textAlign:'center',cursor:clickable?'pointer':'default',position:'relative'}}>
+              <div key={s.l} onClick={clickable?onClick:undefined} style={{background:CARD_BG,padding:'14px 6px',textAlign:'center',cursor:clickable?'pointer':'default',position:'relative'}}>
                 <div style={{fontSize:18,fontWeight:700,color:clickable?AZUL:TXT,letterSpacing:'-0.02em',lineHeight:1.1,fontFamily:'"Playfair Display",serif'}}>{s.v}</div>
                 <div style={{fontSize:9,color:FAINT,marginTop:3,textTransform:'uppercase',letterSpacing:'.06em'}}>{s.l}</div>
                 {clickable&&<div style={{fontSize:8,color:AZUL,marginTop:1}}>Ver →</div>}
@@ -14698,6 +14700,7 @@ const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library
           )}
         </div>
         {showReport&&<ReportModal user={viewer} targetType="user" targetId={user.id} targetLabel={'@'+(user.username||user.name)} onClose={()=>setShowReport(false)}/>}
+        {viewingFollowList&&<FollowListScreen author={user} kind={viewingFollowList} user={viewer} onClose={()=>setViewingFollowList(null)}/>}
 
         {/* Confirmación antes de dejar de seguir de verdad */}
         {confirmUnfollow&&(
@@ -14784,6 +14787,90 @@ const AuthorTextsScreen=({author,user,onClose})=>{
     </div>
   );
 };
+
+/* ─── FOLLOW LIST SCREEN ─── ver los seguidores o seguidos de CUALQUIER
+   persona (no solo los propios) — como en Twitter/Bluesky, para poder
+   descubrir gente a través de la red de alguien más. Reutiliza
+   getFollowing/getFollowers, ya genéricas (aceptan cualquier uid), y
+   deja seguir directamente desde la propia lista. */
+const FollowListScreen=({author,kind,user,onClose})=>{
+  const [list,setList]=useState(null); // null=cargando
+  const [myFollowing,setMyFollowing]=useState(new Set()); // a quién sigo YO — se carga aparte, PublicProfile no la tiene completa
+  const [busyId,setBusyId]=useState(null);
+  const [nestedProfile,setNestedProfile]=useState(null); // navegación en profundidad: pulsar a alguien de la lista abre SU perfil encima
+
+  useEffect(()=>{
+    const load=kind==='followers'?DB.getFollowers:DB.getFollowing;
+    load(author.id).then(rows=>{
+      const key=kind==='followers'?'follower_id':'following_id';
+      const objs=rows.map(r=>({id:r[key],...(r.profiles||{})})).filter(p=>p.name);
+      setList(objs);
+    }).catch(e=>{console.error('FollowListScreen load:',e);setList([]);});
+    DB.getFollowing(user.id).then(rows=>setMyFollowing(new Set(rows.map(r=>r.following_id)))).catch(()=>{});
+  },[author.id,kind]);
+
+  const toggleFollow=async(target)=>{
+    setBusyId(target.id);
+    try{
+      if(myFollowing.has(target.id)){
+        await DB.unfollowUser(user.id,target.id);
+        setMyFollowing(prev=>{const s=new Set(prev);s.delete(target.id);return s;});
+      }else{
+        await DB.followUser(user.id,target.id);
+        setMyFollowing(prev=>new Set([...prev,target.id]));
+      }
+    }catch(e){console.error('toggleFollow:',e);}
+    setBusyId(null);
+  };
+
+  const title=kind==='followers'?('Seguidores de '+author.name):('Seguidos por '+author.name);
+
+  return(
+    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:410,display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0,gap:12}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,fontFamily:"'Source Sans 3',sans-serif",flexShrink:0}}>← Volver</button>
+        <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{title}</div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',maxWidth:520,width:'100%',margin:'0 auto',boxSizing:'border-box'}}>
+        {list===null&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando…</div>}
+        {list!==null&&list.length===0&&(
+          <div style={{textAlign:'center',padding:40,color:FAINT,fontSize:13}}>
+            {kind==='followers'?'Nadie le sigue todavía.':'No sigue a nadie todavía.'}
+          </div>
+        )}
+        {list!==null&&list.map(p=>{
+          const isMe=p.id===user.id;
+          const iFollow=myFollowing.has(p.id);
+          return(
+            <div key={p.id} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 20px',borderBottom:'1px solid '+BDR}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0,flex:1,cursor:'pointer'}} onClick={()=>setNestedProfile(p)}>
+                <UserAvatar user={p} size={38}/>
+                <div style={{minWidth:0}}>
+                  <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:600,fontSize:14,display:'flex',alignItems:'baseline',gap:6}}>
+                    <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span>
+                    <span style={{fontFamily:"'Source Sans 3',sans-serif",fontWeight:500,fontSize:11,color:FAINT,flexShrink:0}}>@{p.username||'—'}</span>
+                  </div>
+                </div>
+              </div>
+              {!isMe&&(
+                <button onClick={()=>toggleFollow(p)} disabled={busyId===p.id}
+                  style={{flexShrink:0,fontSize:11,fontWeight:600,padding:'7px 12px',borderRadius:7,border:'1px solid '+(iFollow?BDR:'rgba(30,155,240,0.35)'),color:iFollow?MUTED:AZUL,background:iFollow?CARD_BG:'rgba(30,155,240,0.06)',cursor:busyId===p.id?'wait':'pointer',whiteSpace:'nowrap'}}>
+                  {busyId===p.id?'…':(iFollow?'Dejar de seguir':'Seguir')}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {nestedProfile&&<PublicProfile user={nestedProfile} viewer={user}
+        isFollowing={myFollowing.has(nestedProfile.id)}
+        onFollow={async(id)=>{await toggleFollow(nestedProfile);}}
+        onUnfollow={async(id)=>{await toggleFollow(nestedProfile);}}
+        onClose={()=>setNestedProfile(null)}/>}
+    </div>
+  );
+};
+
 
 
 const UserAvatar=({user,size=36,onClick})=>{
