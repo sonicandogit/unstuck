@@ -142,7 +142,10 @@ self.addEventListener('push', (e) => {
   const options = {
     body: data.body || '',
     icon: '/pretexto-notification-icon.png',
-    badge: '/pretexto-notification-icon.png',
+    // badge: el icono monocromo diminuto de la barra de estado en Android —
+    // separado de "icon" a propósito para poder probar diseños distintos
+    // sin tocar el icono grande de dentro de la notificación.
+    badge: '/pretexto-notification-badge.png',
     data: { type: data.type, entity_id: data.entity_id },
     tag: data.type || 'pretexto-notification', // agrupa notificaciones del mismo tipo
   };
