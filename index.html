@@ -4704,6 +4704,19 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  // Un lote de perfiles para "Descubrir" — el filtrado de "ya soy amigo /
+  // ya me sigue / soy yo mismo" se hace en el cliente, igual que
+  // getMutualFriends: la tabla de usuarios de esta app es pequeña, así
+  // que traer y filtrar localmente es más simple que una condición
+  // "not in" en la consulta.
+  getDiscoverableUsers: async (limit=60) => {
+    const { data, error } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg, avatar, text_col')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
+  },
   searchByUsername: async (username) => {
     const q = username.startsWith('@') ? username.slice(1) : username;
     const { data, error } = await getSB().from('profiles')
@@ -4800,16 +4813,19 @@ const DB = {
     (followingRes.data||[]).forEach(f => { if (counts[f.follower_id]) counts[f.follower_id].following++; });
     return counts;
   },
-  // Quién de esta lista ha escrito hoy — también apoyado en RLS: si no
-  // puedo ver ninguna entrada de hoy de alguien, no cuenta como "escribió
-  // hoy" para mi vista (coherente con no filtrar nunca por más de lo que
-  // de verdad puedo leer).
+  // Quién de esta lista ha escrito HOY — deliberadamente distinto de "qué
+  // puedo leer". Antes esto consultaba entries directamente, y RLS (bien)
+  // bloqueaba cualquier check guardado sin publicar (visibility
+  // 'ejercicio'), aunque fuera de un amigo mutuo real — así que alguien
+  // que sí escribió aparecía como que no. Esta función RPC distingue
+  // "escribió algo" de "puedo leerlo": confirma actividad sin exponer
+  // contenido, y vuelve a comprobar la amistad mutua ella misma, del lado
+  // del servidor, sin fiarse de qué ids le mande el cliente.
   getTodayWriterIds: async (authorIds) => {
     if (!authorIds?.length) return new Set();
-    const today = new Date().toISOString().slice(0,10);
-    const { data, error } = await getSB().from('entries').select('user_id').in('user_id', authorIds).eq('date', today);
-    if (error) throw error;
-    return new Set((data||[]).map(e => e.user_id));
+    const { data, error } = await getSB().rpc('get_friends_today_activity', { p_friend_ids: authorIds });
+    if (error) { console.error('getTodayWriterIds:', error); return new Set(); }
+    return new Set((data||[]).map(r => r.user_id));
   },
   // ── Reportes y moderación ──
   isAdmin: async () => {
@@ -15860,6 +15876,7 @@ const AmigosScreen=({user,onClose})=>{
   const [textCounts,setTextCounts]=useState({});     // {userId: nº de textos que YO puedo leer}
   const [followCounts,setFollowCounts]=useState({}); // {userId: {followers,following}}
   const [todayWriters,setTodayWriters]=useState(new Set());
+  const [discoverUsers,setDiscoverUsers]=useState([]); // lote base para "Descubrir" sin buscar nada todavía
 
   const loadExtras=async(ids)=>{
     if(!ids?.length)return;
@@ -15893,6 +15910,13 @@ const AmigosScreen=({user,onClose})=>{
         setTotalUsers(total);
         const allIds=[...new Set([...fwingObjs.map(f=>f.id),...fwersObjs.map(f=>f.id)])];
         await loadExtras(allIds);
+        // "Descubrir" sin buscar nada: un lote de gente de la app que
+        // todavía no sigues ni te sigue — se carga aparte, sin bloquear
+        // el resto de la pantalla.
+        DB.getDiscoverableUsers().then(du=>{
+          setDiscoverUsers(du);
+          loadExtras(du.map(u=>u.id));
+        }).catch(e=>console.error('getDiscoverableUsers:',e));
       }catch(e){console.error(e);}
       setLoading(false);
     };
@@ -15905,7 +15929,7 @@ const AmigosScreen=({user,onClose})=>{
       setSearching(true);
       try{
         const r=await DB.searchUsers(query);
-        const filtered=r.filter(u=>u.id!==user.id);
+        const filtered=r.filter(u=>u.id!==user.id&&!followingIds.has(u.id)&&!followerIds.has(u.id));
         setSearchResults(filtered);
         await loadExtras(filtered.map(u=>u.id));
       }catch(e){console.error(e);}
@@ -15939,7 +15963,11 @@ const AmigosScreen=({user,onClose})=>{
   const wroteTodayCount=amigosList.filter(f=>todayWriters.has(f.id)).length;
   const fmtK=n=>n>=1000?Math.round(n/1000)+'k':String(n);
 
-  const listFor=tab==='seguidos'?following:tab==='seguidores'?followers:searchResults;
+  // Sin buscar nada: el lote de "Descubrir" cargado al entrar, sin quien
+  // ya sea seguido/seguidor. Buscando algo: los resultados de searchUsers
+  // (que ya excluyen lo mismo, más el texto de la búsqueda).
+  const discoverBase=discoverUsers.filter(u=>u.id!==user.id&&!followingIds.has(u.id)&&!followerIds.has(u.id));
+  const listFor=tab==='seguidos'?following:tab==='seguidores'?followers:(query.length>=2?searchResults:discoverBase);
   const sortedList=[...listFor].sort((a,b)=>(textCounts[b.id]||0)-(textCounts[a.id]||0));
 
   const Row=({u,rank})=>{
@@ -16067,7 +16095,7 @@ const AmigosScreen=({user,onClose})=>{
           {[
             {k:'seguidos',label:'Seguidos',n:following.length},
             {k:'seguidores',label:'Seguidores',n:followers.length},
-            {k:'descubrir',label:'Descubrir',n:searchResults.length},
+            {k:'descubrir',label:'Descubrir',n:query.length>=2?searchResults.length:discoverBase.length},
           ].map(t=>(
             <div key={t.k} onClick={()=>setTab(t.k)}
               style={{padding:'14px 0 12px',fontSize:11.5,fontWeight:600,letterSpacing:'.09em',textTransform:'uppercase',color:tab===t.k?TXT:FAINT,borderBottom:'2px solid '+(tab===t.k?NARANJA:'transparent'),cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
@@ -16090,8 +16118,8 @@ const AmigosScreen=({user,onClose})=>{
                 <div></div>
               </div>
             )}
-            {tab==='descubrir'&&query.length<2&&(
-              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5,lineHeight:1.6}}>Escribe un nombre o @usuario arriba para buscar escritores.</div>
+            {tab==='descubrir'&&query.length<2&&sortedList.length===0&&(
+              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5,lineHeight:1.6}}>No hay nadie más por descubrir todavía.</div>
             )}
             {tab==='descubrir'&&query.length>=2&&!searching&&sortedList.length===0&&(
               <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:12.5}}>Sin resultados para «{query}».</div>
