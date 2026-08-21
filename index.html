@@ -14713,6 +14713,63 @@ const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library
   );
 };
 
+/* ─── AUTHOR TEXTS SCREEN ─── pantalla dedicada a los textos legibles de
+   una persona — a diferencia del popup de PublicProfile, esto es lo que
+   se abre al pulsar directamente el número de "Textos" en una fila: va
+   derecho a la lista, sin pasar por el perfil. Reutiliza exactamente la
+   misma consulta (getReadableEntries) que ya se apoya en RLS para
+   mostrar solo lo que el usuario actual puede leer de verdad. */
+const AuthorTextsScreen=({author,user,onClose})=>{
+  const [texts,setTexts]=useState(null); // null=cargando
+  const [activity,setActivity]=useState({});
+  const [readEntry,setReadEntry]=useState(null);
+
+  useEffect(()=>{
+    DB.getReadableEntries(author.id,50).then(ts=>{
+      setTexts(ts);
+      const ids=ts.map(t=>t.id);
+      if(ids.length)DB.getActivityForEntries(ids).then(setActivity).catch(()=>{});
+    }).catch(e=>{console.error('AuthorTextsScreen getReadableEntries:',e.message);setTexts([]);});
+  },[author.id]);
+
+  return(
+    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:150,display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',padding:'14px 20px',background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,flexShrink:0,gap:12}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:13,display:'flex',alignItems:'center',gap:5,fontFamily:"'Source Sans 3',sans-serif",flexShrink:0}}>← Volver</button>
+        <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
+          <UserAvatar user={author} size={26}/>
+          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>Textos de {author.name}</div>
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'16px 20px',maxWidth:640,width:'100%',margin:'0 auto',boxSizing:'border-box'}}>
+        {texts===null&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando…</div>}
+        {texts!==null&&texts.length===0&&<div style={{textAlign:'center',padding:40,color:FAINT,fontSize:13,lineHeight:1.6}}>No hay textos que puedas leer ahora mismo.</div>}
+        {texts!==null&&texts.length>0&&(
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {texts.map(t=>{
+              const act=activity[t.id];
+              return(
+                <button key={t.id} onClick={()=>setReadEntry(t)}
+                  style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:4,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,padding:'12px 16px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",width:'100%'}}>
+                  <span style={{fontSize:14.5,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{t.title||'Sin título'}</span>
+                  <div style={{display:'flex',alignItems:'center',gap:9,flexWrap:'wrap'}}>
+                    <span style={{fontSize:11,color:FAINT}}>{t.visibility==='amigos'?'Amigos':'Público'} · {t.word_count||t.wordCount||0} pal.</span>
+                    {act&&act.avgRating&&<span style={{fontSize:11,color:NARANJA,display:'inline-flex',alignItems:'center',gap:2}}><Icon name="star" size={11}/>{act.avgRating}</span>}
+                    {act&&act.reactions>0&&<span style={{fontSize:11,color:AZUL,display:'inline-flex',alignItems:'center',gap:2}}><Icon name="heart" size={11}/>{act.reactions}</span>}
+                    {act&&act.comments>0&&<span style={{fontSize:11,color:AZUL,display:'inline-flex',alignItems:'center',gap:2}}><Icon name="chat-circle" size={11}/>{act.comments}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {readEntry&&<ReadingModal entry={readEntry} user={user} onClose={()=>setReadEntry(null)}/>}
+    </div>
+  );
+};
+
+
 const UserAvatar=({user,size=36,onClick})=>{
   const s={width:size,height:size,borderRadius:'50%',flexShrink:0,cursor:onClick?'pointer':'default'};
   if(user?.avatar)return<img src={user.avatar} alt={user.name||''} onClick={onClick} style={{...s,objectFit:'cover',border:'0.5px solid '+BDR}}/>;
@@ -15791,6 +15848,7 @@ const AmigosScreen=({user,onClose})=>{
   const [searchResults,setSearchResults]=useState([]);
   const [searching,setSearching]=useState(false);
   const [viewingProfile,setViewingProfile]=useState(null);
+  const [viewingAuthorTexts,setViewingAuthorTexts]=useState(null); // pulsar el número de textos va DIRECTO aquí, sin pasar por el perfil
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState('seguidos'); // 'seguidos' | 'seguidores' | 'descubrir'
   const [challengeRecipient,setChallengeRecipient]=useState(null); // persona elegida al pulsar "Retar"
@@ -15927,7 +15985,7 @@ const AmigosScreen=({user,onClose})=>{
             <div style={{fontSize:10.5,color:FAINT,marginTop:2}}>{fc.followers.toLocaleString()} seguidores <span style={{opacity:0.4}}>|</span> {fc.following.toLocaleString()} seguidos</div>
           </div>
         </div>
-        <button onClick={()=>canRead&&setViewingProfile(u)} disabled={!canRead}
+        <button onClick={()=>canRead&&setViewingAuthorTexts(u)} disabled={!canRead}
           style={{display:'flex',alignItems:'center',gap:5,fontSize:13,fontWeight:600,color:canRead?'#1B5FAA':'rgba(10,27,61,0.3)',background:'transparent',border:'none',cursor:canRead?'pointer':'default',padding:0}}>
           <Icon name={canRead?'book-open':'lock-simple'} size={13} color={canRead?'#1B5FAA':'rgba(10,27,61,0.3)'}/>
           {canRead?texts:'—'}
@@ -15955,7 +16013,7 @@ const AmigosScreen=({user,onClose})=>{
               <div style={{fontSize:10,color:FAINT,marginTop:1,whiteSpace:'nowrap'}}>{fc.followers.toLocaleString()} seguidores · {fc.following.toLocaleString()} seguidos</div>
             </div>
           </div>
-          <button onClick={()=>canRead&&setViewingProfile(u)} disabled={!canRead}
+          <button onClick={()=>canRead&&setViewingAuthorTexts(u)} disabled={!canRead}
             style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1,fontSize:12,fontWeight:600,color:canRead?'#1B5FAA':'rgba(10,27,61,0.3)',background:'transparent',border:'none',cursor:canRead?'pointer':'default',padding:0,flexShrink:0}}>
             <Icon name={canRead?'book-open':'lock-simple'} size={15} color={canRead?'#1B5FAA':'rgba(10,27,61,0.3)'}/>
             {canRead?texts:'—'}
@@ -16054,6 +16112,7 @@ const AmigosScreen=({user,onClose})=>{
         onFollow={async(id)=>{await handleFollow(id,false);}}
         onUnfollow={async(id)=>{await handleFollow(id,true);}}
         onClose={()=>setViewingProfile(null)}/>}
+      {viewingAuthorTexts&&<AuthorTextsScreen author={viewingAuthorTexts} user={user} onClose={()=>setViewingAuthorTexts(null)}/>}
       {challengeStep==='type'&&<ChallengeTypeModal user={user} recipient={challengeRecipient}
         onClose={()=>{setChallengeRecipient(null);setChallengeStep(null);}}
         onPickContrarreloj={()=>setChallengeStep('contrarreloj')}
