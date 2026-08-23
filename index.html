@@ -10605,7 +10605,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
   );
 };
 
-const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow,saveProject})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -10649,6 +10649,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
   const [showBiblioteca,setShowBiblioteca]=useState(false);
   const [showEscritorio,setShowEscritorio]=useState(false);
+  const [showMyProjects,setShowMyProjects]=useState(false);
   const [showStats,setShowStats]=useState(false);
   const [showModeration,setShowModeration]=useState(false);
   const [isAdmin,setIsAdmin]=useState(false);
@@ -10863,7 +10864,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               )}
               {/* Ejercicios section */}
               <div style={{fontSize:10,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',padding:'12px 18px 4px'}}>Escribe</div>
-              <button onClick={()=>{onContinue&&onContinue(5);setShowHamburger(false);}}
+              <button onClick={()=>{setShowMyProjects(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
                 <Icon name="notebook" size={16} color={AZULMED}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Tu proyecto</span>
               </button>
@@ -10924,6 +10925,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showModeration&&<ModerationScreen onClose={()=>setShowModeration(false)}/>}
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="biblioteca"/>}
+      {showMyProjects&&<MyProjectsScreen user={user} projects={projects} library={library} saveProject={saveProject}
+        onStart={onStartLesson} onClose={()=>setShowMyProjects(false)}
+        onOpenEscritorio={()=>{setShowMyProjects(false);setShowEscritorio(true);}}/>}
       {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="escritorio"/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
@@ -10958,7 +10962,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
             {showRetosMenu&&retosPos&&<>
               <div onClick={()=>setShowRetosMenu(false)} style={{position:'fixed',inset:0,zIndex:49}}/>
               <div className="fi" style={{position:'fixed',top:retosPos.top,left:retosPos.left,width:190,background:CARD_BG,border:'1px solid '+BDR,borderRadius:12,boxShadow:'0 12px 40px -12px rgba(10,27,61,0.3)',overflow:'hidden',zIndex:50}}>
-                <button onClick={()=>{onContinue&&onContinue(5);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+                <button onClick={()=>{setShowMyProjects(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="notebook"/>Tu proyecto</span>
                   <span style={{fontSize:10.5,color:FAINT}}>Continúa o crea un proyecto propio</span>
                 </button>
@@ -11340,30 +11344,11 @@ const SectionCard=({accent,tag,title,children})=>(
   </div>
 );
 
-const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,writingMode='literatura'})=>{
-  const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
-    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const sk=e.sk||'check';if(['dueto','chain','encadenado','colectivo','cadena','proyecto'].includes(sk))return w>=20;const g=e.goal_words||e.goalWords||0;return g>0?w>=g:w>=20;});
-  const usedCheckIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
-  const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds,writingMode));
-  const checkDone=!!todayCheck?.done;
-  const checkWc=todayCheck?.wordCount||0;
-
-  const defaultChallenge=getRetoPorSemana(writingMode);
-  const savedChallenge=S.get('flujo:'+user.id+':reto:'+defaultChallenge.id)||{};
-  const [reto,setReto]=useState({...defaultChallenge,...savedChallenge});
-  const [editingReto,setEditingReto]=useState(false);
-  const [retoEdit,setRetoEdit]=useState({title:reto.title,desc:reto.desc,goal:reto.goal});
-  const [showLeccion,setShowLeccion]=useState(false);
-  const [leccionReto,setLeccionReto]=useState(null);
-
-  const retoEntries=library.filter(e=>e.sk==='reto'&&e.weekId===defaultChallenge.id);
-  const retoWc=retoEntries.reduce((s,e)=>s+(e.wordCount||0),0);
-  const retoPct=reto.goal>0?Math.min(100,Math.round(retoWc/reto.goal*100)):0;
-  const saveReto=()=>{const updated={...reto,...retoEdit};setReto(updated);S.set('flujo:'+user.id+':reto:'+defaultChallenge.id,updated);setEditingReto(false)};
-
-  // projects/library en vivo + copias que el usuario marcó "mantener offline" en la
-  // Biblioteca. Así "Continuar «Proyecto»" también se puede resolver sin conexión,
-  // en vez de depender solo de lo que ya se haya descargado de Supabase.
+/* ─── PROJECT PICKER ─── la lógica de "elegir/crear un proyecto" extraída
+   a un componente propio, para que SessionBriefing (la sesión de hoy) y
+   MyProjectsScreen (el menú dedicado a proyectos) usen exactamente la
+   misma, en vez de dos copias que puedan desincronizarse con el tiempo. */
+const ProjectPicker=({projects,library,saveProject,onStart,initialGenre=null})=>{
   const combinedProjects=useMemo(()=>{
     const map=new Map();
     offlineKeepProjectsGetAll().forEach(p=>map.set(p.id,p));
@@ -11382,10 +11367,11 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
   const lastProject=lastWrittenEntry
     ?combinedProjects.find(p=>p.id===lastWrittenEntry.project_id)||combinedProjects[0]||null
     :combinedProjects[0]||null;
-  const [showOtherProjects,setShowOtherProjects]=useState(false);
   const [creatingProject,setCreatingProject]=useState(false);
   const [newProj,setNewProj]=useState({title:'',type:'Novela',goal:50000});
-  const [selectedGenre,setSelectedGenre]=useState(null); // null=grid, 'Poesía'/'Relato'/'Novela'/'Ensayo'
+  // initialGenre: para abrir directo en un género concreto (p.ej. desde
+  // el panel "Por tipo" de MyProjectsScreen), sin pasar por el grid.
+  const [selectedGenre,setSelectedGenre]=useState(initialGenre); // null=grid, 'Poesía'/'Relato'/'Novela'/'Ensayo'
 
   const createProject=async()=>{
     if(!newProj.title.trim())return;
@@ -11401,7 +11387,341 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
   };
   const selectProject=p=>{const lastEntry=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});};
 
-  // SectionCard defined outside — see below
+  return(
+    <div style={{padding:'0 18px 18px'}}>
+
+      {/* ── VIEW 1: Genre grid ───────────────────── */}
+      {!selectedGenre&&!creatingProject&&(<>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+          {[
+            {emoji:'feather',label:'Poesía',       types:['Poemario']},
+            {emoji:'book-open',label:'Relato',     types:['Relato corto','Microrrelatos']},
+            {emoji:'books',label:'Novela',         types:['Novela']},
+            {emoji:'pen-nib',label:'Ensayo',       types:['Ensayo','Diario creativo']},
+            {emoji:'video-camera',label:'Película',types:['Película']},
+            {emoji:'video',label:'Cortometraje',   types:['Cortometraje']},
+          ].map(({emoji,label,types})=>{
+            const projs=combinedProjects.filter(p=>types.includes(p.type));
+            return(
+              <button key={label} onClick={()=>{
+                if(projs.length===0){
+                  const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo',Película:'Película',Cortometraje:'Cortometraje'}[label]||'Novela';
+                  setNewProj({title:'',type:defType,goal:50000});
+                  setCreatingProject(true);
+                } else {
+                  setSelectedGenre(label);
+                }
+              }}
+              style={{background:'rgba(30,155,240,0.04)',border:'0.5px solid rgba(30,155,240,0.15)',borderRadius:10,padding:'12px 10px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:4}}>
+                <Icon name={emoji} size={20} color={AZUL}/>
+                <span style={{fontSize:12,fontWeight:600,color:TXT}}>{label}</span>
+                <span style={{fontSize:10,color:MUTED}}>{projs.length} proyecto{projs.length!==1?'s':''}</span>
+              </button>
+            );
+          })}
+        </div>
+        {/* Último proyecto shortcut */}
+        {lastProject&&(
+          <div style={{borderTop:'0.5px solid '+BDR,paddingTop:12}}>
+            <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>Último proyecto</div>
+            <Btn onClick={()=>selectProject(lastProject)} style={{width:'100%',height:40,background:SESSION_BTN_BG,color:SESSION_BTN_TXT}}>
+              Continuar «{lastProject.title}» →
+            </Btn>
+          </div>
+        )}
+      </>)}
+
+      {/* ── VIEW 2: Projects list for selected genre ─ */}
+      {selectedGenre&&!creatingProject&&(()=>{
+        const genreTypes={Poesía:['Poemario'],Relato:['Relato corto','Microrrelatos'],Novela:['Novela'],Ensayo:['Ensayo','Diario creativo'],Película:['Película'],Cortometraje:['Cortometraje']}[selectedGenre]||[];
+        const genreProjs=combinedProjects.filter(p=>genreTypes.includes(p.type));
+        const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo',Película:'Película',Cortometraje:'Cortometraje'}[selectedGenre]||'Novela';
+        return(
+          <>
+            <button onClick={()=>setSelectedGenre(null)} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,marginBottom:12,padding:0,display:'flex',alignItems:'center',gap:4}}>
+              ← Volver a géneros
+            </button>
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
+              {genreProjs.map(p=>{
+                const _projEntries=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id&&!e.deleted).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
+                return(
+                  <div key={p.id} style={{background:'#F8F7F4',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.title}</div>
+                      <div style={{fontSize:11,color:MUTED}}>{wc.toLocaleString()} palabras · {p.type}</div>
+                    </div>
+                    <button onClick={()=>selectProject(p)}
+                      style={{background:TXT,border:'none',borderRadius:7,padding:'6px 12px',fontSize:11,fontWeight:500,color:'#fff',cursor:'pointer',flexShrink:0}}>
+                      Abrir →
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={()=>{setNewProj({title:'',type:defType,goal:50000});setCreatingProject(true);}}
+              style={{width:'100%',background:'transparent',border:'0.5px solid rgba(30,155,240,0.3)',borderRadius:8,padding:'9px',fontSize:12,color:'#1E9BF0',cursor:'pointer'}}>
+              + Nuevo proyecto de {selectedGenre.toLowerCase()}
+            </button>
+          </>
+        );
+      })()}
+
+      {/* ── VIEW 3: Create new project form ─────── */}
+      {creatingProject&&(
+        <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          <button onClick={()=>{setCreatingProject(false);}} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,padding:0,display:'flex',alignItems:'center',gap:4}}>
+            ← {selectedGenre?'Volver a '+selectedGenre:'Volver a géneros'}
+          </button>
+          <div>
+            <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Título del proyecto</div>
+            <input value={newProj.title} onChange={e=>setNewProj(p=>({...p,title:e.target.value}))} placeholder="Ej: Los días de verano" autoFocus style={{width:"100%",border:"0.5px solid "+BDR,borderRadius:8,padding:"8px 10px",fontSize:13,outline:"none",fontFamily:"inherit"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Tipo</div>
+            <select value={newProj.type} onChange={e=>setNewProj(p=>({...p,type:e.target.value}))}
+              style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'8px 10px',fontSize:13,background:CARD_BG,color:TXT,outline:'none',fontFamily:'inherit'}}>
+              {({Poesía:['Poemario'],Relato:['Relato corto','Microrrelatos'],Novela:['Novela'],Ensayo:['Ensayo','Diario creativo'],Película:['Película'],Cortometraje:['Cortometraje']}[selectedGenre]||PROJECT_TYPES).map(t=><option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <Btn onClick={createProject} disabled={!newProj.title.trim()} variant="primary" full style={{height:40}}>
+            Crear y empezar →
+          </Btn>
+        </div>
+      )}
+
+    </div>
+  );
+};
+
+/* ─── MY PROJECTS SCREEN ─── menú dedicado a proyectos: los últimos en
+   los que se ha trabajado (máximo 3, con acceso directo al Escritorio
+   para ver el resto) y, debajo, las mismas modalidades para elegir o
+   crear uno — vía ProjectPicker, sin duplicar su lógica. */
+/* ─── MY PROJECTS SCREEN ─── menú dedicado a proyectos, según el diseño
+   "Mis proyectos (1c)": parrilla de proyectos recientes con progreso, y
+   un panel lateral con creación rápida, conteo por tipo y palabras del
+   mes. Reutiliza ProjectPicker (en un modal) para crear/elegir, sin
+   duplicar esa lógica. */
+const GENRE_META=[
+  {icon:'feather',label:'Poesía',       types:['Poemario'],       color:'#1B5FAA'},
+  {icon:'book-open',label:'Relato',     types:['Relato corto','Microrrelatos'],color:'#1B5FAA'},
+  {icon:'books',label:'Novela',         types:['Novela'],         color:'#1B5FAA'},
+  {icon:'pen-nib',label:'Ensayo',       types:['Ensayo','Diario creativo'],color:NARANJA},
+  {icon:'video-camera',label:'Película',types:['Película'],       color:'#1B5FAA'},
+  {icon:'film-slate',label:'Cortometraje',types:['Cortometraje'], color:'#1B5FAA'},
+];
+const genreForType=t=>GENRE_META.find(g=>g.types.includes(t))||GENRE_META[2];
+
+// Tiempo relativo con horas — para "hace 2 h" en el proyecto recién tocado,
+// no solo días como el relTime que ya existe en otras pantallas.
+const relTimeHours=ts=>{
+  if(!ts)return'';
+  const mins=Math.floor((Date.now()-ts)/60000);
+  if(mins<60)return mins<=1?'hace un momento':'hace '+mins+' min';
+  const hours=Math.floor(mins/60);
+  if(hours<24)return'hace '+hours+' h';
+  const days=Math.floor(hours/24);
+  if(days===1)return'hace 1 día';
+  if(days<7)return'hace '+days+' días';
+  if(days<14)return'hace 1 sem.';
+  if(days<30)return'hace '+Math.floor(days/7)+' sem.';
+  if(days<60)return'hace 1 mes';
+  return'hace '+Math.floor(days/30)+' meses';
+};
+
+const MyProjectsScreen=({user,projects,library,saveProject,onStart,onClose,onOpenEscritorio})=>{
+  const combinedProjects=useMemo(()=>{
+    const map=new Map();
+    offlineKeepProjectsGetAll().forEach(p=>map.set(p.id,p));
+    projects.forEach(p=>map.set(p.id,p));
+    return Array.from(map.values());
+  },[projects]);
+  const combinedLibraryForProjects=useMemo(()=>{
+    const map=new Map();
+    offlineKeepGetAll().forEach(e=>map.set(e.id,e));
+    library.forEach(e=>map.set(e.id,e));
+    return Array.from(map.values());
+  },[library]);
+
+  const [pickerGenre,setPickerGenre]=useState(undefined); // undefined=cerrado, null=grid completo, 'Relato'=directo a ese género
+
+  // Hasta 4 proyectos "en marcha", por la fecha de su entrada más reciente.
+  const recentProjects=useMemo(()=>{
+    const lastEntryByProject={};
+    combinedLibraryForProjects.forEach(e=>{
+      const pid=e.project_id||e.projectId;
+      if(!pid||e.deleted)return;
+      if(!lastEntryByProject[pid]||e.ts>lastEntryByProject[pid].ts)lastEntryByProject[pid]=e;
+    });
+    return combinedProjects
+      .filter(p=>lastEntryByProject[p.id])
+      .map(p=>({...p,_lastEntry:lastEntryByProject[p.id]}))
+      .sort((a,b)=>b._lastEntry.ts-a._lastEntry.ts)
+      .slice(0,4);
+  },[combinedProjects,combinedLibraryForProjects]);
+
+  // Conteo por tipo — los 6 géneros, incluidos los que todavía tienen 0.
+  const genreCounts=useMemo(()=>GENRE_META.map(g=>({
+    ...g,count:combinedProjects.filter(p=>g.types.includes(p.type)).length,
+  })),[combinedProjects]);
+
+  // Palabras escritas ESTE MES (sumando lo añadido en cada sesión, no el
+  // total acumulado) y en cuántos proyectos distintos.
+  const monthStats=useMemo(()=>{
+    const ym=today().slice(0,7); // 'YYYY-MM'
+    const monthEntries=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)&&!e.deleted&&(e.date||'').slice(0,7)===ym);
+    const words=monthEntries.reduce((s,e)=>s+(e.wordsAdded??e.words_added??0),0);
+    const distinctProjects=new Set(monthEntries.map(e=>e.project_id||e.projectId)).size;
+    return{words,distinctProjects};
+  },[combinedLibraryForProjects]);
+
+  const selectProject=p=>{
+    const lastEntry=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;
+    onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:150,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div style={{display:'flex',alignItems:'center',gap:14,padding:'0 24px',height:52,background:CARD_BG,borderBottom:'1px solid '+BDR,flexShrink:0}}>
+        <button onClick={onClose} style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'none',cursor:'pointer',color:MUTED,font:"500 12.5px 'Source Sans 3'"}}>
+          <Icon name="arrow-left" size={14} color={MUTED}/>Menú
+        </button>
+        <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:16,color:TXT}}>Mis proyectos</div>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',display:'grid',gridTemplateColumns:window.innerWidth>=760?'1fr 268px':'1fr'}}>
+        {/* ── Columna principal: en marcha ── */}
+        <div style={{padding:window.innerWidth>=760?'26px 24px 32px':'20px 16px 32px'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18}}>
+            <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:22,letterSpacing:'-0.01em',color:TXT}}>En marcha</div>
+          </div>
+
+          {recentProjects.length===0?(
+            <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:13,lineHeight:1.6}}>
+              Todavía no has escrito en ningún proyecto.<br/>Empieza uno desde el panel de la derecha.
+            </div>
+          ):(
+            <div style={{display:'grid',gridTemplateColumns:window.innerWidth>=520?'1fr 1fr':'1fr',gap:14}}>
+              {recentProjects.map((p,i)=>{
+                const genre=genreForType(p.type);
+                const isTop=i===0;
+                const accent=isTop?NARANJA:'#1E9BF0';
+                const wc=p._lastEntry.word_count||p._lastEntry.wordCount||0;
+                const pct=p.goal>0?Math.min(100,Math.round(wc/p.goal*100)):0;
+                return(
+                  <div key={p.id} onClick={()=>selectProject(p)}
+                    style={{background:CARD_BG,border:'1px solid '+(isTop?'rgba(241,90,36,0.3)':BDR),borderRadius:13,overflow:'hidden',cursor:'pointer'}}>
+                    <div style={{background:isTop?'rgba(241,90,36,0.07)':PAGE_BG,padding:'20px 16px'}}>
+                      <Icon name={genre.icon} size={20} color={isTop?NARANJA:'#1B5FAA'}/>
+                      <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontStyle:'italic',fontSize:19,lineHeight:1.2,marginTop:10,color:TXT}}>{p.title}</div>
+                    </div>
+                    <div style={{padding:'14px 16px'}}>
+                      <div style={{fontSize:11.5,color:MUTED,marginBottom:10}}>{p.type} · {wc.toLocaleString()} palabras · {relTimeHours(p._lastEntry.ts)}</div>
+                      <div style={{height:4,background:'rgba(10,27,61,0.08)',borderRadius:2,marginBottom:12}}>
+                        <div style={{width:pct+'%',height:'100%',background:accent,borderRadius:2}}/>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:6,font:"600 12.5px 'Source Sans 3'",color:accent}}>
+                        {isTop?'Seguir escribiendo':'Abrir'}<Icon name="arrow-right" size={14} color={accent}/>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {combinedProjects.length>0&&(
+            <div onClick={onOpenEscritorio}
+              style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,marginTop:16,font:"600 12.5px 'Source Sans 3'",color:'#1B5FAA',cursor:'pointer'}}>
+              Ver los {combinedProjects.length} proyecto{combinedProjects.length!==1?'s':''} en el Escritorio<Icon name="arrow-right" size={14} color="#1B5FAA"/>
+            </div>
+          )}
+        </div>
+
+        {/* ── Panel lateral ── */}
+        <div style={{background:CARD_BG,borderLeft:window.innerWidth>=760?'1px solid '+BDR:'none',borderTop:window.innerWidth>=760?'none':'1px solid '+BDR,padding:'26px 22px'}}>
+          <button onClick={()=>setPickerGenre(null)}
+            style={{width:'100%',font:"600 13.5px 'Source Sans 3'",color:'#fff',background:NAVY,border:'none',borderRadius:10,padding:13,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginBottom:26}}>
+            <Icon name="plus" size={16} color="#fff"/>Nuevo proyecto
+          </button>
+
+          <div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.22em',textTransform:'uppercase',color:FAINT,marginBottom:14}}>Por tipo</div>
+          <div style={{display:'flex',flexDirection:'column',gap:2}}>
+            {genreCounts.map(g=>(
+              <div key={g.label} onClick={()=>setPickerGenre(g.label)}
+                style={{display:'flex',alignItems:'center',gap:11,padding:'10px 0',borderBottom:'1px solid '+BDR,cursor:'pointer',opacity:g.count===0?0.5:1}}>
+                <Icon name={g.icon} size={17} color={g.color}/>
+                <span style={{flex:1,fontSize:13,fontWeight:600,color:TXT}}>{g.label}</span>
+                {g.count>0
+                  ?<span style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:15,color:g.color}}>{g.count}</span>
+                  :<Icon name="plus" size={14} color={FAINT}/>}
+              </div>
+            ))}
+          </div>
+
+          <div style={{marginTop:26,paddingTop:20,borderTop:'1px solid '+BDR}}>
+            <div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.22em',textTransform:'uppercase',color:FAINT,marginBottom:12}}>Este mes</div>
+            <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:6}}>
+              <span style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:26,color:'#1B5FAA'}}>{monthStats.words.toLocaleString()}</span>
+              <span style={{fontSize:11.5,color:FAINT}}>palabras</span>
+            </div>
+            <div style={{fontSize:12,color:MUTED,lineHeight:1.5}}>
+              {monthStats.distinctProjects>0?('En '+monthStats.distinctProjects+' proyecto'+(monthStats.distinctProjects!==1?'s':'')+' distinto'+(monthStats.distinctProjects!==1?'s':'')+'.'):'Todavía no has escrito este mes.'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {pickerGenre!==undefined&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+          onClick={e=>{if(e.target===e.currentTarget)setPickerGenre(undefined);}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:420,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Nuevo proyecto</div>
+              <button onClick={()=>setPickerGenre(undefined)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+            </div>
+            <ProjectPicker projects={projects} library={library} saveProject={saveProject} onStart={onStart} initialGenre={pickerGenre}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,writingMode='literatura'})=>{
+  const todayCheck=S.get('flujo:check:'+user.id+':'+today())||
+    library.some(e=>{if(e.date?.slice(0,10)!==today())return false;const w=e.words_added!=null?e.words_added:(e.word_count||0);const sk=e.sk||'check';if(['dueto','chain','encadenado','colectivo','cadena','proyecto'].includes(sk))return w>=20;const g=e.goal_words||e.goalWords||0;return g>0?w>=g:w>=20;});
+  // Qué ejercicios se consideran "ya hechos" para decidir cuál proponer.
+  // Antes esto SOLO miraba localStorage (flujo:check:{uid}:*) — un
+  // historial atado al dispositivo, nunca sincronizado. Si alguien
+  // cambiaba de móvil, reinstalaba la app, o el navegador limpiaba datos,
+  // ese historial se perdía sin que la base de datos se enterase — y el
+  // mismo ejercicio, que la lista de checks SÍ sabe que está hecho,
+  // volvía a proponerse como si nunca se hubiera hecho. Ahora se combina
+  // con `library` (la fuente real, ya usada arriba para todayCheck), que
+  // es lo que de verdad se ha completado, sea cual sea el dispositivo.
+  const doneExerciseIds=library.filter(e=>e.week_id||e.weekId).map(e=>e.week_id||e.weekId);
+  const localUsedIds=S.list('flujo:check:'+user.id+':').map(k=>S.get(k)?.exerciseId).filter(Boolean);
+  const usedCheckIds=[...new Set([...doneExerciseIds,...localUsedIds])];
+  const [checkExercise]=useState(()=>pickExercise(energy,usedCheckIds,writingMode));
+  const checkDone=!!todayCheck?.done;
+  const checkWc=todayCheck?.wordCount||0;
+
+  const defaultChallenge=getRetoPorSemana(writingMode);
+  const savedChallenge=S.get('flujo:'+user.id+':reto:'+defaultChallenge.id)||{};
+  const [reto,setReto]=useState({...defaultChallenge,...savedChallenge});
+  const [editingReto,setEditingReto]=useState(false);
+  const [retoEdit,setRetoEdit]=useState({title:reto.title,desc:reto.desc,goal:reto.goal});
+  const [showLeccion,setShowLeccion]=useState(false);
+  const [leccionReto,setLeccionReto]=useState(null);
+
+  const retoEntries=library.filter(e=>e.sk==='reto'&&e.weekId===defaultChallenge.id);
+  const retoWc=retoEntries.reduce((s,e)=>s+(e.wordCount||0),0);
+  const retoPct=reto.goal>0?Math.min(100,Math.round(retoWc/reto.goal*100)):0;
+  const saveReto=()=>{const updated={...reto,...retoEdit};setReto(updated);S.set('flujo:'+user.id+':reto:'+defaultChallenge.id,updated);setEditingReto(false)};
+
+  // La lógica de "elegir/crear proyecto" vive ahora en ProjectPicker,
+  // compartido con MyProjectsScreen — ver más arriba.
 
   const openLeccion=r=>{
     setLeccionReto(r);setShowLeccion(true);
@@ -11493,109 +11813,8 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
         </div>
 
         {/* PROYECTO */}
-        <SectionCard accent="#1B5FAA" tag="Mis proyectos" title={selectedGenre||"¿En qué quieres trabajar?"}>
-          <div style={{padding:'0 18px 18px'}}>
-
-            {/* ── VIEW 1: Genre grid ───────────────────── */}
-            {!selectedGenre&&!creatingProject&&(<>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
-                {[
-                  {emoji:'feather',label:'Poesía',       types:['Poemario']},
-                  {emoji:'book-open',label:'Relato',     types:['Relato corto','Microrrelatos']},
-                  {emoji:'books',label:'Novela',         types:['Novela']},
-                  {emoji:'pen-nib',label:'Ensayo',       types:['Ensayo','Diario creativo']},
-                  {emoji:'video-camera',label:'Película',types:['Película']},
-                  {emoji:'video',label:'Cortometraje',   types:['Cortometraje']},
-                ].map(({emoji,label,types})=>{
-                  const projs=combinedProjects.filter(p=>types.includes(p.type));
-                  return(
-                    <button key={label} onClick={()=>{
-                      if(projs.length===0){
-                        const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo',Película:'Película',Cortometraje:'Cortometraje'}[label]||'Novela';
-                        setNewProj({title:'',type:defType,goal:50000});
-                        setCreatingProject(true);
-                      } else {
-                        setSelectedGenre(label);
-                      }
-                    }}
-                    style={{background:'rgba(30,155,240,0.04)',border:'0.5px solid rgba(30,155,240,0.15)',borderRadius:10,padding:'12px 10px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:4}}>
-                      <Icon name={emoji} size={20} color={AZUL}/>
-                      <span style={{fontSize:12,fontWeight:600,color:TXT}}>{label}</span>
-                      <span style={{fontSize:10,color:MUTED}}>{projs.length} proyecto{projs.length!==1?'s':''}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Último proyecto shortcut */}
-              {lastProject&&(
-                <div style={{borderTop:'0.5px solid '+BDR,paddingTop:12}}>
-                  <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>Último proyecto</div>
-                  <Btn onClick={()=>selectProject(lastProject)} style={{width:'100%',height:40,background:SESSION_BTN_BG,color:SESSION_BTN_TXT}}>
-                    Continuar «{lastProject.title}» →
-                  </Btn>
-                </div>
-              )}
-            </>)}
-
-            {/* ── VIEW 2: Projects list for selected genre ─ */}
-            {selectedGenre&&!creatingProject&&(()=>{
-              const genreTypes={Poesía:['Poemario'],Relato:['Relato corto','Microrrelatos'],Novela:['Novela'],Ensayo:['Ensayo','Diario creativo'],Película:['Película'],Cortometraje:['Cortometraje']}[selectedGenre]||[];
-              const genreProjs=combinedProjects.filter(p=>genreTypes.includes(p.type));
-              const defType={Poesía:'Poemario',Relato:'Relato corto',Novela:'Novela',Ensayo:'Ensayo',Película:'Película',Cortometraje:'Cortometraje'}[selectedGenre]||'Novela';
-              return(
-                <>
-                  <button onClick={()=>setSelectedGenre(null)} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,marginBottom:12,padding:0,display:'flex',alignItems:'center',gap:4}}>
-                    ← Volver a géneros
-                  </button>
-                  <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
-                    {genreProjs.map(p=>{
-                      const _projEntries=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id&&!e.deleted).sort((a,b)=>b.ts-a.ts);const wc=_projEntries[0]?.word_count||_projEntries[0]?.wordCount||0;
-                      return(
-                        <div key={p.id} style={{background:'#F8F7F4',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:10}}>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.title}</div>
-                            <div style={{fontSize:11,color:MUTED}}>{wc.toLocaleString()} palabras · {p.type}</div>
-                          </div>
-                          <button onClick={()=>selectProject(p)}
-                            style={{background:TXT,border:'none',borderRadius:7,padding:'6px 12px',fontSize:11,fontWeight:500,color:'#fff',cursor:'pointer',flexShrink:0}}>
-                            Abrir →
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <button onClick={()=>{setNewProj({title:'',type:defType,goal:50000});setCreatingProject(true);}}
-                    style={{width:'100%',background:'transparent',border:'0.5px solid rgba(30,155,240,0.3)',borderRadius:8,padding:'9px',fontSize:12,color:'#1E9BF0',cursor:'pointer'}}>
-                    + Nuevo proyecto de {selectedGenre.toLowerCase()}
-                  </button>
-                </>
-              );
-            })()}
-
-            {/* ── VIEW 3: Create new project form ─────── */}
-            {creatingProject&&(
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <button onClick={()=>{setCreatingProject(false);}} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:12,padding:0,display:'flex',alignItems:'center',gap:4}}>
-                  ← {selectedGenre?'Volver a '+selectedGenre:'Volver a géneros'}
-                </button>
-                <div>
-                  <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Título del proyecto</div>
-                  <input value={newProj.title} onChange={e=>setNewProj(p=>({...p,title:e.target.value}))} placeholder="Ej: Los días de verano" autoFocus style={{width:"100%",border:"0.5px solid "+BDR,borderRadius:8,padding:"8px 10px",fontSize:13,outline:"none",fontFamily:"inherit"}}/>
-                </div>
-                <div>
-                  <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Tipo</div>
-                  <select value={newProj.type} onChange={e=>setNewProj(p=>({...p,type:e.target.value}))}
-                    style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'8px 10px',fontSize:13,background:CARD_BG,color:TXT,outline:'none',fontFamily:'inherit'}}>
-                    {({Poesía:['Poemario'],Relato:['Relato corto','Microrrelatos'],Novela:['Novela'],Ensayo:['Ensayo','Diario creativo'],Película:['Película'],Cortometraje:['Cortometraje']}[selectedGenre]||PROJECT_TYPES).map(t=><option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <Btn onClick={createProject} disabled={!newProj.title.trim()} variant="primary" full style={{height:40}}>
-                  Crear y empezar →
-                </Btn>
-              </div>
-            )}
-
-          </div>
+        <SectionCard accent="#1B5FAA" tag="Mis proyectos" title="¿En qué quieres trabajar?">
+          <ProjectPicker projects={projects} library={library} saveProject={saveProject} onStart={onStart}/>
         </SectionCard>
       </div>
     </div>
@@ -20416,7 +20635,7 @@ const App=()=>{
         }catch(e){console.error('refresh challenges:',e);}
       }}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
-      onOpenLibrary={()=>setShowExLibrary(true)} onStartLesson={startSession} syncStatus={syncStatus}
+      onOpenLibrary={()=>setShowExLibrary(true)} onStartLesson={startSession} syncStatus={syncStatus} saveProject={saveProject}
       driveData={driveData} driveConnected={driveConnected}
       onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
       onRefresh={()=>loadUserData(user.id)}
