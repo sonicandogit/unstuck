@@ -10605,7 +10605,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
   );
 };
 
-const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow,saveProject})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow,saveProject,autoOpenMyProjects=false,onAutoOpenMyProjectsConsumed})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -10650,6 +10650,17 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showBiblioteca,setShowBiblioteca]=useState(false);
   const [showEscritorio,setShowEscritorio]=useState(false);
   const [showMyProjects,setShowMyProjects]=useState(false);
+  // Al volver "atrás" desde el editor de un proyecto que se abrió desde
+  // Mis proyectos, App marca este flag para que, al remontar el
+  // Dashboard, se reabra esa pantalla en vez de quedarse en el menú
+  // general — y se avisa a App para que lo consuma una sola vez, no en
+  // cada montaje normal del Dashboard.
+  useEffect(()=>{
+    if(autoOpenMyProjects){
+      setShowMyProjects(true);
+      onAutoOpenMyProjectsConsumed&&onAutoOpenMyProjectsConsumed();
+    }
+  },[autoOpenMyProjects]);
   const [showStats,setShowStats]=useState(false);
   const [showModeration,setShowModeration]=useState(false);
   const [isAdmin,setIsAdmin]=useState(false);
@@ -10926,8 +10937,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="biblioteca"/>}
       {showMyProjects&&<MyProjectsScreen user={user} projects={projects} library={library} saveProject={saveProject}
-        onStart={onStartLesson} onClose={()=>setShowMyProjects(false)}
-        onOpenEscritorio={()=>{setShowMyProjects(false);setShowEscritorio(true);}}/>}
+        onStart={onStartLesson} onClose={()=>setShowMyProjects(false)}/>}
       {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="escritorio"/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
@@ -11348,7 +11358,7 @@ const SectionCard=({accent,tag,title,children})=>(
    a un componente propio, para que SessionBriefing (la sesión de hoy) y
    MyProjectsScreen (el menú dedicado a proyectos) usen exactamente la
    misma, en vez de dos copias que puedan desincronizarse con el tiempo. */
-const ProjectPicker=({projects,library,saveProject,onStart,initialGenre=null})=>{
+const ProjectPicker=({projects,library,saveProject,onStart,initialGenre=null,returnTo=null})=>{
   const combinedProjects=useMemo(()=>{
     const map=new Map();
     offlineKeepProjectsGetAll().forEach(p=>map.set(p.id,p));
@@ -11383,9 +11393,9 @@ const ProjectPicker=({projects,library,saveProject,onStart,initialGenre=null})=>
     const folder=GENRE_TO_FOLDER[selectedGenre]||null;
     const p={id:uid(),title:newProj.title.trim(),type:newProj.type,goal:newProj.goal,created_at:today(),word_count:0,folder};
     await saveProject(p);
-    onStart({type:'proyecto',project:p});
+    onStart({type:'proyecto',project:p,returnTo});
   };
-  const selectProject=p=>{const lastEntry=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});};
+  const selectProject=p=>{const lastEntry=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||'',returnTo});};
 
   return(
     <div style={{padding:'0 18px 18px'}}>
@@ -11529,7 +11539,7 @@ const relTimeHours=ts=>{
   return'hace '+Math.floor(days/30)+' meses';
 };
 
-const MyProjectsScreen=({user,projects,library,saveProject,onStart,onClose,onOpenEscritorio})=>{
+const MyProjectsScreen=({user,projects,library,saveProject,onStart,onClose})=>{
   const combinedProjects=useMemo(()=>{
     const map=new Map();
     offlineKeepProjectsGetAll().forEach(p=>map.set(p.id,p));
@@ -11543,22 +11553,34 @@ const MyProjectsScreen=({user,projects,library,saveProject,onStart,onClose,onOpe
     return Array.from(map.values());
   },[library]);
 
-  const [pickerGenre,setPickerGenre]=useState(undefined); // undefined=cerrado, null=grid completo, 'Relato'=directo a ese género
+  const [showCreatePicker,setShowCreatePicker]=useState(false); // modal de "+ Nuevo proyecto" (grid completo)
+  // Filtro por género, en línea — como las pestañas del Escritorio, no un
+  // popup aparte. null = sin filtrar, muestra los últimos 4 en marcha.
+  const [filterGenre,setFilterGenre]=useState(null);
 
-  // Hasta 4 proyectos "en marcha", por la fecha de su entrada más reciente.
-  const recentProjects=useMemo(()=>{
-    const lastEntryByProject={};
+  const lastEntryByProject=useMemo(()=>{
+    const map={};
     combinedLibraryForProjects.forEach(e=>{
       const pid=e.project_id||e.projectId;
       if(!pid||e.deleted)return;
-      if(!lastEntryByProject[pid]||e.ts>lastEntryByProject[pid].ts)lastEntryByProject[pid]=e;
+      if(!map[pid]||e.ts>map[pid].ts)map[pid]=e;
     });
-    return combinedProjects
-      .filter(p=>lastEntryByProject[p.id])
-      .map(p=>({...p,_lastEntry:lastEntryByProject[p.id]}))
-      .sort((a,b)=>b._lastEntry.ts-a._lastEntry.ts)
-      .slice(0,4);
-  },[combinedProjects,combinedLibraryForProjects]);
+    return map;
+  },[combinedLibraryForProjects]);
+
+  // Todos los proyectos relevantes (del género filtrado, o todos si no hay
+  // filtro), sin límite — los que ya tienen alguna sesión guardada
+  // primero, por recencia; los que aún no se han empezado, después, en
+  // orden alfabético. Mismo criterio para ambos casos, así el número
+  // nunca puede desentonar con el conteo de "Por tipo".
+  const shownProjects=useMemo(()=>{
+    const relevant=filterGenre
+      ?combinedProjects.filter(p=>(GENRE_META.find(g=>g.label===filterGenre)?.types||[]).includes(p.type))
+      :combinedProjects;
+    const withActivity=relevant.filter(p=>lastEntryByProject[p.id]).map(p=>({...p,_lastEntry:lastEntryByProject[p.id]})).sort((a,b)=>b._lastEntry.ts-a._lastEntry.ts);
+    const withoutActivity=relevant.filter(p=>!lastEntryByProject[p.id]).sort((a,b)=>(a.title||'').localeCompare(b.title||''));
+    return [...withActivity,...withoutActivity];
+  },[combinedProjects,filterGenre,lastEntryByProject]);
 
   // Conteo por tipo — los 6 géneros, incluidos los que todavía tienen 0.
   const genreCounts=useMemo(()=>GENRE_META.map(g=>({
@@ -11577,7 +11599,15 @@ const MyProjectsScreen=({user,projects,library,saveProject,onStart,onClose,onOpe
 
   const selectProject=p=>{
     const lastEntry=combinedLibraryForProjects.filter(e=>(e.project_id||e.projectId)===p.id).sort((a,b)=>b.ts-a.ts)[0]||null;
-    onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||''});
+    onStart({type:'proyecto',project:p,initialHtml:lastEntry?.html||'',initialPlain:lastEntry?.plain||'',returnTo:'myprojects'});
+  };
+
+  // Pulsar un género en el panel: si ya tiene proyectos, filtra la
+  // parrilla (como una pestaña del Escritorio). Si está vacío, no hay
+  // nada que filtrar — va directa a crear el primero de ese tipo.
+  const onPickGenre=g=>{
+    if(g.count===0){setShowCreatePicker('create:'+g.label);return;}
+    setFilterGenre(prev=>prev===g.label?null:g.label);
   };
 
   return(
@@ -11589,98 +11619,107 @@ const MyProjectsScreen=({user,projects,library,saveProject,onStart,onClose,onOpe
         <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:16,color:TXT}}>Mis proyectos</div>
       </div>
 
-      <div style={{flex:1,overflowY:'auto',display:'grid',gridTemplateColumns:window.innerWidth>=760?'1fr 268px':'1fr'}}>
-        {/* ── Columna principal: en marcha ── */}
-        <div style={{padding:window.innerWidth>=760?'26px 24px 32px':'20px 16px 32px'}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18}}>
-            <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:22,letterSpacing:'-0.01em',color:TXT}}>En marcha</div>
-          </div>
-
-          {recentProjects.length===0?(
-            <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:13,lineHeight:1.6}}>
-              Todavía no has escrito en ningún proyecto.<br/>Empieza uno desde el panel de la derecha.
-            </div>
-          ):(
-            <div style={{display:'grid',gridTemplateColumns:window.innerWidth>=520?'1fr 1fr':'1fr',gap:14}}>
-              {recentProjects.map((p,i)=>{
-                const genre=genreForType(p.type);
-                const isTop=i===0;
-                const accent=isTop?NARANJA:'#1E9BF0';
-                const wc=p._lastEntry.word_count||p._lastEntry.wordCount||0;
-                const pct=p.goal>0?Math.min(100,Math.round(wc/p.goal*100)):0;
-                return(
-                  <div key={p.id} onClick={()=>selectProject(p)}
-                    style={{background:CARD_BG,border:'1px solid '+(isTop?'rgba(241,90,36,0.3)':BDR),borderRadius:13,overflow:'hidden',cursor:'pointer'}}>
-                    <div style={{background:isTop?'rgba(241,90,36,0.07)':PAGE_BG,padding:'20px 16px'}}>
-                      <Icon name={genre.icon} size={20} color={isTop?NARANJA:'#1B5FAA'}/>
-                      <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontStyle:'italic',fontSize:19,lineHeight:1.2,marginTop:10,color:TXT}}>{p.title}</div>
-                    </div>
-                    <div style={{padding:'14px 16px'}}>
-                      <div style={{fontSize:11.5,color:MUTED,marginBottom:10}}>{p.type} · {wc.toLocaleString()} palabras · {relTimeHours(p._lastEntry.ts)}</div>
-                      <div style={{height:4,background:'rgba(10,27,61,0.08)',borderRadius:2,marginBottom:12}}>
-                        <div style={{width:pct+'%',height:'100%',background:accent,borderRadius:2}}/>
-                      </div>
-                      <div style={{display:'flex',alignItems:'center',gap:6,font:"600 12.5px 'Source Sans 3'",color:accent}}>
-                        {isTop?'Seguir escribiendo':'Abrir'}<Icon name="arrow-right" size={14} color={accent}/>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {combinedProjects.length>0&&(
-            <div onClick={onOpenEscritorio}
-              style={{display:'flex',alignItems:'center',justifyContent:'center',gap:7,marginTop:16,font:"600 12.5px 'Source Sans 3'",color:'#1B5FAA',cursor:'pointer'}}>
-              Ver los {combinedProjects.length} proyecto{combinedProjects.length!==1?'s':''} en el Escritorio<Icon name="arrow-right" size={14} color="#1B5FAA"/>
-            </div>
-          )}
-        </div>
-
-        {/* ── Panel lateral ── */}
-        <div style={{background:CARD_BG,borderLeft:window.innerWidth>=760?'1px solid '+BDR:'none',borderTop:window.innerWidth>=760?'none':'1px solid '+BDR,padding:'26px 22px'}}>
-          <button onClick={()=>setPickerGenre(null)}
-            style={{width:'100%',font:"600 13.5px 'Source Sans 3'",color:'#fff',background:NAVY,border:'none',borderRadius:10,padding:13,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginBottom:26}}>
-            <Icon name="plus" size={16} color="#fff"/>Nuevo proyecto
-          </button>
-
-          <div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.22em',textTransform:'uppercase',color:FAINT,marginBottom:14}}>Por tipo</div>
-          <div style={{display:'flex',flexDirection:'column',gap:2}}>
-            {genreCounts.map(g=>(
-              <div key={g.label} onClick={()=>setPickerGenre(g.label)}
-                style={{display:'flex',alignItems:'center',gap:11,padding:'10px 0',borderBottom:'1px solid '+BDR,cursor:'pointer',opacity:g.count===0?0.5:1}}>
-                <Icon name={g.icon} size={17} color={g.color}/>
-                <span style={{flex:1,fontSize:13,fontWeight:600,color:TXT}}>{g.label}</span>
-                {g.count>0
-                  ?<span style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:15,color:g.color}}>{g.count}</span>
-                  :<Icon name="plus" size={14} color={FAINT}/>}
+      <div style={{flex:1,overflowY:'auto'}}>
+        <div style={{maxWidth:920,width:'100%',margin:'0 auto',display:'grid',gridTemplateColumns:window.innerWidth>=760?'1fr 268px':'1fr'}}>
+          {/* ── Columna principal: en marcha / filtrado por género ── */}
+          <div style={{padding:window.innerWidth>=760?'26px 24px 32px':'20px 16px 32px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18,flexWrap:'wrap',gap:10}}>
+              <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:22,letterSpacing:'-0.01em',color:TXT}}>
+                {filterGenre||'En marcha'}
               </div>
-            ))}
+              {filterGenre&&(
+                <button onClick={()=>setFilterGenre(null)}
+                  style={{display:'flex',alignItems:'center',gap:5,background:'transparent',border:'1px solid '+BDR,borderRadius:20,padding:'5px 12px',fontSize:11.5,fontWeight:600,color:MUTED,cursor:'pointer'}}>
+                  × Quitar filtro
+                </button>
+              )}
+            </div>
+
+            {shownProjects.length===0?(
+              <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:13,lineHeight:1.6}}>
+                {filterGenre?('Todavía no tienes ningún proyecto de '+filterGenre.toLowerCase()+' en marcha.')
+                  :(<>Todavía no has escrito en ningún proyecto.<br/>Empieza uno desde el panel de la derecha.</>)}
+              </div>
+            ):(
+              <div style={{display:'grid',gridTemplateColumns:window.innerWidth>=520?'1fr 1fr':'1fr',gap:14}}>
+                {shownProjects.map((p,i)=>{
+                  const genre=genreForType(p.type);
+                  const isTop=!filterGenre&&i===0; // "Seguir escribiendo" solo tiene sentido para el más reciente sin filtrar
+                  const accent=isTop?NARANJA:'#1E9BF0';
+                  // Proyectos sin ninguna sesión guardada todavía (posible al
+                  // filtrar por género) no tienen _lastEntry — se apoyan en
+                  // el propio word_count del proyecto (normalmente 0) y no
+                  // muestran un "hace X" que no existe.
+                  const wc=p._lastEntry?(p._lastEntry.word_count||p._lastEntry.wordCount||0):(p.word_count||p.wordCount||0);
+                  const pct=p.goal>0?Math.min(100,Math.round(wc/p.goal*100)):0;
+                  return(
+                    <div key={p.id} onClick={()=>selectProject(p)}
+                      style={{background:CARD_BG,border:'1px solid '+(isTop?'rgba(241,90,36,0.3)':BDR),borderRadius:13,overflow:'hidden',cursor:'pointer'}}>
+                      <div style={{background:isTop?'rgba(241,90,36,0.07)':PAGE_BG,padding:'20px 16px'}}>
+                        <Icon name={genre.icon} size={20} color={isTop?NARANJA:'#1B5FAA'}/>
+                        <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontStyle:'italic',fontSize:19,lineHeight:1.2,marginTop:10,color:TXT}}>{p.title}</div>
+                      </div>
+                      <div style={{padding:'14px 16px'}}>
+                        <div style={{fontSize:11.5,color:MUTED,marginBottom:10}}>{p.type} · {wc.toLocaleString()} palabras{p._lastEntry?(' · '+relTimeHours(p._lastEntry.ts)):' · sin empezar'}</div>
+                        <div style={{height:4,background:'rgba(10,27,61,0.08)',borderRadius:2,marginBottom:12}}>
+                          <div style={{width:pct+'%',height:'100%',background:accent,borderRadius:2}}/>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:6,font:"600 12.5px 'Source Sans 3'",color:accent}}>
+                          {isTop?'Seguir escribiendo':(p._lastEntry?'Abrir':'Empezar')}<Icon name="arrow-right" size={14} color={accent}/>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div style={{marginTop:26,paddingTop:20,borderTop:'1px solid '+BDR}}>
-            <div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.22em',textTransform:'uppercase',color:FAINT,marginBottom:12}}>Este mes</div>
-            <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:6}}>
-              <span style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:26,color:'#1B5FAA'}}>{monthStats.words.toLocaleString()}</span>
-              <span style={{fontSize:11.5,color:FAINT}}>palabras</span>
+          {/* ── Panel lateral ── */}
+          <div style={{background:CARD_BG,borderLeft:window.innerWidth>=760?'1px solid '+BDR:'none',borderTop:window.innerWidth>=760?'none':'1px solid '+BDR,padding:'26px 22px'}}>
+            <button onClick={()=>setShowCreatePicker('grid')}
+              style={{width:'100%',font:"600 13.5px 'Source Sans 3'",color:'#fff',background:NAVY,border:'none',borderRadius:10,padding:13,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginBottom:26}}>
+              <Icon name="plus" size={16} color="#fff"/>Nuevo proyecto
+            </button>
+
+            <div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.22em',textTransform:'uppercase',color:FAINT,marginBottom:14}}>Por tipo</div>
+            <div style={{display:'flex',flexDirection:'column',gap:2}}>
+              {genreCounts.map(g=>(
+                <div key={g.label} onClick={()=>onPickGenre(g)}
+                  style={{display:'flex',alignItems:'center',gap:11,padding:'10px 8px',margin:'0 -8px',borderRadius:8,borderBottom:'1px solid '+BDR,cursor:'pointer',opacity:g.count===0?0.5:1,background:filterGenre===g.label?'rgba(30,155,240,0.08)':'transparent'}}>
+                  <Icon name={g.icon} size={17} color={g.color}/>
+                  <span style={{flex:1,fontSize:13,fontWeight:600,color:TXT}}>{g.label}</span>
+                  {g.count>0
+                    ?<span style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:15,color:g.color}}>{g.count}</span>
+                    :<Icon name="plus" size={14} color={FAINT}/>}
+                </div>
+              ))}
             </div>
-            <div style={{fontSize:12,color:MUTED,lineHeight:1.5}}>
-              {monthStats.distinctProjects>0?('En '+monthStats.distinctProjects+' proyecto'+(monthStats.distinctProjects!==1?'s':'')+' distinto'+(monthStats.distinctProjects!==1?'s':'')+'.'):'Todavía no has escrito este mes.'}
+
+            <div style={{marginTop:26,paddingTop:20,borderTop:'1px solid '+BDR}}>
+              <div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.22em',textTransform:'uppercase',color:FAINT,marginBottom:12}}>Este mes</div>
+              <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:6}}>
+                <span style={{fontFamily:'"Playfair Display",Georgia,serif',fontWeight:700,fontSize:26,color:'#1B5FAA'}}>{monthStats.words.toLocaleString()}</span>
+                <span style={{fontSize:11.5,color:FAINT}}>palabras</span>
+              </div>
+              <div style={{fontSize:12,color:MUTED,lineHeight:1.5}}>
+                {monthStats.distinctProjects>0?('En '+monthStats.distinctProjects+' proyecto'+(monthStats.distinctProjects!==1?'s':'')+' distinto'+(monthStats.distinctProjects!==1?'s':'')+'.'):'Todavía no has escrito este mes.'}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {pickerGenre!==undefined&&(
+      {showCreatePicker&&(
         <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
-          onClick={e=>{if(e.target===e.currentTarget)setPickerGenre(undefined);}}>
+          onClick={e=>{if(e.target===e.currentTarget)setShowCreatePicker(false);}}>
           <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:420,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
             <div style={{padding:'16px 20px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
               <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Nuevo proyecto</div>
-              <button onClick={()=>setPickerGenre(undefined)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+              <button onClick={()=>setShowCreatePicker(false)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
             </div>
-            <ProjectPicker projects={projects} library={library} saveProject={saveProject} onStart={onStart} initialGenre={pickerGenre}/>
+            <ProjectPicker projects={projects} library={library} saveProject={saveProject} onStart={onStart}
+              initialGenre={showCreatePicker.startsWith?.('create:')?showCreatePicker.slice(7):null} returnTo="myprojects"/>
           </div>
         </div>
       )}
@@ -20296,9 +20335,25 @@ const App=()=>{
 
   const goToBriefing=e=>{setEnergy(e);setView('briefing');};
   const startCuentoWithChallenge=ch=>{setCuentoChallenge(ch);setView('cuento');if(!S.get(firstTimeKey('contrarreloj',user?.id)))setActivePopup('contrarreloj');};
+  // De dónde vino la sesión que se está escribiendo — para que "atrás"
+  // desde el editor vuelva al sitio correcto. 'briefing' (la sesión de
+  // hoy) sigue siendo el destino por defecto, coherente con como
+  // funcionaba antes de que existiera la pantalla dedicada de proyectos.
+  const [sessionReturnTo,setSessionReturnTo]=useState(null); // null='briefing' | 'myprojects'
+  const [pendingOpenMyProjects,setPendingOpenMyProjects]=useState(false);
   const startSession=cfg=>{
+    setSessionReturnTo(cfg.returnTo||null);
     if(cfg.type==='cuento'){setCuentoWritingMode(cfg.writingMode||'literatura');setView('cuento');}
     else{setSessionConfig(cfg);setView('editor');}
+  };
+  const backFromEditor=()=>{
+    if(sessionReturnTo==='myprojects'){
+      setSessionReturnTo(null);
+      setPendingOpenMyProjects(true);
+      setView('dashboard');
+    }else{
+      setView('briefing');
+    }
   };
   const finishDay=data=>{setSessionData(data);setView('postSession');};
   // Al reeditar un texto existente (incluida la escritura compartida, que siempre
@@ -20607,9 +20662,9 @@ const App=()=>{
     const isScriptMode=sessionConfig.writingMode==='guion';
     if(isScriptProject||isScriptMode)return<ScriptEditor user={user} project={sessionConfig.project||null}
       sessionConfig={sessionConfig}
-      saveEntry={saveEntry} onFinishDay={finishDay} onBack={()=>setView('briefing')}/>;
+      saveEntry={saveEntry} onFinishDay={finishDay} onBack={backFromEditor}/>;
     return<Editor user={user} library={library} saveEntry={saveEntry} saveProject={saveProject}
-      onFinishDay={finishDay} onBack={()=>setView('briefing')}
+      onFinishDay={finishDay} onBack={backFromEditor}
       driveData={driveData} sessionConfig={sessionConfig}/>;
   }
 
@@ -20636,6 +20691,7 @@ const App=()=>{
       }}
       onContinue={goToBriefing} onLogout={logout} onDeleteEntry={deleteEntry}
       onOpenLibrary={()=>setShowExLibrary(true)} onStartLesson={startSession} syncStatus={syncStatus} saveProject={saveProject}
+      autoOpenMyProjects={pendingOpenMyProjects} onAutoOpenMyProjectsConsumed={()=>setPendingOpenMyProjects(false)}
       driveData={driveData} driveConnected={driveConnected}
       onDriveUpdate={ns=>{S.set('flujo:drive:'+user.id,ns);setDriveRefresh(r=>r+1);}}
       onRefresh={()=>loadUserData(user.id)}
