@@ -5014,6 +5014,13 @@ const DB = {
     if (error) throw error;
     return data;
   },
+  // Dueto con Claude como compañero — sin invitación que aceptar (no hay
+  // una segunda persona real), empieza directamente en marcha.
+  createAIDuet: async (d) => {
+    const { data, error } = await getSB().from('duets').insert({ ...d, is_ai_partner: true, user_b: null, name_b: 'Claude', status: 'active' }).select().single();
+    if (error) throw error;
+    return data;
+  },
   getMyDuets: async (uid) => {
     const { data, error } = await getSB().from('duets')
       .select('*')
@@ -9840,6 +9847,40 @@ const callClaude=async(system,userMsg,maxTokens=600,uid)=>{
 };
 const FEEDBACK_SYSTEM='Eres un lector honesto y perspicaz de escritura creativa. Responde siempre en español. Sé directo, concreto y breve. Estructura tu respuesta exactamente así:\n\n1. Una cosa que funciona: algo específico que genuinamente funciona en el texto. Nada genérico. Señala un momento concreto.\n2. Una cosa que explorar: algo que el escritor podría desarrollar más, empujar, o que se queda a medias. Sé honesto.\n3. Una pregunta para la próxima vez: una pregunta o reto concreto que le quede dando vueltas.\n\nMáximo 160 palabras en total. No uses frases como "¡Bien hecho!" ni "¡Excelente!".';
 const PUSH_SYSTEM='Eres un coach de escritura creativa. Da UNA sola idea concreta en español — una pregunta, una imagen, una dirección — basada en lo que ya ha escrito. Máximo 2 frases. No resumas lo que escribió. No lo alabes. Sé directo y específico.';
+
+// ── Relato a dos manos con Claude ──
+// Claude escribe el siguiente turno del MISMO relato — nunca comenta,
+// nunca sale del texto. La instrucción de longitud (con su margen del
+// 25%) es dinámica por turno, así que va en el mensaje, no aquí.
+const DUET_AI_SYSTEM=`Estás escribiendo un relato a dos manos, por turnos, con otra persona. Eres el mismo narrador que ella — no un comentarista, no un asistente: la voz que continúa exactamente donde ella la dejó.
+
+Se te dará el relato completo hasta ahora. Escribe solo el siguiente turno — la prosa que sigue, nada más. Ninguna explicación, ninguna nota, ningún comentario sobre lo que acabas de leer o vas a escribir. No existes fuera del relato.
+
+Reglas:
+- Sigue la voz de quien ha escrito hasta ahora: su registro, su ritmo, sus decisiones de estilo. No la tuya por defecto — la suya.
+- No termines la historia. Sigue los principios normales de cualquier relato: avanza, complica, insinúa — pero deja algo con lo que la otra persona pueda seguir. No te quedes con la última palabra.
+- Nunca hables de la escritura, de ti, ni de que esto es una colaboración. Ni una palabra fuera del relato mismo.`;
+
+// Escapa texto plano para insertarlo como HTML seguro (el editor de
+// duetos humano-humano guarda HTML directamente desde contentEditable;
+// el turno de Claude parte de texto plano, así que hay que escaparlo).
+const escapeHtml=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const plainToSimpleHtml=plain=>plain.split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean).map(p=>'<p>'+escapeHtml(p).replace(/\n/g,'<br>')+'</p>').join('');
+
+// Genera el turno de Claude: recibe el relato completo hasta ahora y la
+// extensión del turno humano que se acaba de escribir, para calcular el
+// margen del 25% pedido, sin bajar nunca del mínimo del propio dueto.
+const generateAIDuetTurn=async(fullPlainSoFar,minWords,humanWc,uid)=>{
+  const base=humanWc>0?humanWc:minWords;
+  const targetMin=Math.max(minWords,Math.round(base*0.75));
+  const targetMax=Math.round(base*1.25);
+  const userMsg='Relato hasta ahora:\n\n'+fullPlainSoFar+'\n\nEscribe el siguiente turno. Debe tener entre '+targetMin+' y '+targetMax+' palabras.';
+  const maxTokens=Math.max(700,Math.round(targetMax*2.2));
+  const text=await callClaude(DUET_AI_SYSTEM,userMsg,maxTokens,uid);
+  const plain=text.trim();
+  const wc=plain?plain.trim().split(/\s+/).filter(Boolean).length:0;
+  return{plain,html:plainToSimpleHtml(plain),wc};
+};
 const doPush=async(customExercise,customReto,currentProject,plainTxt,uid)=>{
   const btn=document.getElementById('push-btn');
   if(!plainTxt?.trim()){alert('Escribe algo primero.');return}
@@ -16626,6 +16667,7 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
   const [friends,setFriends]=useState([]);
   const [results,setResults]=useState([]);
   const [recipient,setRecipient]=useState(presetRecipient);
+  const [withClaude,setWithClaude]=useState(false); // escribir con Claude en vez de con un amigo
   const [title,setTitle]=useState('');
   const [premise,setPremise]=useState('');
   const [minWords,setMinWords]=useState(100);
@@ -16645,9 +16687,22 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
   },[query,friends]);
 
   const send=async()=>{
-    if(!recipient||sending)return;
+    if(!withClaude&&!recipient||sending)return;
     setSending(true);setStatus('');
     try{
+      if(withClaude){
+        const duet=await DB.createAIDuet({
+          title:title.trim()||'Relato a cuatro manos',
+          premise:premise.trim()||null,
+          min_words:minWords,
+          user_a:user.id,
+          name_a:user.name,username_a:user.username||user.name,
+          current_turn:'a',
+        });
+        setStatus('¡Empieza cuando quieras!');
+        setTimeout(()=>{onCreated&&onCreated(duet);onClose();},1000);
+        return;
+      }
       const duet=await DB.createDuet({
         title:title.trim()||'Relato a cuatro manos',
         premise:premise.trim()||null,
@@ -16677,25 +16732,40 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
           {/* Recipient */}
           <div>
             <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:8}}>¿Con quién escribes?</div>
-            {recipient?(
+            {withClaude?(
+              <div style={{display:'flex',alignItems:'center',gap:10,background:'rgba(30,155,240,0.06)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:9,padding:'9px 12px'}}>
+                <div style={{width:32,height:32,borderRadius:'50%',background:NAVY,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                  <Icon name="sparkle" size={16} color="#fff"/>
+                </div>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT}}>Claude</div><div style={{fontSize:11,color:MUTED}}>Responde al instante, en cada turno</div></div>
+                <button onClick={()=>setWithClaude(false)} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:16}}>×</button>
+              </div>
+            ):recipient?(
               <div style={{display:'flex',alignItems:'center',gap:10,background:'rgba(30,155,240,0.06)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:9,padding:'9px 12px'}}>
                 <UserAvatar user={recipient} size={32}/>
                 <div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT}}>{recipient.name}</div><div style={{fontSize:11,color:MUTED}}>@{recipient.username||'?'}</div></div>
                 <button onClick={()=>{setRecipient(null);setQuery('');}} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:16}}>×</button>
               </div>
             ):(
-              <div style={{position:'relative'}}>
-                <input type="text" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar entre tus amigos…" style={{width:'100%'}}/>
-                {results.length>0&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,boxShadow:'0 12px 30px -8px rgba(10,27,61,0.25)',overflow:'hidden',zIndex:10}}>
-                  {results.map(r=>(
-                    <button key={r.id} onClick={()=>{setRecipient(r);setQuery('');setResults([]);}}
-                      style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'9px 12px',cursor:'pointer',borderBottom:'0.5px solid '+BDR}}>
-                      <UserAvatar user={r} size={28}/>
-                      <div style={{textAlign:'left'}}><div style={{fontSize:12,fontWeight:500,color:TXT}}>{r.name}</div><div style={{fontSize:11,color:MUTED}}>@{r.username||'?'}</div></div>
-                    </button>
-                  ))}
-                </div>}
-                {query.length<2&&friends.length===0&&<div style={{fontSize:11,color:FAINT,marginTop:5}}>Solo puedes invitar a amigos — todavía no tienes ninguno mutuo.</div>}
+              <div>
+                <div style={{position:'relative'}}>
+                  <input type="text" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar entre tus amigos…" style={{width:'100%'}}/>
+                  {results.length>0&&<div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:CARD_BG,border:'1px solid '+BDR,borderRadius:9,boxShadow:'0 12px 30px -8px rgba(10,27,61,0.25)',overflow:'hidden',zIndex:10}}>
+                    {results.map(r=>(
+                      <button key={r.id} onClick={()=>{setRecipient(r);setQuery('');setResults([]);}}
+                        style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:'transparent',border:'none',padding:'9px 12px',cursor:'pointer',borderBottom:'0.5px solid '+BDR}}>
+                        <UserAvatar user={r} size={28}/>
+                        <div style={{textAlign:'left'}}><div style={{fontSize:12,fontWeight:500,color:TXT}}>{r.name}</div><div style={{fontSize:11,color:MUTED}}>@{r.username||'?'}</div></div>
+                      </button>
+                    ))}
+                  </div>}
+                  {query.length<2&&friends.length===0&&<div style={{fontSize:11,color:FAINT,marginTop:5}}>Solo puedes invitar a amigos — todavía no tienes ninguno mutuo.</div>}
+                </div>
+                <button onClick={()=>setWithClaude(true)}
+                  style={{display:'flex',alignItems:'center',gap:8,width:'100%',marginTop:8,background:'transparent',border:'1px dashed rgba(30,155,240,0.35)',borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left'}}>
+                  <Icon name="sparkle" size={15} color={AZUL}/>
+                  <span style={{fontSize:12.5,fontWeight:500,color:AZUL}}>O escribe con Claude</span>
+                </button>
               </div>
             )}
           </div>
@@ -16722,9 +16792,9 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
 
           {status&&<div style={{fontSize:12,color:status.startsWith('Error')?'#C5221F':'#1E9BF0',padding:'8px 12px',background:status.startsWith('Error')?'rgba(197,34,31,0.06)':'rgba(30,155,240,0.07)',borderRadius:8}}>{status}</div>}
 
-          <button onClick={send} disabled={!recipient||sending}
-            style={{background:recipient&&!sending?TXT:'rgba(0,0,0,0.1)',border:'none',borderRadius:9,padding:'11px',fontSize:14,fontWeight:500,color:recipient&&!sending?'#fff':FAINT,cursor:recipient&&!sending?'pointer':'default'}}>
-            {sending?'Enviando…':<><Icon name="hands-clapping" size={13}/> Enviar invitación</>}
+          <button onClick={send} disabled={(!withClaude&&!recipient)||sending}
+            style={{background:(withClaude||recipient)&&!sending?TXT:'rgba(0,0,0,0.1)',border:'none',borderRadius:9,padding:'11px',fontSize:14,fontWeight:500,color:(withClaude||recipient)&&!sending?'#fff':FAINT,cursor:(withClaude||recipient)&&!sending?'pointer':'default'}}>
+            {sending?(withClaude?'Empezando…':'Enviando…'):(withClaude?<><Icon name="sparkle" size={13}/> Empezar a escribir</>:<><Icon name="hands-clapping" size={13}/> Enviar invitación</>)}
           </button>
         </div>
       </div>
@@ -17283,6 +17353,9 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
   const [wc,setWc]=useState(0);
   const [saving,setSaving]=useState(false);
   const [confirmSkip,setConfirmSkip]=useState(false);
+  const [aiThinking,setAiThinking]=useState(false); // Claude generando su turno, tras pasar el tuyo
+  const [aiError,setAiError]=useState(''); // 'no_key' | 'invalid_key' | 'error' | ''
+  const [showKey,setShowKey]=useState(false);
   const edRef=useRef(null);
 
   // Saltar mi turno SIN escribir — para cuando no llego a tiempo y no quiero
@@ -17337,12 +17410,34 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         date:new Date().toISOString().slice(0,10),ts:Date.now(),
         visibility:'ejercicio',
       });}catch(e){console.error('duet entry:',e);}
-      const newFullHtml=(duet.full_html||'')+html;
-      const newFullPlain=(duet.full_plain||'')+(duet.full_plain?'\n\n':'')+plainTxt;
+      let newFullHtml=(duet.full_html||'')+html;
+      let newFullPlain=(duet.full_plain||'')+(duet.full_plain?'\n\n':'')+plainTxt;
+      let newTurnCount=duet.turn_count+1;
+
+      // Compañero Claude: responde en el acto, con tu propia clave de API
+      // — nunca cuenta como turno "esperando", el turno vuelve a ser tuyo
+      // de inmediato. No se guarda como entries (no es actividad tuya).
+      if(duet.is_ai_partner&&!propose){
+        setAiThinking(true);
+        try{
+          const aiTurn=await generateAIDuetTurn(newFullPlain,duet.min_words,wc,user.id);
+          if(aiTurn.plain){
+            await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html:aiTurn.html,plain:aiTurn.plain,word_count:aiTurn.wc,turn_number:newTurnCount+1,is_ai:true});
+            newFullHtml+='<div style="border-left:2px solid rgba(30,155,240,0.35);padding-left:14px;margin:4px 0;">'+aiTurn.html+'</div>';
+            newFullPlain+=(newFullPlain?'\n\n':'')+aiTurn.plain;
+            newTurnCount+=1;
+          }
+        }catch(e){
+          console.error('generateAIDuetTurn:',e);
+          setAiError(e.message==='no_key'?'no_key':e.message==='invalid_key'?'invalid_key':'error');
+        }
+        setAiThinking(false);
+      }
+
       const patch={
         full_html:newFullHtml,full_plain:newFullPlain,
-        turn_count:duet.turn_count+1,
-        current_turn:isA?'b':'a',
+        turn_count:newTurnCount,
+        current_turn:duet.is_ai_partner?'a':(isA?'b':'a'), // con Claude, el turno siempre vuelve a ti
       };
       if(propose){patch.status='finish_proposed';patch.finish_proposed_by=user.id;}
       await DB.updateDuet(duet.id,patch);
@@ -17493,6 +17588,23 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         )}
       </div>
 
+      {aiError&&(
+        <div style={{position:'absolute',left:20,right:20,bottom:myTurn?70:20,zIndex:5}}>
+          {aiError==='no_key'&&<div style={{background:'rgba(30,155,240,0.08)',border:'0.5px solid rgba(30,155,240,0.25)',borderRadius:9,padding:'12px 14px',boxShadow:'0 8px 24px -8px rgba(10,27,61,0.3)'}}>
+            <p style={{fontSize:13,color:TXT,lineHeight:1.65,marginBottom:10}}>Tu turno se guardó, pero Claude no pudo responder — hace falta tu API key para que escriba su turno. Se guarda solo en tu navegador.</p>
+            <Btn variant="accent" onClick={()=>setShowKey(true)} small>Añadir API key →</Btn>
+          </div>}
+          {aiError==='invalid_key'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',display:'flex',alignItems:'center',gap:10,boxShadow:'0 8px 24px -8px rgba(10,27,61,0.3)'}}>
+            <p style={{fontSize:13,color:'#C5221F',flex:1}}>Tu turno se guardó, pero la API key no es válida.</p>
+            <Btn variant="danger" onClick={()=>setShowKey(true)} small>Actualizar</Btn>
+          </div>}
+          {aiError==='error'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',boxShadow:'0 8px 24px -8px rgba(10,27,61,0.3)'}}>
+            <p style={{fontSize:13,color:'#C5221F'}}>Tu turno se guardó, pero Claude no pudo responder esta vez. Puedes seguir escribiendo tú y lo intenta de nuevo en el siguiente turno.</p>
+          </div>}
+        </div>
+      )}
+      {showKey&&<ApiKeyPanel userId={user.id} onClose={()=>{setShowKey(false);setAiError('');}}/>}
+
       {/* Bottom bar (my turn) */}
       {myTurn&&(
         <div className="duet-bar" style={{position:'absolute',bottom:0,left:0,right:0,padding:'12px 20px',background:canPass?'rgba(30,155,240,0.97)':'rgba(26,25,22,0.95)',display:'flex',alignItems:'center',gap:12,transition:'background 0.4s',flexWrap:'wrap'}}>
@@ -17512,7 +17624,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
           </button>
           <button onClick={()=>passTurn(false)} disabled={!canPass||saving}
             style={{background:canPass?'#fff':'rgba(255,255,255,0.15)',border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:600,color:canPass?'#1E9BF0':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
-            {saving?'Guardando…':'Pasar el turno →'}
+            {aiThinking?'Claude está escribiendo…':saving?'Guardando…':'Pasar el turno →'}
           </button>
         </div>
       )}
