@@ -5030,6 +5030,24 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  // Releer UN solo dueto — para refrescar tras pasar un turno sin traer
+  // la lista entera de vuelta.
+  getDuet: async (id) => {
+    const { data, error } = await getSB().from('duets').select('*').eq('id', id).single();
+    if (error) throw error;
+    return data;
+  },
+  // Borrado unilateral — solo para duetos con Claude (is_ai_partner), donde
+  // no hay una segunda persona real a la que le afecte. Un dueto humano no
+  // debería poder borrarse así, sin que la otra persona tenga ni voz ni
+  // voto — por eso esta función no se usa nunca desde ese caso.
+  // Se borran los turnos primero, sin asumir que exista ON DELETE CASCADE.
+  deleteDuet: async (id) => {
+    const { error: turnsErr } = await getSB().from('duet_turns').delete().eq('duet_id', id);
+    if (turnsErr) throw turnsErr;
+    const { error } = await getSB().from('duets').delete().eq('id', id);
+    if (error) throw error;
+  },
   updateDuet: async (id, patch) => {
     const { error } = await getSB().from('duets').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
@@ -10770,6 +10788,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     }catch(e){console.error('notification navigate:',e);}
   };
   const [showSendDuet,setShowSendDuet]=useState(false);
+  const [openDuetFromCreate,setOpenDuetFromCreate]=useState(null); // salta directo al editor tras crear un dueto con Claude — no hay invitación que esperar
   const [showStartChain,setShowStartChain]=useState(false);
   const [showLibChecks,setShowLibChecks]=useState(false);
   const [showLibSemanales,setShowLibSemanales]=useState(false);
@@ -10986,7 +11005,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
-      {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}/>}
+      {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}
+        onCreated={duet=>{if(duet.is_ai_partner)setOpenDuetFromCreate(duet);}}/>}
+      {openDuetFromCreate&&<DuetEditor user={user} duet={openDuetFromCreate} onClose={()=>setOpenDuetFromCreate(null)} onUpdate={updated=>{if(updated)setOpenDuetFromCreate(updated);}}/>}
       {showStartChain&&<StartChainModal user={user} onClose={()=>setShowStartChain(false)}/>}
       {showLibChecks&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="check" onStartLesson={onStartLesson} onClose={()=>setShowLibChecks(false)} writingMode={writingMode}/>}
       {showLibSemanales&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="reto" onStartLesson={onStartLesson} onClose={()=>setShowLibSemanales(false)} writingMode={writingMode}/>}
@@ -17356,6 +17377,8 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
   const [aiThinking,setAiThinking]=useState(false); // Claude generando su turno, tras pasar el tuyo
   const [aiError,setAiError]=useState(''); // 'no_key' | 'invalid_key' | 'error' | ''
   const [showKey,setShowKey]=useState(false);
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const [deleting,setDeleting]=useState(false);
   const edRef=useRef(null);
 
   // Saltar mi turno SIN escribir — para cuando no llego a tiempo y no quiero
@@ -17448,6 +17471,19 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
 
+  // Borrado unilateral, solo para duetos con Claude — no hay una segunda
+  // persona a la que avisar ni pedir acuerdo, así que no hace falta el
+  // baile de "proponer fin" que sí necesitan los duetos humanos.
+  const handleDelete=async()=>{
+    if(deleting)return;
+    setDeleting(true);
+    try{
+      await DB.deleteDuet(duet.id);
+      onUpdate&&onUpdate(); // que quien mantenga una lista la refresque; el propio dueto ya no existe
+      onClose();
+    }catch(e){alert('Error: '+e.message);setDeleting(false);}
+  };
+
   const confirmFinish=async()=>{
     setSaving(true);
     try{
@@ -17512,8 +17548,17 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
   };
 
   if(turnDone)return<SessionCompleteModal summary={turnDone} variant="turn"
-    note={'Le toca a '+otherName+'. Te avisaremos cuando responda.'}
-    onClose={()=>{setTurnDone(null);onClose();}}/>;
+    note={duet.is_ai_partner?'Claude ya ha respondido — puedes seguir cuando quieras.':('Le toca a '+otherName+'. Te avisaremos cuando responda.')}
+    onClose={async()=>{
+      setTurnDone(null);
+      // Traer el dueto fresco antes de avisar al padre — así, tanto si
+      // onUpdate espera el dato directamente (setOpenDuet(updated)) como
+      // si solo recarga su propia lista (load), llega con lo último de
+      // verdad, no con lo que había antes de pasar el turno.
+      try{const fresh=await DB.getDuet(duet.id);onUpdate&&onUpdate(fresh);}
+      catch(e){console.error('getDuet tras pasar turno:',e);onUpdate&&onUpdate();}
+      onClose();
+    }}/>;
 
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='cuatromanos' onClose={dismissIntro}/>}
@@ -17530,6 +17575,12 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
           </div>
         )}
         {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(30,155,240,0.3)',color:'#A5A0E8'}}>Terminado</div>}
+        {duet.is_ai_partner&&(
+          <button onClick={()=>setConfirmDelete(true)} title="Eliminar relato"
+            style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
+            <Icon name="trash" size={16} color="rgba(255,255,255,0.4)"/>
+          </button>
+        )}
       </div>
 
       {duet.premise&&<div style={{padding:'10px 18px',background:'rgba(30,155,240,0.05)',borderBottom:'0.5px solid '+BDR,fontSize:12,color:'#1E9BF0',fontStyle:'italic',flexShrink:0}}>
@@ -17637,6 +17688,26 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
             <div style={{display:'flex',gap:8}}>
               <button onClick={()=>setConfirmSkip(false)} style={{flex:1,padding:'10px',background:'transparent',border:'1px solid '+BDR,borderRadius:9,fontSize:13.5,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cancelar</button>
               <button onClick={skipTurn} disabled={saving} style={{flex:1,padding:'10px',background:NAVY,border:'none',borderRadius:9,fontSize:13.5,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>{saving?'Guardando…':'Saltar turno'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmDelete&&(
+        <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+          onClick={e=>{if(e.target===e.currentTarget&&!deleting)setConfirmDelete(false);}}>
+          <div style={{background:CARD_BG,borderRadius:14,padding:'22px 24px',maxWidth:320,width:'100%',textAlign:'center'}}>
+            <div style={{fontSize:14,color:TXT,lineHeight:1.5,marginBottom:20}}>
+              ¿Eliminar «<strong>{duet.title}</strong>»? Se borra el relato entero, sin poder deshacerlo.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setConfirmDelete(false)} disabled={deleting}
+                style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer'}}>
+                Cancelar
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                style={{flex:1,background:'#C5221F',border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+                {deleting?'Eliminando…':'Eliminar'}
+              </button>
             </div>
           </div>
         </div>
