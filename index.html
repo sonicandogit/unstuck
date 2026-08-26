@@ -5052,6 +5052,46 @@ const DB = {
     const { error } = await getSB().from('duets').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
   },
+  // Seguir un dueto sin escribir — mismo patrón que followCollective.
+  followDuet: async (duetId, uid) => {
+    const { error } = await getSB().from('duet_followers').insert({ duet_id: duetId, user_id: uid });
+    if (error) throw error;
+  },
+  unfollowDuet: async (duetId, uid) => {
+    const { error } = await getSB().from('duet_followers').delete()
+      .eq('duet_id', duetId).eq('user_id', uid);
+    if (error) throw error;
+  },
+  getFollowedDuets: async (uid) => {
+    const { data: follows } = await getSB().from('duet_followers').select('duet_id').eq('user_id', uid);
+    const ids = (follows || []).map(f => f.duet_id);
+    if (!ids.length) return [];
+    const { data, error } = await getSB().from('duets').select('*').in('id', ids).order('updated_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+  inviteDuetFollowers: async (duetId) => {
+    const { error } = await getSB().rpc('invite_duet_followers', { p_duet_id: duetId });
+    if (error) console.error('inviteDuetFollowers:', error.message);
+  },
+  // Reacciones de duetos — POR TURNO, igual que en colectivos.
+  getDuetTurnReactions: async (turnIds) => {
+    if (!turnIds?.length) return [];
+    const { data, error } = await getSB().from('duet_turn_reactions').select('turn_id, emoji, user_id').in('turn_id', turnIds);
+    if (error) throw error;
+    return data || [];
+  },
+  toggleDuetTurnReaction: async (turnId, userId, emoji) => {
+    const { data: existing } = await getSB().from('duet_turn_reactions')
+      .select('id').eq('turn_id', turnId).eq('user_id', userId).eq('emoji', emoji).maybeSingle();
+    if (existing) {
+      await getSB().from('duet_turn_reactions').delete().eq('id', existing.id);
+      return false;
+    } else {
+      await getSB().from('duet_turn_reactions').insert({ turn_id: turnId, user_id: userId, emoji });
+      return true;
+    }
+  },
   getDuetTurns: async (duetId) => {
     const { data, error } = await getSB().from('duet_turns').select('*').eq('duet_id', duetId).order('turn_number', { ascending: true });
     if (error) throw error;
@@ -10748,6 +10788,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const [showHamburger,setShowHamburger]=useState(false);
   const [collectiveDetail,setCollectiveDetail]=useState(null); // collective being edited/read // perfil abierto desde una notificación
   const [followedCollectiveDetail,setFollowedCollectiveDetail]=useState(null); // FEATURE_FOLLOW_COLLECTIVES_ENABLED — colectivo abierto en modo lectura
+  const [followedDuetDetail,setFollowedDuetDetail]=useState(null); // idem, para un dueto seguido
   const handleNotificationNavigate=async(n)=>{
     try{
       if(n.type==='new_friend_text'||n.type==='new_comment'){
@@ -10774,6 +10815,15 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         // El dueño ya tiene acceso de sobra: abrir el texto directamente.
         const entry=await DB.getEntryById(n.entity_id);
         if(entry)setReadingEntry(entry);
+      }else if(n.type==='collective_follow_update'){
+        // Nuevo turno en un colectivo que sigues sin escribir — antes esta
+        // notificación no llevaba a ningún sitio, ninguna rama la
+        // capturaba. La abrimos directo en modo lectura.
+        const detail=await DB.getCollectiveDetail(n.entity_id);
+        if(detail)setFollowedCollectiveDetail(detail);
+      }else if(n.type==='duet_follow_update'){
+        const detail=await DB.getDuet(n.entity_id);
+        if(detail)setFollowedDuetDetail(detail);
       }else if(n.type==='duet_your_turn'||n.type==='chain_nomination'
                ||n.type==='collective_your_turn'||n.type==='collective_update'
                ||n.type==='pending_turn'){
@@ -10991,6 +11041,9 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {followedCollectiveDetail&&<CollectiveReaderView user={user} collective={followedCollectiveDetail}
         onClose={()=>setFollowedCollectiveDetail(null)}
         onUnfollowed={()=>setFollowedCollectiveDetail(null)}/>}
+      {followedDuetDetail&&<DuetReaderView user={user} duet={followedDuetDetail}
+        onClose={()=>setFollowedDuetDetail(null)}
+        onUnfollowed={()=>setFollowedDuetDetail(null)}/>}
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showModeration&&<ModerationScreen onClose={()=>setShowModeration(false)}/>}
@@ -11202,9 +11255,14 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         <FollowedCollectivesHub user={user} refreshKey={refreshKey}
           onOpen={async c=>{
             try{
+              if(c._type==='duet'){
+                const detail=await DB.getDuet(c.id);
+                setFollowedDuetDetail(detail);
+                return;
+              }
               const detail=await DB.getCollectiveDetail(c.id);
               setFollowedCollectiveDetail(detail);
-            }catch(e){console.error('abrir colectivo seguido:',e);}
+            }catch(e){console.error('abrir historia seguida:',e);}
           }}/>
         <DuetsHub user={user} refreshKey={refreshKey}/>
         <ChainsHub user={user} refreshKey={refreshKey}/>
@@ -16692,6 +16750,7 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
   const [title,setTitle]=useState('');
   const [premise,setPremise]=useState('');
   const [minWords,setMinWords]=useState(100);
+  const [visibility,setVisibility]=useState('privado'); // quién más puede seguirlo, sin escribir
   const [sending,setSending]=useState(false);
   const [status,setStatus]=useState('');
 
@@ -16716,10 +16775,12 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
           title:title.trim()||'Relato a cuatro manos',
           premise:premise.trim()||null,
           min_words:minWords,
+          visibility,
           user_a:user.id,
           name_a:user.name,username_a:user.username||user.name,
           current_turn:'a',
         });
+        if(visibility!=='privado')DB.inviteDuetFollowers(duet.id).catch(e=>console.error('inviteDuetFollowers:',e));
         setStatus('¡Empieza cuando quieras!');
         setTimeout(()=>{onCreated&&onCreated(duet);onClose();},1000);
         return;
@@ -16728,6 +16789,7 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
         title:title.trim()||'Relato a cuatro manos',
         premise:premise.trim()||null,
         min_words:minWords,
+        visibility,
         user_a:user.id,user_b:recipient.id,
         name_a:user.name,username_a:user.username||user.name,
         name_b:recipient.name,username_b:recipient.username||recipient.name,
@@ -16809,6 +16871,30 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
             </div>
             <input type="range" min={25} max={500} step={25} value={minWords} onChange={e=>setMinWords(+e.target.value)} style={{accentColor:'#1E9BF0'}}/>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:FAINT}}><span>25</span><span>500</span></div>
+          </div>
+
+          {/* Visibilidad — quién más puede seguirlo, sin escribir */}
+          <div>
+            <div style={{fontSize:12,fontWeight:500,color:TXT,marginBottom:4}}>¿Quién puede verlo?</div>
+            <div style={{fontSize:11,color:MUTED,marginBottom:10}}>Esto no cambia quién escribe — eso ya está decidido. Solo quién más puede seguirlo sin participar.</div>
+            {[
+              {v:'privado',label:'Privado',hint:'Solo quien escribe puede verlo'},
+              {v:'amigos',label:'Amigos',hint:withClaude?'Tus amigos pueden seguirlo':'Los amigos de cualquiera de los dos pueden seguirlo'},
+              {v:'abierto',label:'Abierto',hint:withClaude?'Cualquiera que te siga puede seguirlo':'Cualquiera que siga a alguno de los dos puede seguirlo'},
+            ].map(opt=>(
+              <div key={opt.v} onClick={()=>setVisibility(opt.v)}
+                style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',marginBottom:6,
+                  borderRadius:9,border:'1.5px solid '+(visibility===opt.v?AZUL:BDR),cursor:'pointer',
+                  background:visibility===opt.v?'rgba(30,155,240,0.05)':'transparent'}}>
+                <div style={{width:16,height:16,borderRadius:'50%',border:'1.5px solid '+(visibility===opt.v?AZUL:BDR),flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  {visibility===opt.v&&<div style={{width:8,height:8,borderRadius:'50%',background:AZUL}}/>}
+                </div>
+                <div>
+                  <div style={{fontSize:12.5,fontWeight:600,color:TXT}}>{opt.label}</div>
+                  <div style={{fontSize:10.5,color:FAINT}}>{opt.hint}</div>
+                </div>
+              </div>
+            ))}
           </div>
 
           {status&&<div style={{fontSize:12,color:status.startsWith('Error')?'#C5221F':'#1E9BF0',padding:'8px 12px',background:status.startsWith('Error')?'rgba(197,34,31,0.06)':'rgba(30,155,240,0.07)',borderRadius:8}}>{status}</div>}
@@ -17736,7 +17822,11 @@ const DuetsHub=({user,refreshKey=0})=>{
   const myTurnDuets=active.filter(d=>(d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d)));
 
   const accept=async(d)=>{
-    try{await DB.updateDuet(d.id,{status:'active'});load();}
+    try{
+      await DB.updateDuet(d.id,{status:'active'});
+      if(d.visibility&&d.visibility!=='privado')DB.inviteDuetFollowers(d.id).catch(e=>console.error('inviteDuetFollowers:',e));
+      load();
+    }
     catch(e){alert('Error: '+e.message);}
   };
   const decline=async(d)=>{
@@ -19019,7 +19109,16 @@ const FollowedCollectivesHub=({user,onOpen,refreshKey=0})=>{
 
   useEffect(()=>{
     if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED){setLoading(false);return;}
-    DB.getFollowedCollectives(user.id).then(setItems).catch(()=>{}).finally(()=>setLoading(false));
+    Promise.all([
+      DB.getFollowedCollectives(user.id).catch(()=>[]),
+      DB.getFollowedDuets(user.id).catch(()=>[]),
+    ]).then(([collectives,duets])=>{
+      const merged=[
+        ...collectives.map(c=>({...c,_type:'collective'})),
+        ...duets.map(d=>({...d,_type:'duet'})),
+      ].sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at));
+      setItems(merged);
+    }).finally(()=>setLoading(false));
   },[user.id,refreshKey]);
 
   if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED||loading||!items.length)return null;
@@ -19031,12 +19130,12 @@ const FollowedCollectivesHub=({user,onOpen,refreshKey=0})=>{
         <span style={{fontSize:11,fontWeight:600,color:TXT}}>Historias que sigo</span>
       </div>
       {items.map(c=>(
-        <div key={c.id}
+        <div key={c._type+'_'+c.id}
           style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
             border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 14px',
             marginBottom:6,textAlign:'left'}}>
           <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <Icon name="eye" size={15} color={FAINT}/>
+            <Icon name={c._type==='duet'?'hands-clapping':'eye'} size={15} color={FAINT}/>
           </div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
@@ -19154,6 +19253,117 @@ const CollectiveReaderView=({user,collective,onClose,onUnfollowed})=>{
           );})}
 
           {turns.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:FAINT,fontSize:13}}>Todavía no hay ninguna parte escrita.</div>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── DUET READER VIEW ─── el equivalente de CollectiveReaderView para
+   duetos: solo lectura, sin escribir, con reacciones por turno. A
+   diferencia de los colectivos, los turnos no vienen incrustados en el
+   dueto — hay que cargarlos aparte. */
+const DuetReaderView=({user,duet,onClose,onUnfollowed})=>{
+  const [turns,setTurns]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [unfollowing,setUnfollowing]=useState(false);
+  const [reactions,setReactions]=useState([]); // [{turn_id,emoji,user_id}] — por turno
+
+  useEffect(()=>{
+    DB.getDuetTurns(duet.id).then(t=>{
+      setTurns(t);setLoading(false);
+      const turnIds=t.map(x=>x.id);
+      DB.getDuetTurnReactions(turnIds).then(setReactions).catch(()=>{});
+    }).catch(e=>{console.error('DuetReaderView getDuetTurns:',e);setLoading(false);});
+  },[duet.id]);
+
+  const authorName=t=>t.is_ai?'Claude':(t.user_id===duet.user_a?(duet.name_a||'?'):(duet.name_b||'?'));
+
+  const handleReaction=async(turnId,emoji)=>{
+    try{
+      const added=await DB.toggleDuetTurnReaction(turnId,user.id,emoji);
+      setReactions(prev=>added
+        ?[...prev,{turn_id:turnId,emoji,user_id:user.id}]
+        :prev.filter(r=>!(r.turn_id===turnId&&r.emoji===emoji&&r.user_id===user.id)));
+    }catch(e){console.error('reacción a turno de dueto:',e);}
+  };
+
+  const doUnfollow=async()=>{
+    if(unfollowing)return;
+    setUnfollowing(true);
+    try{
+      await DB.unfollowDuet(duet.id,user.id);
+      onUnfollowed&&onUnfollowed(duet.id);
+      onClose();
+    }catch(e){alert('No se pudo dejar de seguir: '+e.message);}
+    finally{setUnfollowing(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:200,background:PAGE_BG,display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,padding:'14px 16px',borderBottom:'1px solid '+BDR,background:CARD_BG}}>
+        <button onClick={onClose} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,padding:4,display:'flex'}}>
+          <Icon name="arrow-left" size={18}/>
+        </button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{duet.title}</div>
+          <div style={{fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}>
+            <Icon name="eye" size={11} color={FAINT}/>Siguiendo · sin escribir
+          </div>
+        </div>
+        <button onClick={doUnfollow} disabled={unfollowing}
+          style={{flexShrink:0,background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'6px 12px',fontSize:11,color:MUTED,cursor:unfollowing?'default':'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+          {unfollowing?'…':'Dejar de seguir'}
+        </button>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',padding:'20px 16px 40px',WebkitOverflowScrolling:'touch'}}>
+        <div style={{maxWidth:640,margin:'0 auto'}}>
+          {duet.premise&&<div style={{background:'rgba(30,155,240,0.05)',border:'1px solid rgba(30,155,240,0.15)',borderRadius:10,padding:'12px 16px',marginBottom:24}}>
+            <div style={{fontSize:9,fontWeight:700,color:AZUL,textTransform:'uppercase',letterSpacing:'.1em',marginBottom:6}}>Premisa</div>
+            <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:14,color:TXT,lineHeight:1.6}}>&ldquo;{duet.premise}&rdquo;</div>
+          </div>}
+
+          {loading&&<div style={{textAlign:'center',padding:'40px 0',color:MUTED,fontSize:13}}>Cargando…</div>}
+
+          {!loading&&turns.map((t,i)=>{
+            const turnReactions=reactions.filter(r=>r.turn_id===t.id);
+            return(
+            <div key={t.id} style={{marginBottom:24,paddingBottom:24,borderBottom:i<turns.length-1?'1px dashed '+BDR:'none'}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
+                <div style={{width:4,height:4,borderRadius:'50%',background:AZUL}}/>
+                <span style={{fontSize:10,fontWeight:600,color:AZULMED}}>{authorName(t)}</span>
+                <span style={{fontSize:9,color:FAINT}}>· Parte {t.turn_number}</span>
+              </div>
+              {t.passed?(
+                <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:FAINT,fontStyle:'italic'}}>
+                  <Icon name="arrow-bend-up-right" size={13} color={FAINT}/>{authorName(t)} pasó su turno esta vez.
+                </div>
+              ):(<>
+                <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:PROSE_TEXT}}
+                  dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
+                {/* Mismo razonamiento que en CollectiveReaderView: solo quien
+                    sigue sin escribir ve este componente — a quien escribe
+                    se le abre DuetEditor, sin ningún botón de reacción. La
+                    política RLS lo exige igualmente del lado del servidor. */}
+                <div style={{display:'flex',gap:6,marginTop:12,alignItems:'center'}}>
+                  {['👏','❤️','🔥'].map(emoji=>{
+                    const count=turnReactions.filter(r=>r.emoji===emoji).length;
+                    const mine=turnReactions.some(r=>r.emoji===emoji&&r.user_id===user.id);
+                    return(
+                      <button key={emoji} onClick={()=>handleReaction(t.id,emoji)}
+                        style={{display:'flex',alignItems:'center',gap:4,border:'0.5px solid '+(mine?'rgba(30,155,240,0.4)':BDR),borderRadius:16,padding:'4px 10px',background:mine?'rgba(30,155,240,0.08)':'transparent',cursor:'pointer',fontSize:13}}>
+                        <span>{emoji}</span>
+                        {count>0&&<span style={{fontSize:10.5,fontWeight:600,color:mine?'#1E9BF0':MUTED}}>{count}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>)}
+            </div>
+          );})}
+
+          {!loading&&turns.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:FAINT,fontSize:13}}>Todavía no hay ningún turno escrito.</div>}
         </div>
       </div>
     </div>
@@ -19558,6 +19768,8 @@ const NOTIF_ICON={
   pending_turn:'hourglass', pending_challenge:'timer',
   collective_follow_invite:'eye',
   collective_follow_update:'scroll',
+  duet_follow_invite:'eye',
+  duet_follow_update:'hands-clapping',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
@@ -19568,6 +19780,8 @@ const NOTIF_COLOR={
   pending_turn:'#1A6B8A', pending_challenge:NARANJA,
   collective_follow_invite:AZULMED,
   collective_follow_update:MUTED,
+  duet_follow_invite:AZULMED,
+  duet_follow_update:MUTED,
 };
 
 const relNotifTime=iso=>{
@@ -19657,7 +19871,10 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     if(followRespondedIds[n.id])return; // evita doble clic
     setFollowRespondedIds(prev=>({...prev,[n.id]:accept?'yes':'no'})); // optimista
     try{
-      if(accept)await DB.followCollective(n.entity_id,user.id);
+      if(accept){
+        if(n.type==='duet_follow_invite')await DB.followDuet(n.entity_id,user.id);
+        else await DB.followCollective(n.entity_id,user.id);
+      }
       if(!n.read){
         await DB.markNotificationRead(n.id);
         setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
@@ -19691,7 +19908,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
             {unread>0&&<button onClick={markAllRead} style={{background:'transparent',border:'none',color:AZUL,fontSize:11,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Marcar todo leído</button>}
           </div>
           {loaded&&items.length===0&&<div style={{padding:'32px 16px',textAlign:'center',color:MUTED,fontSize:12.5}}>Aún no tienes notificaciones.</div>}
-          {items.map(n=>n.type==='collective_follow_invite'?(
+          {items.map(n=>(n.type==='collective_follow_invite'||n.type==='duet_follow_invite')?(
             // Fila especial: no navega al pulsar, tiene sus propios botones
             // de decisión — por eso es un <div>, no un <button> (no se
             // pueden anidar botones).
