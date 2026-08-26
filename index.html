@@ -19929,6 +19929,11 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     try{
       if(accept){
         await DB.acceptFollowInvite(n.id);
+        // Sin esto, "Historias que sigo" (ya montado en el Dashboard) se
+        // queda con la lista de antes de aceptar — la aceptación funciona
+        // bien en el servidor, pero la pantalla no se entera de refrescar
+        // sola, igual que pasaba con los turnos de dueto.
+        onNewChallenge&&onNewChallenge();
       }
       if(!n.read){
         await DB.markNotificationRead(n.id);
