@@ -5052,11 +5052,8 @@ const DB = {
     const { error } = await getSB().from('duets').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
   },
-  // Seguir un dueto sin escribir — mismo patrón que followCollective.
-  followDuet: async (duetId, uid) => {
-    const { error } = await getSB().from('duet_followers').insert({ duet_id: duetId, user_id: uid });
-    if (error) throw error;
-  },
+  // Seguir un dueto ahora SIEMPRE pasa por acceptFollowInvite — el insert
+  // directo se cerró en el servidor al construir la invitación manual.
   unfollowDuet: async (duetId, uid) => {
     const { error } = await getSB().from('duet_followers').delete()
       .eq('duet_id', duetId).eq('user_id', uid);
@@ -5073,6 +5070,21 @@ const DB = {
   inviteDuetFollowers: async (duetId) => {
     const { error } = await getSB().rpc('invite_duet_followers', { p_duet_id: duetId });
     if (error) console.error('inviteDuetFollowers:', error.message);
+  },
+  // Aceptar una invitación a seguir — vale para la automática (según
+  // visibilidad) y la manual (una persona concreta, incluso en privado).
+  // Nunca inserta directamente: la función valida en el servidor que la
+  // invitación es real antes de dar acceso.
+  acceptFollowInvite: async (notificationId) => {
+    const { error } = await getSB().rpc('accept_follow_invite', { p_notification_id: notificationId });
+    if (error) throw error;
+  },
+  // Invitar a UNA persona concreta a seguir, sin importar la visibilidad
+  // — solo puede hacerlo quien participa de verdad en la historia
+  // (comprobado en el servidor, no solo aquí).
+  inviteSpecificFollower: async (entityType, entityId, targetUserId) => {
+    const { error } = await getSB().rpc('invite_specific_follower', { p_entity_type: entityType, p_entity_id: entityId, p_target_user_id: targetUserId });
+    if (error) throw error;
   },
   // Reacciones de duetos — POR TURNO, igual que en colectivos.
   getDuetTurnReactions: async (turnIds) => {
@@ -5285,10 +5297,8 @@ const DB = {
     const{error}=await getSB().rpc('invite_collective_followers',{p_collective_id:collectiveId});
     if(error)throw error;
   },
-  followCollective: async(collectiveId,uid)=>{
-    const{error}=await getSB().from('collective_followers').insert({collective_id:collectiveId,user_id:uid});
-    if(error)throw error;
-  },
+  // Seguir un colectivo ahora SIEMPRE pasa por acceptFollowInvite — el
+  // insert directo se cerró en el servidor al construir la invitación manual.
   unfollowCollective: async(collectiveId,uid)=>{
     const{error}=await getSB().from('collective_followers').delete()
       .eq('collective_id',collectiveId).eq('user_id',uid);
@@ -17465,6 +17475,8 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
   const [showKey,setShowKey]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [deleting,setDeleting]=useState(false);
+  const [showInviteFollower,setShowInviteFollower]=useState(false);
+  const [inviteStatus,setInviteStatus]=useState(''); // mensaje breve tras invitar
   const edRef=useRef(null);
 
   // Saltar mi turno SIN escribir — para cuando no llego a tiempo y no quiero
@@ -17661,6 +17673,10 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
           </div>
         )}
         {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(30,155,240,0.3)',color:'#A5A0E8'}}>Terminado</div>}
+        <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
+          style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
+          <Icon name="user-plus" size={16} color="rgba(255,255,255,0.4)"/>
+        </button>
         {duet.is_ai_partner&&(
           <button onClick={()=>setConfirmDelete(true)} title="Eliminar relato"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
@@ -17796,6 +17812,23 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {showInviteFollower&&<FriendPickerModal user={user} title="¿A quién invitas a seguir?"
+        onClose={()=>setShowInviteFollower(false)}
+        onPick={async f=>{
+          setShowInviteFollower(false);
+          try{
+            await DB.inviteSpecificFollower('duet',duet.id,f.id);
+            setInviteStatus('Invitación enviada a @'+(f.username||f.name));
+          }catch(e){setInviteStatus('Error: '+e.message);}
+          setTimeout(()=>setInviteStatus(''),3500);
+        }}/>}
+      {inviteStatus&&(
+        <div style={{position:'fixed',left:20,right:20,bottom:myTurn?70:20,zIndex:150,
+          background:inviteStatus.startsWith('Error')?'rgba(197,34,31,0.95)':'rgba(10,27,61,0.92)',
+          color:'#fff',borderRadius:9,padding:'10px 14px',fontSize:12.5,textAlign:'center'}}>
+          {inviteStatus}
         </div>
       )}
     </div>
@@ -18557,6 +18590,8 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
 /* ── 2. CollectiveEditor ──────────────────────────────────────── */
 const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})=>{
   const [showIntro,dismissIntro]=useFirstTime('colectivos',user?.id,true);
+  const [showInviteFollower,setShowInviteFollower]=useState(false);
+  const [inviteStatus,setInviteStatus]=useState('');
   const [col,setCol]=useState(initialCol);
   // Tiempo de la parte, desde la primera tecla (ver DuetEditor).
   const startedAtRef=useRef(null);
@@ -18895,6 +18930,10 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
             }
             return'Parte '+(col.turn_count+1);
           })()}</span>
+          <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
+            style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,display:'flex'}}>
+            <Icon name="user-plus" size={15} color="rgba(255,255,255,0.4)"/>
+          </button>
         </div>
       </div>
 
@@ -19030,6 +19069,23 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
           )}
         </div>
       </div>
+      {showInviteFollower&&<FriendPickerModal user={user} title="¿A quién invitas a seguir?"
+        onClose={()=>setShowInviteFollower(false)}
+        onPick={async f=>{
+          setShowInviteFollower(false);
+          try{
+            await DB.inviteSpecificFollower('collective',col.id,f.id);
+            setInviteStatus('Invitación enviada a @'+(f.username||f.name));
+          }catch(e){setInviteStatus('Error: '+e.message);}
+          setTimeout(()=>setInviteStatus(''),3500);
+        }}/>}
+      {inviteStatus&&(
+        <div style={{position:'fixed',left:20,right:20,bottom:20,zIndex:150,
+          background:inviteStatus.startsWith('Error')?'rgba(197,34,31,0.95)':'rgba(10,27,61,0.92)',
+          color:'#fff',borderRadius:9,padding:'10px 14px',fontSize:12.5,textAlign:'center'}}>
+          {inviteStatus}
+        </div>
+      )}
     </div>
   );
 };
@@ -19872,8 +19928,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     setFollowRespondedIds(prev=>({...prev,[n.id]:accept?'yes':'no'})); // optimista
     try{
       if(accept){
-        if(n.type==='duet_follow_invite')await DB.followDuet(n.entity_id,user.id);
-        else await DB.followCollective(n.entity_id,user.id);
+        await DB.acceptFollowInvite(n.id);
       }
       if(!n.read){
         await DB.markNotificationRead(n.id);
