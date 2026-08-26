@@ -19177,7 +19177,7 @@ const FollowedCollectivesHub=({user,onOpen,refreshKey=0})=>{
     }).finally(()=>setLoading(false));
   },[user.id,refreshKey]);
 
-  if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED||loading||!items.length)return null;
+  if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED||loading)return null;
 
   return(
     <div style={{marginBottom:16}}>
@@ -19185,6 +19185,11 @@ const FollowedCollectivesHub=({user,onOpen,refreshKey=0})=>{
         <Icon name="eye" size={14} color={AZULMED}/>
         <span style={{fontSize:11,fontWeight:600,color:TXT}}>Historias que sigo</span>
       </div>
+      {items.length===0&&(
+        <div style={{fontSize:11.5,color:FAINT,padding:'10px 14px',background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:10}}>
+          Todavía no sigues ninguna historia sin escribir en ella.
+        </div>
+      )}
       {items.map(c=>(
         <div key={c._type+'_'+c.id}
           style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
