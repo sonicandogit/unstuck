@@ -5067,6 +5067,38 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  // Solo las historias seguidas que tienen novedades SIN LEER — para el
+  // Dashboard, que no debe mostrar nada si no hay nada nuevo. Se apoya en
+  // las notificaciones de "nuevo turno" que ya se generan (duet_follow_
+  // update / collective_follow_update), no en un mecanismo aparte de
+  // visto/no visto.
+  getFollowedStoriesWithNews: async (uid) => {
+    const { data, error } = await getSB().from('notifications')
+      .select('entity_id, type').eq('user_id', uid).eq('read', false)
+      .in('type', ['duet_follow_update', 'collective_follow_update']);
+    if (error) throw error;
+    const seen = new Set(); const unique = [];
+    (data || []).forEach(n => { const k = n.type + ':' + n.entity_id; if (!seen.has(k)) { seen.add(k); unique.push(n); } });
+    const duetIds = unique.filter(n => n.type === 'duet_follow_update').map(n => n.entity_id);
+    const colIds = unique.filter(n => n.type === 'collective_follow_update').map(n => n.entity_id);
+    const [duetsRes, colsRes] = await Promise.all([
+      duetIds.length ? getSB().from('duets').select('*').in('id', duetIds) : Promise.resolve({ data: [] }),
+      colIds.length ? getSB().from('collectives').select('*').in('id', colIds) : Promise.resolve({ data: [] }),
+    ]);
+    return [
+      ...(duetsRes.data || []).map(d => ({ ...d, _type: 'duet' })),
+      ...(colsRes.data || []).map(c => ({ ...c, _type: 'collective' })),
+    ];
+  },
+  // Marcar como leídas las novedades de UNA historia concreta — al
+  // abrirla desde el Dashboard, para que deje de aparecer ahí hasta que
+  // haya un turno nuevo de verdad.
+  markStoryNewsRead: async (uid, entityId) => {
+    const { error } = await getSB().from('notifications').update({ read: true })
+      .eq('user_id', uid).eq('entity_id', entityId)
+      .in('type', ['duet_follow_update', 'collective_follow_update']);
+    if (error) console.error('markStoryNewsRead:', error.message);
+  },
   inviteDuetFollowers: async (duetId) => {
     const { error } = await getSB().rpc('invite_duet_followers', { p_duet_id: duetId });
     if (error) console.error('inviteDuetFollowers:', error.message);
@@ -16112,6 +16144,9 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   const [tab,setTab]=useState(mode==='escritorio'?'mis_textos':'explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
+  const [followedStories,setFollowedStories]=useState([]); // TODAS las que sigues, con o sin novedades — el sitio permanente
+  const [openFollowedCollective,setOpenFollowedCollective]=useState(null);
+  const [openFollowedDuet,setOpenFollowedDuet]=useState(null);
   const [exploreQuery,setExploreQuery]=useState('');
   const [amigosQuery,setAmigosQuery]=useState('');
   const [following,setFollowing]=useState([]); // array of user_ids
@@ -16145,6 +16180,17 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
     try{const data=await DB.getFriendsEntries(user.id);setFriendsEntries(data);}
     catch(e){console.error(e);}
     finally{setLoading(false);}
+    if(FEATURE_FOLLOW_COLLECTIVES_ENABLED){
+      Promise.all([
+        DB.getFollowedCollectives(user.id).catch(()=>[]),
+        DB.getFollowedDuets(user.id).catch(()=>[]),
+      ]).then(([collectives,duets])=>{
+        setFollowedStories([
+          ...collectives.map(c=>({...c,_type:'collective'})),
+          ...duets.map(d=>({...d,_type:'duet'})),
+        ].sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)));
+      }).catch(()=>{});
+    }
   };
 
   const loadFollowing=async()=>{
@@ -16301,6 +16347,34 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           {following.length===0&&<div style={{background:'rgba(27,95,170,0.06)',border:'1px solid rgba(27,95,170,0.22)',borderRadius:12,padding:'16px 20px',marginBottom:12,fontSize:13,color:AZULMED,lineHeight:1.65}}>
             Sigue a otros escritores desde la pestaña "Explorar" para ver aquí sus textos compartidos con amigos.
           </div>}
+          {followedStories.length>0&&(
+            <div style={{padding:'0 0 20px',maxWidth:520}}>
+              <div style={{fontSize:11,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>Historias que sigues</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {followedStories.map(c=>(
+                  <div key={c._type+'_'+c.id}
+                    style={{display:'flex',alignItems:'center',gap:10,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,padding:'10px 14px'}}>
+                    <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <Icon name={c._type==='duet'?'hands-clapping':'eye'} size={15} color={FAINT}/>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
+                      <div style={{fontSize:10.5,color:FAINT}}>{c.status==='finished'?'Terminado':'Parte '+c.turn_count}</div>
+                    </div>
+                    <button onClick={async()=>{
+                      try{
+                        if(c._type==='duet'){const d=await DB.getDuet(c.id);setOpenFollowedDuet(d);}
+                        else{const d=await DB.getCollectiveDetail(c.id);setOpenFollowedCollective(d);}
+                      }catch(e){console.error('abrir historia seguida:',e);}
+                    }}
+                      style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'7px 13px',fontSize:12,fontWeight:600,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                      Leer<Icon name="arrow-right" size={11} color={MUTED}/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {following.length>0&&<div style={{padding:'0 0 14px',maxWidth:260}}>
             <div style={{position:'relative'}}>
               <Icon name="magnifying-glass" size={13} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
@@ -16322,6 +16396,10 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         {/* MIS TEXTOS */}
         {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete} onPublish={onPublish} onUnpublish={onUnpublish} mode={mode}/>}
       </div>
+      {openFollowedCollective&&<CollectiveReaderView user={user} collective={openFollowedCollective}
+        onClose={()=>setOpenFollowedCollective(null)} onUnfollowed={()=>{setOpenFollowedCollective(null);loadFriends();}}/>}
+      {openFollowedDuet&&<DuetReaderView user={user} duet={openFollowedDuet}
+        onClose={()=>setOpenFollowedDuet(null)} onUnfollowed={()=>{setOpenFollowedDuet(null);loadFriends();}}/>}
     </div>
   );
 };
@@ -19165,44 +19243,38 @@ const FollowedCollectivesHub=({user,onOpen,refreshKey=0})=>{
 
   useEffect(()=>{
     if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED){setLoading(false);return;}
-    Promise.all([
-      DB.getFollowedCollectives(user.id).catch(()=>[]),
-      DB.getFollowedDuets(user.id).catch(()=>[]),
-    ]).then(([collectives,duets])=>{
-      const merged=[
-        ...collectives.map(c=>({...c,_type:'collective'})),
-        ...duets.map(d=>({...d,_type:'duet'})),
-      ].sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at));
-      setItems(merged);
-    }).finally(()=>setLoading(false));
+    DB.getFollowedStoriesWithNews(user.id).then(setItems).catch(()=>setItems([])).finally(()=>setLoading(false));
   },[user.id,refreshKey]);
 
-  if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED||loading)return null;
+  // Nada que anunciar — no se muestra NI EL TÍTULO. A propósito: esta
+  // sección es para novedades reales, no un directorio permanente (eso
+  // vive en la Biblioteca, pestaña "Amigos"). Si siempre apareciera,
+  // aunque fuera vacía, el Dashboard se llenaría de secciones muertas.
+  if(!FEATURE_FOLLOW_COLLECTIVES_ENABLED||loading||items.length===0)return null;
 
   return(
     <div style={{marginBottom:16}}>
       <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
         <Icon name="eye" size={14} color={AZULMED}/>
-        <span style={{fontSize:11,fontWeight:600,color:TXT}}>Historias que sigo</span>
+        <span style={{fontSize:11,fontWeight:600,color:TXT}}>Novedades en lo que sigues</span>
       </div>
-      {items.length===0&&(
-        <div style={{fontSize:11.5,color:FAINT,padding:'10px 14px',background:CARD_BG,border:'0.5px solid '+BDR,borderRadius:10}}>
-          Todavía no sigues ninguna historia sin escribir en ella.
-        </div>
-      )}
       {items.map(c=>(
         <div key={c._type+'_'+c.id}
           style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
             border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 14px',
             marginBottom:6,textAlign:'left'}}>
-          <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <Icon name={c._type==='duet'?'hands-clapping':'eye'} size={15} color={FAINT}/>
+          <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(241,90,36,0.08)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <Icon name={c._type==='duet'?'hands-clapping':'eye'} size={15} color={NARANJA}/>
           </div>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
-            <div style={{fontSize:10.5,color:FAINT}}>{c.status==='finished'?'Terminado':'Parte '+c.turn_count}</div>
+            <div style={{fontSize:10.5,color:NARANJA,fontWeight:600}}>Turno nuevo · {c.status==='finished'?'Terminado':'Parte '+c.turn_count}</div>
           </div>
-          <button onClick={()=>onOpen(c)}
+          <button onClick={async()=>{
+            await DB.markStoryNewsRead(user.id,c.id).catch(()=>{});
+            setItems(prev=>prev.filter(x=>!(x._type===c._type&&x.id===c.id)));
+            onOpen(c);
+          }}
             style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'7px 13px',fontSize:12,fontWeight:600,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
             Leer<Icon name="arrow-right" size={11} color={MUTED}/>
           </button>
