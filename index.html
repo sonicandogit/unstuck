@@ -11766,9 +11766,9 @@ const fmtDateLabel=date=>{
   const isToday=date.toDateString()===new Date().toDateString();
   return(isToday?'Hoy · ':'')+DOW_NAMES[date.getDay()]+' '+date.getDate()+' de '+MONTH_NAMES[date.getMonth()];
 };
-const isSlotActiveNow=slot=>{
+const isSlotActiveNow=(slot,date)=>{
   const now=new Date();
-  if(!hasOccurrenceOn(slot,now))return false;
+  if(date.toDateString()!==now.toDateString())return false; // esta tarjeta concreta debe ser HOY, no cualquier futura ocurrencia
   const[h,m]=slot.time_of_day.split(':').map(Number);
   const scheduled=new Date(now);scheduled.setHours(h,m,0,0);
   const diffMin=(now-scheduled)/60000;
@@ -11866,7 +11866,7 @@ const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
               <div style={{fontSize:11,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>{fmtDateLabel(date)}</div>
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
                 {daySlots.map(slot=>{
-                  const active=slot.enabled&&isSlotActiveNow(slot);
+                  const active=slot.enabled&&isSlotActiveNow(slot,date);
                   return(
                     <div key={slot.id} style={{display:'flex',alignItems:'center',gap:10,background:CARD_BG,border:'1px solid '+(active?'rgba(241,90,36,0.35)':BDR),borderRadius:10,padding:'12px 14px',opacity:slot.enabled?1:0.5}}>
                       <div style={{flex:1,minWidth:0}}>
@@ -12832,7 +12832,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const RETO_MODES=['normal','rio','limite','tunel','presion'];
 
   const [started,setStarted]=useState(false);
-  const [timerSec,setTimer]=useState(sk==='check'?7*60:null);
+  const [timerSec,setTimer]=useState(sessionConfig?.scheduleContext?sessionConfig.scheduleContext.durationMinutes*60:(sk==='check'?7*60:null));
   const [running,setRunning]=useState(false);
   const lockedMode=null; // modes are always user-selectable
   const allowedModes=sk==='proyecto'?null:RETO_MODES;
@@ -12914,6 +12914,12 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
   const headerAccent=sk==='check'?AZUL:sk==='reto'?NARANJA:sk==='proyecto'?AZULMED:sk==='cuento'?'#A82020':sk==='dueto'?'#1A6B8A':AZUL;
   const headerBg=sk==='check'?'rgba(30,155,240,0.06)':sk==='reto'?'rgba(241,90,36,0.06)':sk==='proyecto'?'rgba(27,95,170,0.06)':sk==='cuento'?'rgba(168,32,32,0.06)':'rgba(30,155,240,0.06)';
   const timerDur=sessionConfig?.scheduleContext?sessionConfig.scheduleContext.durationMinutes*60:(sk==='check'?7*60:null); // reto & proyecto normales: sin countdown — salvo que vengan de una cita
+  // "Cita cumplida" se comporta como un cambio de turno: solo se puede
+  // pulsar al llegar al 75% del tiempo marcado — el mismo margen que
+  // exige el servidor, para que nunca se vea activo un botón que el
+  // servidor de todas formas no fuera a contar.
+  const scheduleReady=sessionConfig?.scheduleContext&&timerDur!=null&&timerSec!=null
+    ?(timerDur-timerSec)>=timerDur*0.75:false;
   const sessionXP=customExercise?.xp||80;
 
 
@@ -13174,7 +13180,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         <button onClick={()=>setShowLib(true)} className="desk-only" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
         {FEATURE_DRIVE_ENABLED&&<button onClick={()=>setShowDrive(true)} className="desk-only" style={{background:connected?'rgba(30,155,240,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(30,155,240,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#1E9BF0':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>}
         {sessionConfig?.scheduleContext&&(
-          <button onClick={handleFinishDay} style={{background:NARANJA,border:'none',borderRadius:7,padding:'5px 11px',fontSize:11.5,fontWeight:600,color:'#fff',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5}}>
+          <button onClick={handleFinishDay} disabled={!scheduleReady} title={scheduleReady?'':'Necesitas escribir al menos el 75% del tiempo marcado'}
+            style={{background:scheduleReady?NARANJA:'rgba(241,90,36,0.25)',border:'none',borderRadius:7,padding:'5px 11px',fontSize:11.5,fontWeight:600,color:'#fff',cursor:scheduleReady?'pointer':'default',flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5}}>
             <Icon name="sparkle" size={12} color="#fff"/>Cita cumplida
           </button>
         )}
@@ -13252,7 +13259,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             <div style={{display:'flex',gap:6}}>
               <Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn>
               <Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn>
-              {sessionConfig?.scheduleContext&&<Btn onClick={handleFinishDay} variant="accion" small><Icon name="sparkle" size={12} color="#fff"/>Cita cumplida</Btn>}
+              {sessionConfig?.scheduleContext&&<Btn onClick={handleFinishDay} variant="accion" small disabled={!scheduleReady}><Icon name="sparkle" size={12} color="#fff"/>Cita cumplida</Btn>}
               <Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn>
             </div>
           </div>}
