@@ -5102,7 +5102,7 @@ const DB = {
   // ── Calendario de escritura — citas semanales recurrentes ──
   getWritingSchedule: async (uid) => {
     const { data, error } = await getSB().from('writing_schedule').select('*')
-      .eq('user_id', uid).order('day_of_week').order('time_of_day');
+      .eq('user_id', uid).order('start_date').order('time_of_day');
     if (error) throw error;
     return data || [];
   },
