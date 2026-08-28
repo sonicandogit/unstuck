@@ -5106,9 +5106,9 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
-  createScheduleSlot: async (uid, dayOfWeek, timeOfDay, durationMinutes) => {
+  createScheduleSlot: async (uid, startDate, timeOfDay, durationMinutes, recurrence) => {
     const { data, error } = await getSB().from('writing_schedule').insert({
-      user_id: uid, day_of_week: dayOfWeek, time_of_day: timeOfDay, duration_minutes: durationMinutes,
+      user_id: uid, start_date: startDate, time_of_day: timeOfDay, duration_minutes: durationMinutes, recurrence,
     }).select().single();
     if (error) throw error;
     return data;
@@ -11064,10 +11064,6 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
                 <Icon name="notebook" size={16} color={AZULMED}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Tu proyecto</span>
               </button>
-              <button onClick={()=>{setShowWritingCalendar(true);setShowHamburger(false);}}
-                style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
-                <Icon name="calendar" size={16} color={AZULMED}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Calendario</span>
-              </button>
               <button onClick={()=>{setShowLibChecks(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
                 <Icon name="lightbulb" size={16} color={AZULMED}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Checks diarios</span>
@@ -11283,6 +11279,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                 {[
                   {icon:'sliders-horizontal',label:'Editar perfil',action:()=>{setShowProfileSettings(true);setShowUserMenu(false);}},
                   {icon:'chart-bar',label:'Estadísticas',action:()=>{setShowStats(true);setShowUserMenu(false);}},
+                  {icon:'calendar',label:'Calendario',action:()=>{setShowWritingCalendar(true);setShowUserMenu(false);}},
                   ...(FEATURE_SCREENPLAY_ENABLED?[{icon:'film-script',label:writingMode==='literatura'?'Modo: Literatura':'Modo: Guión cine',action:()=>{setConfirmModeChange(true);setShowUserMenu(false);},dot:writingMode==='guion'?NARANJA:AZUL}]:[]),
                   {icon:'tray',label:'Buzón de retos',action:()=>{setShowChallengesHistory(true);setShowUserMenu(false);},badge:receivedChallenges?.length},
                   {icon:'key',label:'API key de Claude',action:()=>{setShowKeyPanel(true);setShowUserMenu(false);if(!S.get(firstTimeKey('revisionia',user?.id)))setActivePopup('revisionia');},dot:getApiKey(user.id)?AZUL:null},
@@ -11744,9 +11741,33 @@ const relTimeHours=ts=>{
    después de su hora — como una reunión de Teams, no algo exacto al
    segundo. Al terminar la sesión, App decide si contó como cumplida. */
 const DOW_NAMES=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+const MONTH_NAMES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const lastDayOfMonthJS=date=>new Date(date.getFullYear(),date.getMonth()+1,0).getDate();
+// La misma lógica que send_schedule_reminders en el servidor — ninguna,
+// una vez a la semana, o una vez al mes (con el día 31 cayendo en el
+// último día de los meses más cortos).
+const hasOccurrenceOn=(schedule,date)=>{
+  const start=new Date(schedule.start_date+'T00:00:00');
+  const check=new Date(date.getFullYear(),date.getMonth(),date.getDate());
+  const startDay=new Date(start.getFullYear(),start.getMonth(),start.getDate());
+  if(check<startDay)return false;
+  if(schedule.recurrence==='none')return check.getTime()===startDay.getTime();
+  if(schedule.recurrence==='weekly')return check.getDay()===startDay.getDay();
+  if(schedule.recurrence==='monthly'){
+    const sD=startDay.getDate(),cD=check.getDate();
+    if(sD===cD)return true;
+    const lastDay=lastDayOfMonthJS(check);
+    return cD===lastDay&&sD>lastDay;
+  }
+  return false;
+};
+const fmtDateLabel=date=>{
+  const isToday=date.toDateString()===new Date().toDateString();
+  return(isToday?'Hoy · ':'')+DOW_NAMES[date.getDay()]+' '+date.getDate()+' de '+MONTH_NAMES[date.getMonth()];
+};
 const isSlotActiveNow=slot=>{
   const now=new Date();
-  if(now.getDay()!==slot.day_of_week)return false;
+  if(!hasOccurrenceOn(slot,now))return false;
   const[h,m]=slot.time_of_day.split(':').map(Number);
   const scheduled=new Date(now);scheduled.setHours(h,m,0,0);
   const diffMin=(now-scheduled)/60000;
@@ -11756,9 +11777,12 @@ const CalendarScreen=({user,onClose,onStart})=>{
   const [slots,setSlots]=useState([]);
   const [loading,setLoading]=useState(true);
   const [showNew,setShowNew]=useState(false);
-  const [newDow,setNewDow]=useState(new Date().getDay());
+  const todayISO=new Date().toISOString().slice(0,10);
+  const [newDate,setNewDate]=useState(todayISO);
   const [newTime,setNewTime]=useState('20:00');
   const [newDuration,setNewDuration]=useState(30);
+  const [newRecurring,setNewRecurring]=useState(false);
+  const [newRecurrence,setNewRecurrence]=useState('weekly'); // 'weekly' | 'monthly' — solo importa si newRecurring
   const [saving,setSaving]=useState(false);
   const [confirmDeleteId,setConfirmDeleteId]=useState(null);
   const [,forceTick]=useState(0); // para que isSlotActiveNow se reevalúe con el reloj real, no solo al montar
@@ -11770,27 +11794,35 @@ const CalendarScreen=({user,onClose,onStart})=>{
   useEffect(load,[user.id]);
   useEffect(()=>{const t=setInterval(()=>forceTick(v=>v+1),30000);return()=>clearInterval(t);},[]);
 
-  // Orden visual: empezando por HOY, los próximos 7 días — más útil que
-  // una semana fija lunes-domingo que podría mostrar días ya pasados.
-  const orderedDows=useMemo(()=>{
-    const today=new Date().getDay();
-    return Array.from({length:7},(_,i)=>(today+i)%7);
-  },[]);
+  // Próximas ocurrencias reales en los próximos 30 días — ya no "por día
+  // de la semana genérico", sino fechas concretas, sea la cita única,
+  // semanal o mensual.
+  const upcoming=useMemo(()=>{
+    const out=[];
+    const today=new Date();today.setHours(0,0,0,0);
+    for(let i=0;i<30;i++){
+      const day=new Date(today);day.setDate(today.getDate()+i);
+      const daySlots=slots.filter(s=>hasOccurrenceOn(s,day));
+      if(daySlots.length)out.push({date:day,slots:daySlots});
+    }
+    return out;
+  },[slots]);
 
   const createSlot=async()=>{
-    if(saving)return;
+    if(saving||!newDate)return;
     setSaving(true);
     try{
-      await DB.createScheduleSlot(user.id,newDow,newTime+':00',newDuration);
+      await DB.createScheduleSlot(user.id,newDate,newTime+':00',newDuration,newRecurring?newRecurrence:'none');
       setShowNew(false);
+      setNewRecurring(false);
       load();
     }catch(e){alert('Error: '+e.message);}
     setSaving(false);
   };
 
-  const enterRoom=slot=>{
-    const today=new Date().toISOString().slice(0,10);
-    onStart({type:'check',scheduleContext:{scheduleId:slot.id,occurrenceDate:today,durationMinutes:slot.duration_minutes}});
+  const enterRoom=(slot,date)=>{
+    const occurrenceDate=date.toISOString().slice(0,10);
+    onStart({type:'check',scheduleContext:{scheduleId:slot.id,occurrenceDate,durationMinutes:slot.duration_minutes}});
   };
 
   const streak=user.schedule_kept_streak||0;
@@ -11807,7 +11839,6 @@ const CalendarScreen=({user,onClose,onStart})=>{
       <div style={{flex:1,overflowY:'auto',padding:'20px 16px 48px'}}>
         <div style={{maxWidth:560,margin:'0 auto'}}>
 
-          {/* Contador hacia el próximo comodín */}
           <div style={{background:'rgba(241,90,36,0.06)',border:'1px solid rgba(241,90,36,0.2)',borderRadius:12,padding:'14px 16px',marginBottom:20,display:'flex',alignItems:'center',gap:12}}>
             <Icon name="sparkle" size={18} color={NARANJA}/>
             <div style={{flex:1}}>
@@ -11823,49 +11854,49 @@ const CalendarScreen=({user,onClose,onStart})=>{
 
           {loading&&<div style={{textAlign:'center',padding:40,color:MUTED,fontSize:13}}>Cargando…</div>}
 
-          {!loading&&slots.length===0&&(
+          {!loading&&upcoming.length===0&&(
             <div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:13,lineHeight:1.6}}>
               Todavía no te has reservado ninguna cita de escritura.
             </div>
           )}
 
-          {!loading&&orderedDows.map(dow=>{
-            const daySlots=slots.filter(s=>s.day_of_week===dow);
-            if(!daySlots.length)return null;
-            return(
-              <div key={dow} style={{marginBottom:18}}>
-                <div style={{fontSize:11,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>{DOW_NAMES[dow]}</div>
-                <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                  {daySlots.map(slot=>{
-                    const active=slot.enabled&&isSlotActiveNow(slot);
-                    return(
-                      <div key={slot.id} style={{display:'flex',alignItems:'center',gap:10,background:CARD_BG,border:'1px solid '+(active?'rgba(241,90,36,0.35)':BDR),borderRadius:10,padding:'12px 14px',opacity:slot.enabled?1:0.5}}>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:14,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{slot.time_of_day.slice(0,5)}</div>
-                          <div style={{fontSize:10.5,color:FAINT}}>{slot.duration_minutes} min{!slot.enabled?' · pausada':''}</div>
+          {!loading&&upcoming.map(({date,slots:daySlots})=>(
+            <div key={date.toISOString()} style={{marginBottom:18}}>
+              <div style={{fontSize:11,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>{fmtDateLabel(date)}</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {daySlots.map(slot=>{
+                  const active=slot.enabled&&isSlotActiveNow(slot);
+                  return(
+                    <div key={slot.id} style={{display:'flex',alignItems:'center',gap:10,background:CARD_BG,border:'1px solid '+(active?'rgba(241,90,36,0.35)':BDR),borderRadius:10,padding:'12px 14px',opacity:slot.enabled?1:0.5}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{slot.time_of_day.slice(0,5)}</div>
+                        <div style={{fontSize:10.5,color:FAINT}}>
+                          {slot.duration_minutes} min
+                          {slot.recurrence==='weekly'?' · cada semana':slot.recurrence==='monthly'?' · cada mes':''}
+                          {!slot.enabled?' · pausada':''}
                         </div>
-                        {active&&(
-                          <button onClick={()=>enterRoom(slot)}
-                            style={{flexShrink:0,background:NARANJA,border:'none',borderRadius:8,padding:'8px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>
-                            Entrar a la sala<Icon name="arrow-right" size={12} color="#fff"/>
-                          </button>
-                        )}
-                        <button onClick={()=>DB.toggleScheduleSlot(slot.id,!slot.enabled).then(load)}
-                          title={slot.enabled?'Pausar':'Reactivar'}
-                          style={{flexShrink:0,background:'transparent',border:'none',color:FAINT,cursor:'pointer',padding:4}}>
-                          <Icon name={slot.enabled?'pause':'play'} size={14} color={FAINT}/>
-                        </button>
-                        <button onClick={()=>setConfirmDeleteId(slot.id)}
-                          style={{flexShrink:0,background:'transparent',border:'none',color:FAINT,cursor:'pointer',padding:4}}>
-                          <Icon name="trash" size={14} color={FAINT}/>
-                        </button>
                       </div>
-                    );
-                  })}
-                </div>
+                      {active&&(
+                        <button onClick={()=>enterRoom(slot,date)}
+                          style={{flexShrink:0,background:NARANJA,border:'none',borderRadius:8,padding:'8px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>
+                          Entrar a la sala<Icon name="arrow-right" size={12} color="#fff"/>
+                        </button>
+                      )}
+                      <button onClick={()=>DB.toggleScheduleSlot(slot.id,!slot.enabled).then(load)}
+                        title={slot.enabled?'Pausar':'Reactivar'}
+                        style={{flexShrink:0,background:'transparent',border:'none',color:FAINT,cursor:'pointer',padding:4}}>
+                        <Icon name={slot.enabled?'pause':'play'} size={14} color={FAINT}/>
+                      </button>
+                      <button onClick={()=>setConfirmDeleteId(slot.id)}
+                        style={{flexShrink:0,background:'transparent',border:'none',color:FAINT,cursor:'pointer',padding:4}}>
+                        <Icon name="trash" size={14} color={FAINT}/>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -11875,18 +11906,16 @@ const CalendarScreen=({user,onClose,onStart})=>{
           <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:380,padding:'20px 22px'}}>
             <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:16}}>Nueva cita</div>
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Día de la semana</div>
-              <select value={newDow} onChange={e=>setNewDow(+e.target.value)}
-                style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'8px 10px',fontSize:13,background:CARD_BG,color:TXT,outline:'none',fontFamily:'inherit'}}>
-                {DOW_NAMES.map((n,i)=><option key={i} value={i}>{n}</option>)}
-              </select>
+              <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Fecha</div>
+              <input type="date" value={newDate} min={todayISO} onChange={e=>setNewDate(e.target.value)}
+                style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit'}}/>
             </div>
             <div style={{marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Hora</div>
               <input type="time" value={newTime} onChange={e=>setNewTime(e.target.value)}
                 style={{width:'100%',border:'1px solid '+BDR,borderRadius:9,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit'}}/>
             </div>
-            <div style={{marginBottom:20}}>
+            <div style={{marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:500,color:MUTED,marginBottom:6}}>Duración</div>
               <div style={{display:'flex',gap:6}}>
                 {[15,30,45,60].map(d=>(
@@ -11897,6 +11926,23 @@ const CalendarScreen=({user,onClose,onStart})=>{
                 ))}
               </div>
             </div>
+            <div style={{marginBottom:newRecurring?12:20,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{fontSize:12.5,fontWeight:500,color:TXT}}>Hacer recurrente</div>
+              <div onClick={()=>setNewRecurring(v=>!v)}
+                style={{width:38,height:22,borderRadius:11,background:newRecurring?AZUL:BDR,position:'relative',cursor:'pointer',transition:'background 0.15s'}}>
+                <div style={{position:'absolute',top:2,left:newRecurring?18:2,width:18,height:18,borderRadius:'50%',background:'#fff',transition:'left 0.15s',boxShadow:'0 1px 3px rgba(0,0,0,0.2)'}}/>
+              </div>
+            </div>
+            {newRecurring&&(
+              <div style={{marginBottom:20,display:'flex',gap:6}}>
+                {[{v:'weekly',label:'Semanal'},{v:'monthly',label:'Mensual'}].map(opt=>(
+                  <button key={opt.v} onClick={()=>setNewRecurrence(opt.v)}
+                    style={{flex:1,padding:'8px 0',borderRadius:8,border:'1.5px solid '+(newRecurrence===opt.v?AZUL:BDR),background:newRecurrence===opt.v?'rgba(30,155,240,0.06)':'transparent',color:newRecurrence===opt.v?AZUL:MUTED,fontSize:12.5,fontWeight:600,cursor:'pointer'}}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div style={{display:'flex',gap:8}}>
               <button onClick={()=>setShowNew(false)} disabled={saving}
                 style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer'}}>
