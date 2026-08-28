@@ -11126,7 +11126,8 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="biblioteca"/>}
       {showMyProjects&&<MyProjectsScreen user={user} projects={projects} library={library} saveProject={saveProject}
         onStart={onStartLesson} onClose={()=>setShowMyProjects(false)}/>}
-      {showWritingCalendar&&<CalendarScreen user={user} onStart={onStartLesson} onClose={()=>setShowWritingCalendar(false)}/>}
+      {showWritingCalendar&&<CalendarScreen user={user} onStart={onStartLesson} onClose={()=>setShowWritingCalendar(false)}
+        projects={projects} library={library} saveProject={saveProject}/>}
       {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="escritorio"/>}
       {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
@@ -11773,7 +11774,7 @@ const isSlotActiveNow=slot=>{
   const diffMin=(now-scheduled)/60000;
   return diffMin>=-15&&diffMin<=(slot.duration_minutes+60);
 };
-const CalendarScreen=({user,onClose,onStart})=>{
+const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
   const [slots,setSlots]=useState([]);
   const [loading,setLoading]=useState(true);
   const [showNew,setShowNew]=useState(false);
@@ -11820,9 +11821,9 @@ const CalendarScreen=({user,onClose,onStart})=>{
     setSaving(false);
   };
 
+  const [pendingRoomEntry,setPendingRoomEntry]=useState(null); // {slot,date} — mientras se elige el proyecto
   const enterRoom=(slot,date)=>{
-    const occurrenceDate=date.toISOString().slice(0,10);
-    onStart({type:'check',scheduleContext:{scheduleId:slot.id,occurrenceDate,durationMinutes:slot.duration_minutes}});
+    setPendingRoomEntry({slot,date});
   };
 
   const streak=user.schedule_kept_streak||0;
@@ -11972,6 +11973,27 @@ const CalendarScreen=({user,onClose,onStart})=>{
                 Eliminar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {pendingRoomEntry&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+          onClick={e=>{if(e.target===e.currentTarget)setPendingRoomEntry(null);}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:420,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>¿En qué escribes hoy?</div>
+              <button onClick={()=>setPendingRoomEntry(null)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+            </div>
+            <ProjectPicker projects={projects} library={library} saveProject={saveProject}
+              onStart={cfg=>{
+                // Aquí es donde se une lo elegido en ProjectPicker con el
+                // contexto de la cita — sin este paso, entrar a la sala
+                // abriría el proyecto pero sin reloj ni "Cita cumplida".
+                const{slot,date}=pendingRoomEntry;
+                const occurrenceDate=date.toISOString().slice(0,10);
+                setPendingRoomEntry(null);
+                onStart({...cfg,scheduleContext:{scheduleId:slot.id,occurrenceDate,durationMinutes:slot.duration_minutes}});
+              }}/>
           </div>
         </div>
       )}
@@ -12891,7 +12913,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     :currentProject?(currentProject.type+' · '+(currentProject.wordCount||0)+' palabras'):'';
   const headerAccent=sk==='check'?AZUL:sk==='reto'?NARANJA:sk==='proyecto'?AZULMED:sk==='cuento'?'#A82020':sk==='dueto'?'#1A6B8A':AZUL;
   const headerBg=sk==='check'?'rgba(30,155,240,0.06)':sk==='reto'?'rgba(241,90,36,0.06)':sk==='proyecto'?'rgba(27,95,170,0.06)':sk==='cuento'?'rgba(168,32,32,0.06)':'rgba(30,155,240,0.06)';
-  const timerDur=sk==='check'?7*60:null; // reto & proyecto: no countdown
+  const timerDur=sessionConfig?.scheduleContext?sessionConfig.scheduleContext.durationMinutes*60:(sk==='check'?7*60:null); // reto & proyecto normales: sin countdown — salvo que vengan de una cita
   const sessionXP=customExercise?.xp||80;
 
 
@@ -13151,6 +13173,11 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         </div>
         <button onClick={()=>setShowLib(true)} className="desk-only" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
         {FEATURE_DRIVE_ENABLED&&<button onClick={()=>setShowDrive(true)} className="desk-only" style={{background:connected?'rgba(30,155,240,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(30,155,240,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#1E9BF0':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>}
+        {sessionConfig?.scheduleContext&&(
+          <button onClick={handleFinishDay} style={{background:NARANJA,border:'none',borderRadius:7,padding:'5px 11px',fontSize:11.5,fontWeight:600,color:'#fff',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:5}}>
+            <Icon name="sparkle" size={12} color="#fff"/>Cita cumplida
+          </button>
+        )}
         <button onClick={handleFinishDay} style={{background:ADVANCE_BG,border:'none',borderRadius:7,padding:'5px 11px',fontSize:11.5,fontWeight:600,color:ADVANCE_TXT,cursor:'pointer',flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>Terminar →</button>
         <div style={{position:'relative'}}>
           <button onClick={()=>setShowUserMenu(v=>!v)} style={{width:26,height:26,borderRadius:'50%',background:user.bg,border:'1.5px solid '+user.accent+'44',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:600,color:user.textCol}}>{user.initials}</button>
@@ -13222,7 +13249,12 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
           {done&&<div style={{padding:'7px 18px',background:'rgba(30,155,240,0.07)',borderBottom:'0.5px solid rgba(30,155,240,0.18)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
             <span style={{fontSize:13,color:'#1E9BF0',fontWeight:500}}>✓ Completado — {wc} palabras</span>
-            <div style={{display:'flex',gap:6}}><Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn><Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn><Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn></div>
+            <div style={{display:'flex',gap:6}}>
+              <Btn onClick={()=>saveNow(false)} variant="green" small>Guardar</Btn>
+              <Btn onClick={()=>{if(edRef.current)exportDocx(buildEntry(),fontObj.docx,sz)}} small>↓ .docx</Btn>
+              {sessionConfig?.scheduleContext&&<Btn onClick={handleFinishDay} variant="accion" small><Icon name="sparkle" size={12} color="#fff"/>Cita cumplida</Btn>}
+              <Btn onClick={handleFinishDay} variant="primary" small>Terminar →</Btn>
+            </div>
           </div>}
           {toast&&<div style={{padding:'6px 18px',background:toast.color+'0C',borderBottom:'0.5px solid '+toast.color+'22',display:'flex',alignItems:'center',gap:8,flexShrink:0}}><span style={{fontSize:11,fontWeight:600,color:toast.color,display:'inline-flex',alignItems:'center',gap:5}}><Icon name={toast.icon} size={12}/>{toast.name}</span><span style={{fontSize:12,color:MUTED}}>{toast.full}</span></div>}
           {idleWarn&&ab==='presion'&&<div style={{padding:'6px 18px',background:'rgba(168,32,32,0.07)',borderBottom:'0.5px solid rgba(168,32,32,0.16)',fontSize:12,color:'#A82020',flexShrink:0}}>⚡ {idleLimit-idle}s antes de perder el párrafo</div>}
