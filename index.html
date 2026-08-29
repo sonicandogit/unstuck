@@ -5131,6 +5131,15 @@ const DB = {
     if (error) throw error;
     return data; // true/false — si contó como cumplida
   },
+  // Qué ocurrencias ya se cumplieron — para que el Calendario sepa
+  // distinguir "puedes entrar" de "ya lo hiciste hoy", en vez de ofrecer
+  // siempre el mismo botón sin importar si ya se completó.
+  getScheduleLogs: async (uid) => {
+    const { data, error } = await getSB().from('writing_schedule_log')
+      .select('schedule_id, occurrence_date').eq('user_id', uid).eq('fulfilled', true);
+    if (error) throw error;
+    return data || [];
+  },
   inviteDuetFollowers: async (duetId) => {
     const { error } = await getSB().rpc('invite_duet_followers', { p_duet_id: duetId });
     if (error) console.error('inviteDuetFollowers:', error.message);
@@ -9967,11 +9976,26 @@ const setApiKey=(uid,k)=>S.set('flujo:'+(uid||'_')+':apikey',k);
 const callClaude=async(system,userMsg,maxTokens=600,uid)=>{
   const key=getApiKey(uid);
   if(!key)throw new Error('no_key');
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:'claude-opus-4-7',max_tokens:maxTokens,system,messages:[{role:'user',content:userMsg}]}),
-  });
+  // Sin esto, si la petición se queda colgada (red inestable, el navegador
+  // suspendiendo la conexión, un problema puntual del servidor), la
+  // promesa nunca se resuelve ni se rechaza — y quien esté esperando
+  // queda atrapado para siempre, sin ningún error que libere la interfaz.
+  const controller=new AbortController();
+  const timeoutId=setTimeout(()=>controller.abort(),30000);
+  let r;
+  try{
+    r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-opus-4-7',max_tokens:maxTokens,system,messages:[{role:'user',content:userMsg}]}),
+      signal:controller.signal,
+    });
+  }catch(e){
+    if(e.name==='AbortError')throw new Error('La respuesta está tardando demasiado. Puedes reintentarlo o continuar sin ella.');
+    throw e;
+  }finally{
+    clearTimeout(timeoutId);
+  }
   if(r.status===401)throw new Error('invalid_key');
   if(!r.ok){let msg='Error HTTP '+r.status;try{const e=await r.json();msg=e.error?.message?e.error.message+' ('+r.status+')':msg}catch(e){}throw new Error(msg)}
   const d=await r.json();
@@ -11776,6 +11800,7 @@ const isSlotActiveNow=(slot,date)=>{
 };
 const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
   const [slots,setSlots]=useState([]);
+  const [fulfilledSet,setFulfilledSet]=useState(new Set()); // claves 'scheduleId_occurrenceDate' ya cumplidas
   const [loading,setLoading]=useState(true);
   const [showNew,setShowNew]=useState(false);
   const todayISO=new Date().toISOString().slice(0,10);
@@ -11791,6 +11816,9 @@ const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
   const load=()=>{
     setLoading(true);
     DB.getWritingSchedule(user.id).then(setSlots).catch(e=>console.error('getWritingSchedule:',e)).finally(()=>setLoading(false));
+    DB.getScheduleLogs(user.id).then(logs=>{
+      setFulfilledSet(new Set(logs.map(l=>l.schedule_id+'_'+l.occurrence_date)));
+    }).catch(e=>console.error('getScheduleLogs:',e));
   };
   useEffect(load,[user.id]);
   useEffect(()=>{const t=setInterval(()=>forceTick(v=>v+1),30000);return()=>clearInterval(t);},[]);
@@ -11866,9 +11894,11 @@ const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
               <div style={{fontSize:11,fontWeight:600,color:MUTED,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>{fmtDateLabel(date)}</div>
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
                 {daySlots.map(slot=>{
-                  const active=slot.enabled&&isSlotActiveNow(slot,date);
+                  const occurrenceDate=date.toISOString().slice(0,10); // mismo formato que enterRoom, para que coincida con lo guardado
+                  const fulfilled=fulfilledSet.has(slot.id+'_'+occurrenceDate);
+                  const active=!fulfilled&&slot.enabled&&isSlotActiveNow(slot,date);
                   return(
-                    <div key={slot.id} style={{display:'flex',alignItems:'center',gap:10,background:CARD_BG,border:'1px solid '+(active?'rgba(241,90,36,0.35)':BDR),borderRadius:10,padding:'12px 14px',opacity:slot.enabled?1:0.5}}>
+                    <div key={slot.id} style={{display:'flex',alignItems:'center',gap:10,background:CARD_BG,border:'1px solid '+(active?'rgba(241,90,36,0.35)':BDR),borderRadius:10,padding:'12px 14px',opacity:(slot.enabled&&!fulfilled)?1:0.6}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:14,fontWeight:600,color:TXT,fontFamily:'"Playfair Display",serif'}}>{slot.time_of_day.slice(0,5)}</div>
                         <div style={{fontSize:10.5,color:FAINT}}>
@@ -11877,6 +11907,11 @@ const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
                           {!slot.enabled?' · pausada':''}
                         </div>
                       </div>
+                      {fulfilled&&(
+                        <div style={{flexShrink:0,display:'flex',alignItems:'center',gap:5,color:AZUL,fontSize:12,fontWeight:600}}>
+                          <Icon name="check-circle" size={15} color={AZUL}/>Completada
+                        </div>
+                      )}
                       {active&&(
                         <button onClick={()=>enterRoom(slot,date)}
                           style={{flexShrink:0,background:NARANJA,border:'none',borderRadius:8,padding:'8px 14px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer',display:'flex',alignItems:'center',gap:5}}>
@@ -12496,7 +12531,14 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
                 </div>
               )}
               <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
-                {fbState==='loading'&&<div style={{fontSize:11,color:MUTED}}>Esperando la revisión de Claude…</div>}
+                {fbState==='loading'&&(
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <span style={{fontSize:11,color:MUTED}}>Esperando la revisión de Claude…</span>
+                    <button onClick={()=>{setFbError('Has decidido continuar sin esperar la revisión.');setFbState('error');}} style={{background:'transparent',border:'none',color:AZULMED,fontSize:11,fontWeight:600,cursor:'pointer',textDecoration:'underline',padding:0,fontFamily:"'Source Sans 3',sans-serif"}}>
+                      Saltar
+                    </button>
+                  </div>
+                )}
                 <Btn variant="primary" onClick={save} disabled={fbState==='loading'} style={{height:42,fontSize:14,paddingLeft:24,paddingRight:24}}>Terminar</Btn>
               </div>
             </div>
