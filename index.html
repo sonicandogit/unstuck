@@ -5140,6 +5140,26 @@ const DB = {
     if (error) throw error;
     return data || [];
   },
+  // Quién sigue un dueto/colectivo, con su perfil — para que los autores
+  // vean cuántas personas y quiénes, no solo el número.
+  getDuetFollowersList: async (duetId) => {
+    const { data: follows } = await getSB().from('duet_followers').select('user_id').eq('duet_id', duetId);
+    const ids = (follows || []).map(f => f.user_id);
+    if (!ids.length) return [];
+    const { data, error } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
+    if (error) throw error;
+    return data || [];
+  },
+  getCollectiveFollowersList: async (collectiveId) => {
+    const { data: follows } = await getSB().from('collective_followers').select('user_id').eq('collective_id', collectiveId);
+    const ids = (follows || []).map(f => f.user_id);
+    if (!ids.length) return [];
+    const { data, error } = await getSB().from('profiles')
+      .select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
+    if (error) throw error;
+    return data || [];
+  },
   inviteDuetFollowers: async (duetId) => {
     const { error } = await getSB().rpc('invite_duet_followers', { p_duet_id: duetId });
     if (error) console.error('inviteDuetFollowers:', error.message);
@@ -17891,6 +17911,51 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
 
 
 /* ─── DUET EDITOR ───────────────────────────────────────────── */
+/* ─── FOLLOWERS INDICATOR ─── "X personas siguiendo", con un desplegable
+   a quiénes — compartido entre DuetEditor y CollectiveEditor, para no
+   duplicar la misma lógica en los dos. No se muestra nada si nadie sigue
+   todavía, para no meter ruido en historias sin audiencia. */
+const FollowersIndicator=({entityId,entityType,color})=>{
+  const [followers,setFollowers]=useState(null); // null=cargando
+  const [showList,setShowList]=useState(false);
+
+  useEffect(()=>{
+    const fn=entityType==='duet'?DB.getDuetFollowersList:DB.getCollectiveFollowersList;
+    fn(entityId).then(setFollowers).catch(()=>setFollowers([]));
+  },[entityId,entityType]);
+
+  if(!followers||followers.length===0)return null;
+
+  return(<>
+    <button onClick={()=>setShowList(true)}
+      style={{background:'transparent',border:'none',color,fontSize:11,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,padding:0,flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>
+      <Icon name="eye" size={12} color={color}/>{followers.length} {followers.length===1?'persona siguiendo':'personas siguiendo'}
+    </button>
+    {showList&&(
+      <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:260,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={e=>{if(e.target===e.currentTarget)setShowList(false);}}>
+        <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:340,maxHeight:'70vh',overflowY:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
+          <div style={{padding:'16px 20px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{fontSize:14.5,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Quién sigue esta historia</div>
+            <button onClick={()=>setShowList(false)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
+          </div>
+          <div style={{padding:'8px 0'}}>
+            {followers.map(f=>(
+              <div key={f.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 20px'}}>
+                <UserAvatar user={f} size={32}/>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name}</div>
+                  <div style={{fontSize:11,color:FAINT}}>@{f.username||'?'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+  </>);
+};
+
 const DuetEditor=({user,duet,onClose,onUpdate})=>{
   const [showIntro,dismissIntro]=useFirstTime('cuatromanos',user?.id,true);
   const isA=duet.user_a===user.id;
@@ -18110,6 +18175,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
           </div>
         )}
         {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(30,155,240,0.3)',color:'#A5A0E8'}}>Terminado</div>}
+        <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)"/>
         <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
           style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
           <Icon name="user-plus" size={16} color="rgba(255,255,255,0.4)"/>
@@ -19367,6 +19433,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
             }
             return'Parte '+(col.turn_count+1);
           })()}</span>
+          <FollowersIndicator entityId={col.id} entityType="collective" color="rgba(255,255,255,0.75)"/>
           <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,display:'flex'}}>
             <Icon name="user-plus" size={15} color="rgba(255,255,255,0.4)"/>
