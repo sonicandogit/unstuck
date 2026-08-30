@@ -16558,6 +16558,16 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
 const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete,onPublish,onUnpublish,mode='biblioteca'})=>{
   const isEscritorio=mode==='escritorio';
+  // Compartida entre "Explorar" y "Amigos" — buscar por título O por
+  // quién lo escribió, no solo por título como antes.
+  const matchesTitleOrAuthor=(e,q)=>{
+    if(!q.trim())return true;
+    const needle=q.trim().toLowerCase();
+    const author=e.profiles;
+    return(e.title||'').toLowerCase().includes(needle)
+      ||(author?.name||'').toLowerCase().includes(needle)
+      ||(author?.username||'').toLowerCase().includes(needle);
+  };
   const [tab,setTab]=useState(mode==='escritorio'?'mis_textos':'explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
@@ -16652,7 +16662,6 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   ]:[
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
-    {id:'buscar',label:'Personas',count:0},
     {id:'colectivos',label:'Colectivos',count:collectivesWaitingCount+duetsWaitingCount},
     {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&e.in_library&&!e.deleted).length},
   ];
@@ -16711,7 +16720,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           <div style={{padding:'0 0 14px',maxWidth:260}}>
             <div style={{position:'relative'}}>
               <Icon name="magnifying-glass" size={13} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
-              <input value={exploreQuery} onChange={e=>setExploreQuery(e.target.value)} placeholder="Buscar por título…"
+              <input value={exploreQuery} onChange={e=>setExploreQuery(e.target.value)} placeholder="Buscar por título o autor…"
                 style={{width:'100%',padding:'7px 10px 7px 30px',fontSize:12,border:'1px solid '+BDR,borderRadius:8,background:CARD_BG,color:TXT,outline:'none',fontFamily:"'Source Sans 3',sans-serif"}}/>
               {exploreQuery&&<button onClick={()=>setExploreQuery('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:2}}><Icon name="x" size={12}/></button>}
             </div>
@@ -16725,7 +16734,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           </div>}
           {(()=>{
             // Sort: recent activity first, then entry date
-            const sorted=publicEntries.filter(e=>!exploreQuery.trim()||(e.title||'').toLowerCase().includes(exploreQuery.trim().toLowerCase())).sort((a,b)=>{
+            const sorted=publicEntries.filter(e=>matchesTitleOrAuthor(e,exploreQuery)).sort((a,b)=>{
               const aAct=activity[a.id]?.lastActivity||0;
               const bAct=activity[b.id]?.lastActivity||0;
               const aScore=Math.max(aAct,a.ts||0);
@@ -16800,7 +16809,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           {following.length>0&&<div style={{padding:'0 0 14px',maxWidth:260}}>
             <div style={{position:'relative'}}>
               <Icon name="magnifying-glass" size={13} color={FAINT} style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)'}}/>
-              <input value={amigosQuery} onChange={e=>setAmigosQuery(e.target.value)} placeholder="Buscar por título…"
+              <input value={amigosQuery} onChange={e=>setAmigosQuery(e.target.value)} placeholder="Buscar por título o autor…"
                 style={{width:'100%',padding:'7px 10px 7px 30px',fontSize:12,border:'1px solid '+BDR,borderRadius:8,background:CARD_BG,color:TXT,outline:'none',fontFamily:"'Source Sans 3',sans-serif"}}/>
               {amigosQuery&&<button onClick={()=>setAmigosQuery('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'transparent',border:'none',cursor:'pointer',color:FAINT,padding:2}}><Icon name="x" size={12}/></button>}
             </div>
@@ -16808,7 +16817,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           {loading&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Cargando…</div>}
           {!loading&&friendsEntries.length===0&&following.length>0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Tus amigos no han compartido textos contigo todavía.</div>}
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
-            {friendsEntries.filter(e=>!amigosQuery.trim()||(e.title||'').toLowerCase().includes(amigosQuery.trim().toLowerCase())).map(e=>{
+            {friendsEntries.filter(e=>matchesTitleOrAuthor(e,amigosQuery)).map(e=>{
               const author=e.profiles;
               const isFollowing=following.includes(e.user_id);
               return(
@@ -16832,7 +16841,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         </>}
 
         {/* BUSCAR */}
-        {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
+        {/* Pestaña "Personas" retirada — ya existe un buscador de usuarios completo en la pantalla Amigos, fuera de la Biblioteca */}
 
         {/* MIS TEXTOS */}
         {tab==='colectivos'&&<div style={{padding:'0 0 20px'}}>
@@ -18449,12 +18458,12 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount})=>{
   };
 
   const waitingDuets=active.filter(d=>!((d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d))));
-  useEffect(()=>{if(loaded&&mode==='biblioteca')onCount&&onCount(waitingDuets.length);},[loaded,mode,waitingDuets.length]);
+  useEffect(()=>{if(loaded&&mode==='biblioteca')onCount&&onCount(myTurnDuets.length+waitingDuets.length);},[loaded,mode,myTurnDuets.length,waitingDuets.length]);
   // En el Dashboard: solo lo que requiere acción tuya (invitaciones, tu
   // turno, terminados) — "esperando" se muestra aparte, en la Biblioteca,
   // para que el Dashboard no se llene de cosas que solo quieres leer.
   if(mode==='dashboard'&&(!loaded||(invitations.length===0&&myTurnDuets.length===0&&finished.length===0)))return null;
-  if(mode==='biblioteca'&&(!loaded||waitingDuets.length===0))return null;
+  if(mode==='biblioteca'&&(!loaded||(myTurnDuets.length===0&&waitingDuets.length===0)))return null;
 
   return(
     <>
@@ -18498,8 +18507,21 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount})=>{
           );
         })}
 
-        {mode==='biblioteca'&&waitingDuets.length>0&&(
+        {mode==='biblioteca'&&(myTurnDuets.length+waitingDuets.length)>0&&(
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
+            {myTurnDuets.map(d=>{
+              const other=isA(d)?d.name_b:d.name_a;
+              return(
+                <GridEntryCard key={d.id}
+                  meta={visMeta('dueto')}
+                  title={d.title}
+                  subtitle={'con '+other}
+                  excerpt="¡Es tu turno de escribir!"
+                  onClick={()=>setOpenDuet(d)}
+                  footerLeft={<span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>mín. {d.min_words} pal./turno</span>}
+                  footerRight={<span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:NARANJA,fontWeight:700}}>Escribir<Icon name="arrow-right" size={11} color={NARANJA}/></span>}/>
+              );
+            })}
             {waitingDuets.map(d=>{
               const other=isA(d)?d.name_b:d.name_a;
               return(
@@ -19690,11 +19712,11 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0,mode='dashboard',onCount})
   const myTurn=items.filter(c=>c.current_turn_user_id===user.id&&c.status==='active');
   const following=items.filter(c=>c.current_turn_user_id!==user.id&&c.status==='active');
   const finished=items.filter(c=>c.status==='finished').slice(0,3);
-  useEffect(()=>{if(!loading&&mode==='biblioteca')onCount&&onCount(following.length);},[loading,mode,following.length]);
+  useEffect(()=>{if(!loading&&mode==='biblioteca')onCount&&onCount(myTurn.length+following.length);},[loading,mode,myTurn.length,following.length]);
 
   if(loading)return null;
   if(mode==='dashboard'&&myTurn.length===0&&finished.length===0)return null;
-  if(mode==='biblioteca'&&following.length===0)return null;
+  if(mode==='biblioteca'&&(myTurn.length===0&&following.length===0))return null;
 
   return(
     <div style={{marginBottom:16}}>
@@ -19720,8 +19742,16 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0,mode='dashboard',onCount})
           </button>
         </div>
       ))}
-      {mode==='biblioteca'&&following.length>0&&(
+      {mode==='biblioteca'&&(myTurn.length+following.length)>0&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
+          {myTurn.map(c=>(
+            <GridEntryCard key={c.id}
+              meta={visMeta('colectivo')}
+              title={c.title}
+              excerpt="¡Es tu turno de escribir!"
+              onClick={()=>onOpen(c)}
+              footerRight={<span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:NARANJA,fontWeight:700}}>Escribir<Icon name="arrow-right" size={11} color={NARANJA}/></span>}/>
+          ))}
           {following.map(c=>(
             <GridEntryCard key={c.id}
               meta={visMeta('colectivo')}
@@ -21408,7 +21438,22 @@ const App=()=>{
     if(sessionConfig?.scheduleContext){
       const{scheduleId,occurrenceDate}=sessionConfig.scheduleContext;
       DB.markScheduleOccurrenceFulfilled(scheduleId,occurrenceDate,data.elapsed||0)
-        .then(fulfilled=>setScheduleFulfillResult({fulfilled}))
+        .then(async fulfilled=>{
+          setScheduleFulfillResult({fulfilled});
+          if(fulfilled){
+            // El servidor ya actualizó schedule_kept_streak/wildcards, pero
+            // nadie le avisa al cliente — sin esto, el contador "X/3" del
+            // Calendario se queda con el valor de antes de escribir hasta
+            // que se recargue toda la app. setUser (no una mutación directa
+            // del objeto) para garantizar el re-render, sin depender de que
+            // CalendarScreen se desmonte/remonte por otro motivo mientras
+            // tanto — confirmado con pruebas que la mutación sola no basta.
+            try{
+              const fresh=await DB.getProfile(user.id);
+              if(fresh)setUser(prev=>prev&&({...prev,schedule_kept_streak:fresh.schedule_kept_streak,wildcards:fresh.wildcards}));
+            }catch(e){console.error('refrescar streak de citas:',e);}
+          }
+        })
         .catch(e=>{console.error('markScheduleOccurrenceFulfilled:',e);setScheduleFulfillResult(null);});
     }
   };
