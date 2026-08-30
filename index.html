@@ -9792,6 +9792,59 @@ const Signo=({char,size=180,top,left,right,bottom,color='navy',style={}})=>(
   <span className={'signo signo-'+color} style={{fontSize:size,top,left,right,bottom,...style}} aria-hidden="true">{char}</span>
 );
 
+// ── Tiempo relativo + metadatos de visibilidad — antes vivían solo dentro
+// de MisTextos; promovidos aquí para que Amigos y Colectivos puedan usar
+// EXACTAMENTE el mismo lenguaje visual, no una copia parecida. ──
+const relTime=iso=>{
+  if(!iso)return'';
+  const d=new Date(iso?.slice?.(0,10)||iso);
+  const days=Math.floor((Date.now()-d.getTime())/864e5);
+  if(days<=0)return'hoy';
+  if(days===1)return'hace 1 día';
+  if(days<7)return'hace '+days+' días';
+  if(days<14)return'1 semana';
+  if(days<30)return Math.floor(days/7)+' semanas';
+  if(days<60)return'1 mes';
+  return Math.floor(days/30)+' meses';
+};
+const VIS_META={
+  privado:{label:'Privado',color:MUTED,bg:'rgba(10,27,61,0.06)',signo:';',signoColor:'navy'},
+  amigos:{label:'Amigos',color:AZULMED,bg:'rgba(27,95,170,0.1)',signo:',',signoColor:'azul'},
+  abierto:{label:'Público',color:NARANJA,bg:'rgba(241,90,36,0.1)',signo:'\u201c',signoColor:'naranja'},
+  ejercicio:{label:'Borrador',color:AZULMED,bg:'rgba(27,95,170,0.08)',signo:'\u00b7',signoColor:'azul'},
+  colectivo:{label:'Colectivo',color:AZUL,bg:'rgba(30,155,240,0.1)',signo:null,signoColor:'azul'},
+  dueto:{label:'A cuatro manos',color:'#1A6B8A',bg:'rgba(26,107,138,0.1)',signo:null,signoColor:'azul'},
+};
+const visMeta=v=>VIS_META[v]||VIS_META.ejercicio;
+
+// ── Tarjeta de rejilla genérica — el mismo patrón visual de "Mis textos"
+// (badge, tiempo, título Playfair, extracto de 3 líneas, pie con
+// palabras/estado a la izquierda y una acción a la derecha), reutilizado
+// tal cual en Amigos y Colectivos en vez de mantener tres estilos
+// distintos por separado. ──
+const GridEntryCard=({meta,timeLabel,title,subtitle,excerpt,footerLeft,footerRight,onClick,minHeight=165})=>(
+  <div onClick={onClick} style={{position:'relative',overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,borderRadius:13,padding:'16px',cursor:onClick?'pointer':'default',display:'flex',flexDirection:'column',minHeight}}>
+    {meta.signo&&<Signo char={meta.signo} size={60} top={-12} right={10} color={meta.signoColor}/>}
+    <div style={{position:'relative',display:'flex',flexDirection:'column',flex:1}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:6}}>
+        <span style={{font:"600 9px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:meta.color,background:meta.bg,padding:'4px 7px',borderRadius:5,whiteSpace:'nowrap',flexShrink:0}}>
+          {meta.label}
+        </span>
+        {timeLabel&&<span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT,whiteSpace:'nowrap'}}>{timeLabel}</span>}
+      </div>
+      <div style={{fontFamily:'"Playfair Display",serif',fontWeight:600,fontSize:16,lineHeight:1.28,color:TXT,marginBottom:subtitle?2:6}}>{title}</div>
+      {subtitle&&<div style={{fontSize:11,color:AZULMED,fontWeight:600,marginBottom:8}}>{subtitle}</div>}
+      {excerpt&&<div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10,flex:1,display:'-webkit-box',WebkitLineClamp:3,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{excerpt}</div>}
+      {!excerpt&&<div style={{flex:1}}/>}
+      <div style={{display:'flex',alignItems:'center',gap:8}}>
+        {footerLeft}
+        <div style={{flex:1}}/>
+        {footerRight}
+      </div>
+    </div>
+  </div>
+);
+
 // Antetítulo (eyebrow) — uso: <Eyebrow color="naranja">Escritura diaria</Eyebrow>
 const Eyebrow=({children,color='azul',style={}})=>(
   <div style={{font:"600 10px/1 'Source Sans 3',sans-serif",letterSpacing:'.26em',textTransform:'uppercase',color:color==='naranja'?NARANJA:AZUL,...style}}>
@@ -11363,17 +11416,6 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
           onOpenTeams={()=>setShowTeams(true)}/>
         <SharedBackBanner user={user} refreshKey={refreshKey}/>
         <CollabInviteBanner user={user} onAccepted={onCollabAccepted} refreshKey={refreshKey}/>
-        <CollectivesHub user={user} refreshKey={refreshKey}
-          onOpen={async c=>{
-            // Única vía para volver a un colectivo ya empezado o a uno al que te
-            // han invitado. Antes solo se entraba justo tras crearlo (onCreated),
-            // así que al cerrar el editor la función quedaba inaccesible.
-            try{
-              const detail=await DB.getCollectiveDetail(c.id);
-              setCollectiveDetail(detail);
-            }catch(e){console.error('abrir colectivo:',e);}
-          }}
-          onNew={()=>setShowCollectives(true)}/>
         <FollowedCollectivesHub user={user} refreshKey={refreshKey}
           onOpen={async c=>{
             try{
@@ -11386,7 +11428,6 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               setFollowedCollectiveDetail(detail);
             }catch(e){console.error('abrir historia seguida:',e);}
           }}/>
-        <DuetsHub user={user} refreshKey={refreshKey}/>
         <ChainsHub user={user} refreshKey={refreshKey}/>
         <FeedbackWidget user={user} library={library}/>
         <ShareNudge user={user} library={library}/>
@@ -11428,6 +11469,20 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
           <Btn variant="primary" onClick={()=>onContinue(energy)} full style={{height:44,fontSize:14.5}}>Ver sesión de hoy →</Btn>
           </div>
         </div>
+
+        {/* Colectivos/duetos donde te toca escribir — justo debajo de la
+            sesión de hoy, no arriba del todo, para que el Dashboard no se
+            llene de tarjetas antes de llegar a lo principal. Los que solo
+            esperas leer viven aparte, en la Biblioteca. */}
+        <CollectivesHub user={user} refreshKey={refreshKey} mode="dashboard"
+          onOpen={async c=>{
+            try{
+              const detail=await DB.getCollectiveDetail(c.id);
+              setCollectiveDetail(detail);
+            }catch(e){console.error('abrir colectivo:',e);}
+          }}
+          onNew={()=>setShowCollectives(true)}/>
+        <DuetsHub user={user} refreshKey={refreshKey} mode="dashboard"/>
 
         {/* Current week + Streak */}
         <div className="resp-2col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
@@ -16225,26 +16280,9 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
     }catch(e){alert('Error: '+e.message);}
   };
 
-  const relTime=iso=>{
-    if(!iso)return'';
-    const d=new Date(iso?.slice?.(0,10)||iso);
-    const days=Math.floor((Date.now()-d.getTime())/864e5);
-    if(days<=0)return'hoy';
-    if(days===1)return'hace 1 día';
-    if(days<7)return'hace '+days+' días';
-    if(days<14)return'1 semana';
-    if(days<30)return Math.floor(days/7)+' semanas';
-    if(days<60)return'1 mes';
-    return Math.floor(days/30)+' meses';
-  };
-
-  const VIS_META={
-    privado:{label:'Privado',color:MUTED,bg:'rgba(10,27,61,0.06)',signo:';',signoColor:'navy'},
-    amigos:{label:'Amigos',color:AZULMED,bg:'rgba(27,95,170,0.1)',signo:',',signoColor:'azul'},
-    abierto:{label:'Público',color:NARANJA,bg:'rgba(241,90,36,0.1)',signo:'\u201c',signoColor:'naranja'},
-    ejercicio:{label:'Borrador',color:AZULMED,bg:'rgba(27,95,170,0.08)',signo:'\u00b7',signoColor:'azul'},
-  };
-  const visMeta=(v)=>VIS_META[v]||VIS_META.ejercicio;
+  // relTime/VIS_META/visMeta ahora viven a nivel global, para que Amigos
+  // y Colectivos compartan exactamente el mismo estilo — ver arriba, junto
+  // a GridEntryCard.
 
   // 'borrador' agrupa lo que aún no tiene una visibilidad social explícita
   // (checks, retos, proyectos: visibility='ejercicio', o cualquier valor no
@@ -16526,6 +16564,10 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   const [followedStories,setFollowedStories]=useState([]); // TODAS las que sigues, con o sin novedades — el sitio permanente
   const [openFollowedCollective,setOpenFollowedCollective]=useState(null);
   const [openFollowedDuet,setOpenFollowedDuet]=useState(null);
+  const [openMyCollective,setOpenMyCollective]=useState(null); // tus propios colectivos donde no es tu turno — el editor completo, no el visor de seguidor
+  const [collectivesWaitingCount,setCollectivesWaitingCount]=useState(0);
+  const [duetsWaitingCount,setDuetsWaitingCount]=useState(0);
+  const [hubRefreshKey,setHubRefreshKey]=useState(0); // sin esto, CollectivesHub en modo biblioteca nunca se enteraría de un turno nuevo escrito desde aquí
   const [exploreQuery,setExploreQuery]=useState('');
   const [amigosQuery,setAmigosQuery]=useState('');
   const [following,setFollowing]=useState([]); // array of user_ids
@@ -16611,6 +16653,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
     {id:'explorar',label:'Explorar',count:publicEntries.length},
     {id:'amigos',label:'Amigos',count:friendsEntries.length},
     {id:'buscar',label:'Personas',count:0},
+    {id:'colectivos',label:'Colectivos',count:collectivesWaitingCount+duetsWaitingCount},
     {id:'mis_textos',label:'Mis textos',count:library.filter(e=>e.user_id===user.id&&e.in_library&&!e.deleted).length},
   ];
 
@@ -16764,8 +16807,27 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           </div>}
           {loading&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Cargando…</div>}
           {!loading&&friendsEntries.length===0&&following.length>0&&<div style={{textAlign:'center',padding:32,color:MUTED,fontSize:13}}>Tus amigos no han compartido textos contigo todavía.</div>}
-          <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {friendsEntries.filter(e=>!amigosQuery.trim()||(e.title||'').toLowerCase().includes(amigosQuery.trim().toLowerCase())).map(e=><PublicEntryCard key={e.id} entry={e} currentUser={user} onRead={setReadEntry} onFollow={handleFollow} following={following}/>)}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
+            {friendsEntries.filter(e=>!amigosQuery.trim()||(e.title||'').toLowerCase().includes(amigosQuery.trim().toLowerCase())).map(e=>{
+              const author=e.profiles;
+              const isFollowing=following.includes(e.user_id);
+              return(
+                <GridEntryCard key={e.id}
+                  meta={visMeta(e.visibility)}
+                  timeLabel={relTime(e.date)}
+                  title={e.title||'Sin título'}
+                  subtitle={'por '+(author?.name||author?.username||'alguien')}
+                  excerpt={(e.plain||'').slice(0,100)}
+                  onClick={()=>setReadEntry(e)}
+                  footerLeft={<span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>{e.word_count||e.wordCount||0} pal.</span>}
+                  footerRight={e.user_id!==user.id&&(
+                    <button onClick={ev=>{ev.stopPropagation();handleFollow(e.user_id,isFollowing);}}
+                      style={{background:isFollowing?'rgba(10,27,61,0.05)':'rgba(30,155,240,0.08)',border:'1px solid '+(isFollowing?BDR:'rgba(30,155,240,0.3)'),borderRadius:6,padding:'3px 9px',fontSize:10.5,fontWeight:600,color:isFollowing?MUTED:AZUL,cursor:'pointer',flexShrink:0}}>
+                      {isFollowing?'Siguiendo':'Seguir'}
+                    </button>
+                  )}/>
+              );
+            })}
           </div>
         </>}
 
@@ -16773,12 +16835,23 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         {tab==='buscar'&&<UserSearchPanel user={user} following={following} onFollow={handleFollow} teams={myTeams} onAddToTeam={()=>{}}/>}
 
         {/* MIS TEXTOS */}
+        {tab==='colectivos'&&<div style={{padding:'0 0 20px'}}>
+          <CollectivesHub user={user} refreshKey={hubRefreshKey} mode="biblioteca" onCount={setCollectivesWaitingCount}
+            onOpen={async c=>{
+              try{const detail=await DB.getCollectiveDetail(c.id);setOpenMyCollective(detail);}
+              catch(e){console.error('abrir colectivo propio:',e);}
+            }}/>
+          <DuetsHub user={user} refreshKey={hubRefreshKey} mode="biblioteca" onCount={setDuetsWaitingCount}/>
+          {collectivesWaitingCount+duetsWaitingCount===0&&<div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:13}}>Nada pendiente de leer por ahora.</div>}
+        </div>}
         {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete} onPublish={onPublish} onUnpublish={onUnpublish} mode={mode}/>}
       </div>
       {openFollowedCollective&&<CollectiveReaderView user={user} collective={openFollowedCollective}
         onClose={()=>setOpenFollowedCollective(null)} onUnfollowed={()=>{setOpenFollowedCollective(null);loadFriends();}}/>}
       {openFollowedDuet&&<DuetReaderView user={user} duet={openFollowedDuet}
         onClose={()=>setOpenFollowedDuet(null)} onUnfollowed={()=>{setOpenFollowedDuet(null);loadFriends();}}/>}
+      {openMyCollective&&<CollectiveEditor user={user} collective={openMyCollective}
+        onClose={()=>{setOpenMyCollective(null);setHubRefreshKey(k=>k+1);}} onUpdate={()=>{}}/>}
     </div>
   );
 };
@@ -18163,29 +18236,34 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
   return(
     <div style={{position:'fixed',inset:0,background:PAGE_BG,zIndex:300,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='cuatromanos' onClose={dismissIntro}/>}
       {/* Header */}
-      <div style={{background:'#0A1B3D',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
-        <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer'}}>← Salir</button>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6}}><Icon name="hands-clapping" size={13}/>{duet.title}</div>
-          <div style={{fontSize:11,color:'rgba(255,255,255,0.5)'}}>con {otherName} · mín. {duet.min_words} pal./turno</div>
-        </div>
-        {duet.status==='active'&&(
-          <div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:myTurn?'rgba(30,155,240,0.3)':'rgba(255,255,255,0.1)',color:myTurn?'#4CAF82':'rgba(255,255,255,0.5)',flexShrink:0}}>
-            {myTurn?'Tu turno':'Turno de '+otherName}
+      <div style={{background:'#0A1B3D',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',flexDirection:'column',gap:8}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',flexShrink:0}}>← Salir</button>
+          <div style={{flex:1,minWidth:0,fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6}}>
+            <Icon name="hands-clapping" size={13}/>{duet.title}
           </div>
-        )}
-        {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(30,155,240,0.3)',color:'#A5A0E8'}}>Terminado</div>}
-        <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)"/>
-        <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
-          style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
-          <Icon name="user-plus" size={16} color="rgba(255,255,255,0.4)"/>
-        </button>
-        {duet.is_ai_partner&&(
-          <button onClick={()=>setConfirmDelete(true)} title="Eliminar relato"
+          {duet.status==='active'&&(
+            <div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:myTurn?'rgba(30,155,240,0.3)':'rgba(255,255,255,0.1)',color:myTurn?'#4CAF82':'rgba(255,255,255,0.5)',flexShrink:0}}>
+              {myTurn?'Tu turno':'Turno de '+otherName}
+            </div>
+          )}
+          {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(30,155,240,0.3)',color:'#A5A0E8',flexShrink:0}}>Terminado</div>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:11,color:'rgba(255,255,255,0.5)',flexShrink:0}}>con {otherName} · mín. {duet.min_words} pal./turno</span>
+          <div style={{flex:1}}/>
+          <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)"/>
+          <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
-            <Icon name="trash" size={16} color="rgba(255,255,255,0.4)"/>
+            <Icon name="user-plus" size={16} color="rgba(255,255,255,0.4)"/>
           </button>
-        )}
+          {duet.is_ai_partner&&(
+            <button onClick={()=>setConfirmDelete(true)} title="Eliminar relato"
+              style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
+              <Icon name="trash" size={16} color="rgba(255,255,255,0.4)"/>
+            </button>
+          )}
+        </div>
       </div>
 
       {duet.premise&&<div style={{padding:'10px 18px',background:'rgba(30,155,240,0.05)',borderBottom:'0.5px solid '+BDR,fontSize:12,color:'#1E9BF0',fontStyle:'italic',flexShrink:0}}>
@@ -18339,7 +18417,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
 };
 
 /* ─── DUETS HUB (dashboard widget) ──────────────────────────── */
-const DuetsHub=({user,refreshKey=0})=>{
+const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount})=>{
   const [duets,setDuets]=useState([]);
   const [openDuet,setOpenDuet]=useState(null);
   const [loaded,setLoaded]=useState(false);
@@ -18371,8 +18449,12 @@ const DuetsHub=({user,refreshKey=0})=>{
   };
 
   const waitingDuets=active.filter(d=>!((d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d))));
-  // Solo mostramos el hub si hay algo que requiere acción de mi parte
-  if(!loaded||(invitations.length===0&&myTurnDuets.length===0&&finished.length===0))return null;
+  useEffect(()=>{if(loaded&&mode==='biblioteca')onCount&&onCount(waitingDuets.length);},[loaded,mode,waitingDuets.length]);
+  // En el Dashboard: solo lo que requiere acción tuya (invitaciones, tu
+  // turno, terminados) — "esperando" se muestra aparte, en la Biblioteca,
+  // para que el Dashboard no se llene de cosas que solo quieres leer.
+  if(mode==='dashboard'&&(!loaded||(invitations.length===0&&myTurnDuets.length===0&&finished.length===0)))return null;
+  if(mode==='biblioteca'&&(!loaded||waitingDuets.length===0))return null;
 
   return(
     <>
@@ -18383,7 +18465,7 @@ const DuetsHub=({user,refreshKey=0})=>{
           <span style={{fontSize:11,fontWeight:600,color:TXT}}>Relatos a cuatro manos</span>
         </div>
 
-        {invitations.map(d=>(
+        {mode==='dashboard'&&invitations.map(d=>(
           <div key={d.id} style={{background:'rgba(30,155,240,0.05)',border:'0.5px solid rgba(30,155,240,0.2)',borderRadius:10,padding:'12px 14px',marginBottom:6}}>
             <div style={{fontSize:13,color:TXT,marginBottom:8}}><strong>{d.name_a}</strong> te invita a escribir «{d.title}» (mín. {d.min_words} pal./turno)</div>
             {d.premise&&<div style={{fontSize:12,color:MUTED,fontStyle:'italic',marginBottom:8}}>"{d.premise}"</div>}
@@ -18394,7 +18476,7 @@ const DuetsHub=({user,refreshKey=0})=>{
           </div>
         ))}
 
-        {myTurnDuets.map(d=>{
+        {mode==='dashboard'&&myTurnDuets.map(d=>{
           const other=isA(d)?d.name_b:d.name_a;
           return(
             <div key={d.id}
@@ -18416,29 +18498,25 @@ const DuetsHub=({user,refreshKey=0})=>{
           );
         })}
 
-        {waitingDuets.map(d=>{
-          const other=isA(d)?d.name_b:d.name_a;
-          return(
-            <div key={d.id}
-              style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
-                border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 14px',
-                marginBottom:6,textAlign:'left'}}>
-              <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                <Icon name="hourglass" size={15} color={FAINT}/>
-              </div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.title}</div>
-                <div style={{fontSize:10.5,color:FAINT}}>con {other} · {d.status==='finish_proposed'?'propuesta de fin pendiente':'turno de '+other}</div>
-              </div>
-              <button onClick={()=>setOpenDuet(d)}
-                style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'7px 13px',fontSize:12,fontWeight:600,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-                Ver<Icon name="arrow-right" size={11} color={MUTED}/>
-              </button>
-            </div>
-          );
-        })}
+        {mode==='biblioteca'&&waitingDuets.length>0&&(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
+            {waitingDuets.map(d=>{
+              const other=isA(d)?d.name_b:d.name_a;
+              return(
+                <GridEntryCard key={d.id}
+                  meta={visMeta('dueto')}
+                  title={d.title}
+                  subtitle={'con '+other}
+                  excerpt={d.status==='finish_proposed'?'Propuesta de fin pendiente.':'Turno de '+other+'.'}
+                  onClick={()=>setOpenDuet(d)}
+                  footerLeft={<span style={{font:"500 11px/1 'Source Sans 3'",color:FAINT}}>mín. {d.min_words} pal./turno</span>}
+                  footerRight={<span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:MUTED,fontWeight:600}}>Ver<Icon name="arrow-right" size={11} color={MUTED}/></span>}/>
+              );
+            })}
+          </div>
+        )}
 
-        {finished.map(d=>{
+        {mode==='dashboard'&&finished.map(d=>{
           const other=isA(d)?d.name_b:d.name_a;
           const iApproved=isA(d)?d.publish_a:d.publish_b;
           return(
@@ -19420,19 +19498,21 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
         </div>
       )}
       {/* Header */}
-      <div style={{display:'flex',alignItems:'center',gap:8,padding:'0 16px',height:44,background:HEADER_NAVY_BG,flexShrink:0}}>
-        <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>
-          <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>Menú
-        </button>
-        <div style={{flex:1,textAlign:'center',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)'}}>{col.title}</div>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <span style={{fontSize:9,color:'rgba(255,255,255,0.4)'}}>{(()=>{
+      <div style={{display:'flex',flexDirection:'column',gap:6,padding:'8px 16px',background:HEADER_NAVY_BG,flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+            <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>Menú
+          </button>
+          <div style={{flex:1,minWidth:0,textAlign:'center',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{col.title}</div>
+          <span style={{fontSize:9,color:'rgba(255,255,255,0.4)',flexShrink:0}}>{(()=>{
             if(col.target_rounds&&members.length){
               const round=Math.floor((col.turn_count)/members.length)+1;
               return'Ronda '+Math.min(round,col.target_rounds)+' de '+col.target_rounds;
             }
             return'Parte '+(col.turn_count+1);
           })()}</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,flexWrap:'wrap'}}>
           <FollowersIndicator entityId={col.id} entityType="collective" color="rgba(255,255,255,0.75)"/>
           <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,display:'flex'}}>
@@ -19595,7 +19675,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
 };
 
 /* ── 3. CollectivesHub ────────────────────────────────────────── */
-const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
+const CollectivesHub=({user,onOpen,onNew,refreshKey=0,mode='dashboard',onCount})=>{
   const [items,setItems]=useState([]);
   const [loading,setLoading]=useState(true);
 
@@ -19603,13 +19683,18 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
     DB.getMyCollectives(user.id).then(setItems).catch(()=>{}).finally(()=>setLoading(false));
   },[user.id,refreshKey]);
 
-  if(loading)return null;
-
+  // items empieza en [] antes de cargar, así que estos cálculos son
+  // seguros incluso mientras loading es true — nunca deben depender de
+  // haberse saltado el return de abajo, o los Hooks dejan de coincidir
+  // entre renders (como pasó aquí antes del arreglo).
   const myTurn=items.filter(c=>c.current_turn_user_id===user.id&&c.status==='active');
   const following=items.filter(c=>c.current_turn_user_id!==user.id&&c.status==='active');
   const finished=items.filter(c=>c.status==='finished').slice(0,3);
+  useEffect(()=>{if(!loading&&mode==='biblioteca')onCount&&onCount(following.length);},[loading,mode,following.length]);
 
-  if(!items.length)return null;
+  if(loading)return null;
+  if(mode==='dashboard'&&myTurn.length===0&&finished.length===0)return null;
+  if(mode==='biblioteca'&&following.length===0)return null;
 
   return(
     <div style={{marginBottom:16}}>
@@ -19617,7 +19702,7 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
         <Icon name="users-three" size={14} color={AZUL}/>
         <span style={{fontSize:11,fontWeight:600,color:TXT}}>Relatos colectivos</span>
       </div>
-      {myTurn.map(c=>(
+      {mode==='dashboard'&&myTurn.map(c=>(
         <div key={c.id}
           style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
             border:'1.5px solid '+AZUL,borderRadius:10,padding:'11px 14px',
@@ -19635,24 +19720,18 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0})=>{
           </button>
         </div>
       ))}
-      {following.map(c=>(
-        <div key={c.id}
-          style={{display:'flex',alignItems:'center',gap:10,width:'100%',background:CARD_BG,
-            border:'0.5px solid '+BDR,borderRadius:10,padding:'10px 14px',
-            marginBottom:6,textAlign:'left'}}>
-          <div style={{flexShrink:0,width:32,height:32,borderRadius:8,background:'rgba(10,27,61,0.05)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <Icon name="hourglass" size={15} color={FAINT}/>
-          </div>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:13,color:TXT,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
-            <div style={{fontSize:10.5,color:FAINT}}>Turno {c.turn_count+1} · esperando…</div>
-          </div>
-          <button onClick={()=>onOpen(c)}
-            style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:4,background:'transparent',border:'0.5px solid '+BDR,borderRadius:8,padding:'7px 13px',fontSize:12,fontWeight:600,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-            Leer<Icon name="arrow-right" size={11} color={MUTED}/>
-          </button>
+      {mode==='biblioteca'&&following.length>0&&(
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
+          {following.map(c=>(
+            <GridEntryCard key={c.id}
+              meta={visMeta('colectivo')}
+              title={c.title}
+              excerpt={'Turno '+(c.turn_count+1)+' · esperando a que escriban.'}
+              onClick={()=>onOpen(c)}
+              footerRight={<span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,color:MUTED,fontWeight:600}}>Leer<Icon name="arrow-right" size={11} color={MUTED}/></span>}/>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 };
