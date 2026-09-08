@@ -1910,9 +1910,16 @@ function sanitizeHtml(dirty){
   if(window.DOMPurify&&typeof window.DOMPurify.sanitize==='function'){
     return window.DOMPurify.sanitize(s,{
       USE_PROFILES:{html:true},
-      ADD_ATTR:['style'],
-      FORBID_TAGS:['style','iframe','form','object','embed','link','base'],
-      FORBID_ATTR:['srcset']
+      // "style" NO se permite: DOMPurify no ofrece forma de filtrar
+      // propiedades CSS individuales (no existe un "solo color/negrita,
+      // nunca background"), así que la única opción real es prohibirlo
+      // del todo — permitirlo abría una vía de fuga de IP y "aviso de
+      // lectura" oculto vía style="background:url(...)" (confirmado con
+      // una petición de red real disparada al probarlo). El formato
+      // (negrita, cursiva, subrayado...) se aplica con etiquetas, nunca
+      // con style, así que esto no afecta al editor.
+      FORBID_ATTR:['style','srcset'],
+      FORBID_TAGS:['style','iframe','form','object','embed','link','base']
     });
   }
   // SAST-004 — Fallback si DOMPurify no cargó (fallo de red, bloqueador,
@@ -10875,7 +10882,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
   );
 };
 
-const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow,saveProject,autoOpenMyProjects=false,onAutoOpenMyProjectsConsumed})=>{
+const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,onEntrySaved,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow,saveProject,autoOpenMyProjects=false,onAutoOpenMyProjectsConsumed})=>{
   const [energy,setEnergy]=useState(()=>S.get('flujo:'+user.id+':mood:'+today())?.energy??5);
   const [theme,setTheme]=useTheme();
   const [showUserMenu,setShowUserMenu]=useState(false);
@@ -11219,22 +11226,22 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {activePopup&&<ContextualPopup id={activePopup} onClose={closeActivePopup}/>}
       {showStats&&<EstadísticasScreen library={library} reflections={reflections} onClose={()=>setShowStats(false)} stats={computeStats(library,reflections)}/>}
       {showModeration&&<ModerationScreen onClose={()=>setShowModeration(false)}/>}
-      {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowBiblioteca(false)}
+      {showBiblioteca&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onEntrySaved={onEntrySaved} onClose={()=>setShowBiblioteca(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="biblioteca"/>}
       {showMyProjects&&<MyProjectsScreen user={user} projects={projects} library={library} saveProject={saveProject}
         onStart={onStartLesson} onClose={()=>setShowMyProjects(false)}/>}
       {showWritingCalendar&&<CalendarScreen user={user} onStart={onStartLesson} onClose={()=>setShowWritingCalendar(false)}
         projects={projects} library={library} saveProject={saveProject}/>}
-      {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onClose={()=>setShowEscritorio(false)}
+      {showEscritorio&&<BibliotecaScreen user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onEntrySaved={onEntrySaved} onClose={()=>setShowEscritorio(false)}
         onVisibilityChange={onChangeVisibility} onFolderChange={onChangeFolder} onEdit={onEditEntry} onDelete={onDeleteEntry} onPublish={onPublishToLibrary} onUnpublish={onUnpublishFromLibrary} mode="escritorio"/>}
-      {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge}/>}
+      {showChallengesHistory&&<ChallengesHistory user={user} onClose={()=>setShowChallengesHistory(false)} onAcceptChallenge={onAcceptChallenge} onDeclineChallenge={onDeclineChallenge} onEntrySaved={onEntrySaved}/>}
       {showProfile&&<PublicProfile user={user} viewer={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}
         onCreated={duet=>{if(duet.is_ai_partner)setOpenDuetFromCreate(duet);}}/>}
-      {openDuetFromCreate&&<DuetEditor user={user} duet={openDuetFromCreate} onClose={()=>setOpenDuetFromCreate(null)} onUpdate={updated=>{if(updated)setOpenDuetFromCreate(updated);}}/>}
+      {openDuetFromCreate&&<DuetEditor user={user} duet={openDuetFromCreate} onClose={()=>setOpenDuetFromCreate(null)} onUpdate={updated=>{if(updated)setOpenDuetFromCreate(updated);}} onEntrySaved={onEntrySaved}/>}
       {showStartChain&&<StartChainModal user={user} onClose={()=>setShowStartChain(false)}/>}
       {showLibChecks&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="check" onStartLesson={onStartLesson} onClose={()=>setShowLibChecks(false)} writingMode={writingMode}/>}
       {showLibSemanales&&<ExerciseLibrary user={user} library={library} reflections={[]} filterType="reto" onStartLesson={onStartLesson} onClose={()=>setShowLibSemanales(false)} writingMode={writingMode}/>}
@@ -11482,7 +11489,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
             }catch(e){console.error('abrir colectivo:',e);}
           }}
           onNew={()=>setShowCollectives(true)}/>
-        <DuetsHub user={user} refreshKey={refreshKey} mode="dashboard"/>
+        <DuetsHub user={user} refreshKey={refreshKey} mode="dashboard" onEntrySaved={onEntrySaved}/>
 
         {/* Current week + Streak */}
         <div className="resp-2col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
@@ -15198,7 +15205,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
 
 
 /* ─── SENT CHALLENGES HISTORY ─────────────────────── */
-const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
+const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge,onEntrySaved})=>{
   const [sent,setSent]=useState([]);
   const [received,setReceived]=useState([]);
   const [receivedNoms,setReceivedNoms]=useState([]);
@@ -15392,7 +15399,7 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge})=>{
                       <div style={{fontSize:11,color:MUTED}}>Con {other} · esperando su turno</div>
                     </div>
                     <button onClick={()=>setOpenDuet(d)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:7,padding:'5px 12px',fontSize:11,color:MUTED,cursor:'pointer'}}>Ver</button>
-                    {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={updated=>{if(updated)setOpenDuet(updated);}}/>}
+                    {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={updated=>{if(updated)setOpenDuet(updated);}} onEntrySaved={onEntrySaved}/>}
                   </div>
                 );
               })}
@@ -16556,7 +16563,7 @@ const PublicEntryCard=({entry,currentUser,onRead,onFollow,following,activity})=>
 };
 
 /* ─── BIBLIOTECA SCREEN ──────────────────────────── */
-const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete,onPublish,onUnpublish,mode='biblioteca'})=>{
+const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccepted,onEntrySaved,onClose,onVisibilityChange,onFolderChange,onEdit,onDelete,onPublish,onUnpublish,mode='biblioteca'})=>{
   const isEscritorio=mode==='escritorio';
   // Compartida entre "Explorar" y "Amigos" — buscar por título O por
   // quién lo escribió, no solo por título como antes.
@@ -16850,7 +16857,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
               try{const detail=await DB.getCollectiveDetail(c.id);setOpenMyCollective(detail);}
               catch(e){console.error('abrir colectivo propio:',e);}
             }}/>
-          <DuetsHub user={user} refreshKey={hubRefreshKey} mode="biblioteca" onCount={setDuetsWaitingCount}/>
+          <DuetsHub user={user} refreshKey={hubRefreshKey} mode="biblioteca" onCount={setDuetsWaitingCount} onEntrySaved={onEntrySaved}/>
           {collectivesWaitingCount+duetsWaitingCount===0&&<div style={{textAlign:'center',padding:'40px 20px',color:FAINT,fontSize:13}}>Nada pendiente de leer por ahora.</div>}
         </div>}
         {tab==='mis_textos'&&<MisTextos user={user} library={library} projects={projects} sharedWithMe={sharedWithMe} onCollabAccepted={onCollabAccepted} onVisibilityChange={onVisibilityChange} onFolderChange={onFolderChange} onEdit={onEdit} onDelete={onDelete} onPublish={onPublish} onUnpublish={onUnpublish} mode={mode}/>}
@@ -17997,23 +18004,44 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
    a quiénes — compartido entre DuetEditor y CollectiveEditor, para no
    duplicar la misma lógica en los dos. No se muestra nada si nadie sigue
    todavía, para no meter ruido en historias sin audiencia. */
-const FollowersIndicator=({entityId,entityType,color})=>{
-  const [followers,setFollowers]=useState(null); // null=cargando
+const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true})=>{
+  // Duetos: el conteo es público (para cualquier usuario logueado, sirve
+  // para decidir si seguirlo), pero la LISTA de quiénes son solo la ven
+  // los dos escritores — canSeeIdentities lo decide quien llama a este
+  // componente, comparando user.id con duet.user_a/duet.user_b.
+  // Colectivos: comportamiento sin cambios respecto a antes de esta
+  // corrección (canSeeIdentities no se usa en esa rama).
+  const [count,setCount]=useState(null); // null=cargando
+  const [followers,setFollowers]=useState(null); // lista completa, solo si canSeeIdentities
   const [showList,setShowList]=useState(false);
 
   useEffect(()=>{
-    const fn=entityType==='duet'?DB.getDuetFollowersList:DB.getCollectiveFollowersList;
-    fn(entityId).then(setFollowers).catch(()=>setFollowers([]));
+    setFollowers(null);setShowList(false);
+    if(entityType==='duet'){
+      getSB().rpc('get_duet_follower_count',{p_duet_id:entityId})
+        .then(({data,error})=>{if(error)throw error;setCount(data??0);})
+        .catch(()=>setCount(0));
+    }else{
+      DB.getCollectiveFollowersList(entityId).then(list=>{setFollowers(list);setCount(list.length);}).catch(()=>{setFollowers([]);setCount(0);});
+    }
   },[entityId,entityType]);
 
-  if(!followers||followers.length===0)return null;
+  const openList=()=>{
+    if(entityType==='duet'&&canSeeIdentities&&followers===null){
+      DB.getDuetFollowersList(entityId).then(setFollowers).catch(()=>setFollowers([]));
+    }
+    setShowList(true);
+  };
+
+  if(count===null||count===0)return null;
+  const clickable=entityType!=='duet'||canSeeIdentities;
 
   return(<>
-    <button onClick={()=>setShowList(true)}
-      style={{background:'transparent',border:'none',color,fontSize:11,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,padding:0,flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>
-      <Icon name="eye" size={12} color={color}/>{followers.length} {followers.length===1?'persona siguiendo':'personas siguiendo'}
+    <button onClick={clickable?openList:undefined}
+      style={{background:'transparent',border:'none',color,fontSize:11,fontWeight:600,cursor:clickable?'pointer':'default',display:'flex',alignItems:'center',gap:4,padding:0,flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>
+      <Icon name="eye" size={12} color={color}/>{count} {count===1?'persona siguiendo':'personas siguiendo'}
     </button>
-    {showList&&(
+    {showList&&clickable&&(
       <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:260,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
         onClick={e=>{if(e.target===e.currentTarget)setShowList(false);}}>
         <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:340,maxHeight:'70vh',overflowY:'auto',boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)'}}>
@@ -18022,7 +18050,7 @@ const FollowersIndicator=({entityId,entityType,color})=>{
             <button onClick={()=>setShowList(false)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
           </div>
           <div style={{padding:'8px 0'}}>
-            {followers.map(f=>(
+            {(followers||[]).map(f=>(
               <div key={f.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 20px'}}>
                 <UserAvatar user={f} size={32}/>
                 <div style={{minWidth:0}}>
@@ -18038,7 +18066,7 @@ const FollowersIndicator=({entityId,entityType,color})=>{
   </>);
 };
 
-const DuetEditor=({user,duet,onClose,onUpdate})=>{
+const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const [showIntro,dismissIntro]=useFirstTime('cuatromanos',user?.id,true);
   const isA=duet.user_a===user.id;
   const insertVoiceDuet=t=>{const el=edRef.current;if(!el)return;el.focus();document.execCommand('insertText',false,t);el.dispatchEvent(new Event('input',{bubbles:true}));};
@@ -18105,7 +18133,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
       const secs=turnSecs();
       await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
       // Save to entries so it counts for daily check / stats
-      try{await DB.upsertEntry({
+      const entryData={
         id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
         user_id:user.id,sk:'dueto',
         title:duet.title+' (turno '+(duet.turn_count+1)+')',
@@ -18114,7 +18142,15 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         elapsed:secs,font_idx:0,editor_size:17,align_dir:'left',
         date:new Date().toISOString().slice(0,10),ts:Date.now(),
         visibility:'ejercicio',
-      });}catch(e){console.error('duet entry:',e);}
+      };
+      try{
+        await DB.upsertEntry(entryData);
+        // Sin esto, el turno se guarda bien en el servidor, pero la racha
+        // del Dashboard (calculada del "library" del cliente) no se entera
+        // de que hoy sí se escribió algo — parece que el dueto "no contó",
+        // aunque en realidad sí se guardó.
+        onEntrySaved&&onEntrySaved(entryData);
+      }catch(e){console.error('duet entry:',e);}
       let newFullHtml=(duet.full_html||'')+html;
       let newFullPlain=(duet.full_plain||'')+(duet.full_plain?'\n\n':'')+plainTxt;
       let newTurnCount=duet.turn_count+1;
@@ -18261,7 +18297,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span style={{fontSize:11,color:'rgba(255,255,255,0.5)',flexShrink:0}}>con {otherName} · mín. {duet.min_words} pal./turno</span>
           <div style={{flex:1}}/>
-          <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)"/>
+          <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)" canSeeIdentities={user.id===duet.user_a||user.id===duet.user_b}/>
           <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
             <Icon name="user-plus" size={16} color="rgba(255,255,255,0.4)"/>
@@ -18426,7 +18462,7 @@ const DuetEditor=({user,duet,onClose,onUpdate})=>{
 };
 
 /* ─── DUETS HUB (dashboard widget) ──────────────────────────── */
-const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount})=>{
+const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount,onEntrySaved})=>{
   const [duets,setDuets]=useState([]);
   const [openDuet,setOpenDuet]=useState(null);
   const [loaded,setLoaded]=useState(false);
@@ -18467,7 +18503,7 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount})=>{
 
   return(
     <>
-      {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={load}/>}
+      {openDuet&&<DuetEditor user={user} duet={openDuet} onClose={()=>setOpenDuet(null)} onUpdate={load} onEntrySaved={onEntrySaved}/>}
       <div style={{marginBottom:16}}>
         <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
           <Icon name="hands-clapping" size={14} color={AZUL}/>
@@ -18636,7 +18672,7 @@ const ShareNudge=({user,library})=>{
     <div className="fu" style={{background:'rgba(30,155,240,0.05)',border:'0.5px solid rgba(30,155,240,0.2)',borderRadius:14,padding:'14px 18px',marginBottom:16,display:'flex',alignItems:'center',gap:12}}>
       <Icon name="books" size={22} color={AZUL} style={{flexShrink:0}}/>
       <div style={{flex:1,fontSize:12,color:TXT,lineHeight:1.5}}>
-        Tienes <strong>{privCount} textos</strong> que nadie puede leer. ¿Por qué no compartes tu favorito? Pulsa el 🔒 junto a cualquier texto para hacerlo visible.
+        Tienes <strong>{privCount} textos</strong> marcados como privados. ¿Por qué no compartes tu favorito? Pulsa el 🔒 junto a cualquier texto para hacerlo visible.
       </div>
       <button onClick={()=>{S.set('pretexto:nudge_share:'+user.id,true);setDismissed(true);}}
         style={{background:'transparent',border:'none',fontSize:14,color:FAINT,cursor:'pointer',flexShrink:0}}>✕</button>
@@ -21060,7 +21096,7 @@ const PrivacyModal=({onClose})=>(
 
         {[
           ['¿Quién es el responsable?','Pretexto es un servicio de escritura creativa operado por Lucas Sánchez (sonicandogit@gmail.com). Para cualquier consulta sobre privacidad, puedes escribirnos a ese correo.'],
-          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Son completamente privados por defecto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.\n— País aproximado: al iniciar sesión, calculamos tu país a partir de tu dirección IP mediante un servicio externo de geolocalización. Guardamos únicamente el país resultante (por ejemplo, "España"); la dirección IP no se almacena en ningún momento. Lo usamos solo para entender de forma agregada desde dónde escribe la comunidad, nunca para identificarte individualmente ante terceros.'],
+          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Los que marcas como privados no los ve ningún otro usuario — nunca se comparten con nadie más, y solo se usan para darte soporte si tú lo pides. Como en la mayoría de apps que no ofrecen cifrado de extremo a extremo, quien administra Pretexto podría acceder técnicamente a los datos en bruto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.\n— País aproximado: al iniciar sesión, calculamos tu país a partir de tu dirección IP mediante un servicio externo de geolocalización. Guardamos únicamente el país resultante (por ejemplo, "España"); la dirección IP no se almacena en ningún momento. Lo usamos solo para entender de forma agregada desde dónde escribe la comunidad, nunca para identificarte individualmente ante terceros.'],
           ['¿Para qué usamos tus datos?','— Para proporcionarte el servicio de escritura y guardar tus textos.\n— Para mejorar la app mediante análisis de uso agregado y anónimo.\n— Nunca vendemos tus datos a terceros.\n— Nunca usamos tus textos para entrenar modelos de IA.'],
           ['¿Dónde se almacenan?','Tus datos se almacenan en Supabase (infraestructura AWS en Europa). Google Analytics almacena datos de uso en servidores de Google. Puedes consultar la política de Google en google.com/policies/privacy/partners.'],
           ['Cookies','Solo usamos cookies analíticas de Google Analytics, y únicamente si has dado tu consentimiento. Puedes rechazarlas sin que ello afecte al funcionamiento de la app.'],
@@ -21098,7 +21134,7 @@ const TermsModal=({onClose})=>(
           ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña. Notifícanos si detectas uso no autorizado.'],
           ['4. Propiedad de tus textos','Los textos que escribes en Pretexto son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo.'],
           ['5. Uso aceptable','No puedes usar Pretexto para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar contenido que viole estas normas.'],
-          ['6. Privacidad de los textos','Los textos marcados como "Privado" solo son accesibles por ti. Los marcados como "Amigos" son accesibles por tus seguidores mutuos. Los marcados como "Abierto" son visibles para todos los usuarios registrados.'],
+          ['6. Privacidad de los textos','Los textos marcados como "Privado" no los ve ningún otro usuario — está reforzado en el servidor, no solo escondido en la pantalla. Como en la mayoría de apps que no ofrecen cifrado de extremo a extremo, quien administra Pretexto podría acceder técnicamente a los datos en bruto, pero no se comparten con nadie más. Los marcados como "Amigos" son accesibles por tus seguidores mutuos. Los marcados como "Abierto" son visibles para todos los usuarios registrados.'],
           ['7. API de Claude','Si usas la función de feedback de Claude, aceptas los términos de uso de Anthropic. Pretexto actúa como intermediario y no almacena el contenido procesado.'],
           ['8. Limitación de responsabilidad','Pretexto no garantiza la disponibilidad continua del servicio. No somos responsables de la pérdida de datos. Recomendamos hacer backups periódicos con la función incluida en la app.'],
           ['9. Cancelación','Puedes eliminar tu cuenta en cualquier momento escribiéndonos a sonicandogit@gmail.com. Eliminaremos todos tus datos en un plazo de 30 días.'],
@@ -21131,6 +21167,14 @@ const App=()=>{
   const [view,setView]=useState('dashboard');
   const [energy,setEnergy]=useState(5);
   const [library,setLibrary]=useState([]);
+  // Para guardados que NO pasan por el flujo normal de sesión/finishDay
+  // (como un turno de dueto, guardado directamente desde DuetEditor) —
+  // sin esto, la entrada se guarda bien en el servidor, pero la racha
+  // del Dashboard (calculada de este mismo "library" en el cliente) no
+  // se entera de que hoy sí se escribió algo.
+  const onEntrySaved=entry=>{
+    setLibrary(prev=>[entry,...prev.filter(e=>e.id!==entry.id)]);
+  };
   const [reflections,setReflections]=useState([]);
   const [projects,setProjects]=useState([]);
   const [sessionConfig,setSessionConfig]=useState(null);
@@ -21775,7 +21819,7 @@ const App=()=>{
     {showWelcome&&<WelcomeCarousel onClose={()=>setShowWelcome(false)}/>}
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} writingMode={writingMode} setReadingEntry={undefined}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
-      sharedWithMe={sharedWithMe}
+      sharedWithMe={sharedWithMe} onEntrySaved={onEntrySaved}
       onCollabAccepted={entry=>setSharedWithMe(prev=>[entry,...prev.filter(x=>x.id!==entry.id)])}
       isOffline={isOffline} pendingCount={pendingCount}
       refreshKey={dataVersion}
