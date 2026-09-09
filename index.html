@@ -20011,8 +20011,9 @@ const DuetReaderView=({user,duet,onClose,onUnfollowed})=>{
         </button>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{duet.title}</div>
-          <div style={{fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:4}}>
-            <Icon name="eye" size={11} color={FAINT}/>Siguiendo · sin escribir
+          <div style={{fontSize:10,color:FAINT,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            <span style={{display:'flex',alignItems:'center',gap:4}}><Icon name="eye" size={11} color={FAINT}/>Siguiendo · sin escribir</span>
+            <FollowersIndicator entityId={duet.id} entityType="duet" color={FAINT} canSeeIdentities={false}/>
           </div>
         </div>
         <button onClick={doUnfollow} disabled={unfollowing}
