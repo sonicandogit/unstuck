@@ -10209,7 +10209,15 @@ const exportDocx=async(entry,fDocx,fSize,feedbackTxt)=>{
   const {Document,Packer,Paragraph,TextRun,AlignmentType}=lib;
   const aMap={left:AlignmentType.LEFT,center:AlignmentType.CENTER,right:AlignmentType.RIGHT};
   const pA=aMap[entry.alignDir||'left']||AlignmentType.LEFT;
-  const div=document.createElement('div');div.innerHTML=entry.html||'';
+  // Saneado con sanitizeHtml antes de volcarlo a un elemento real — mismo criterio
+  // que los otros 6 sitios de la app que pintan HTML ajeno (duetos, colectivos,
+  // encadenados, ReadingModal). Hoy exportDocx solo se llama con el texto propio
+  // de quien exporta (ver Editor), así que no había una vía activa de explotación,
+  // pero asignar HTML sin sanear a un elemento puede disparar manejadores de evento
+  // (p.ej. onerror de una imagen) aunque el elemento nunca se muestre en pantalla —
+  // y dejaba la puerta abierta a que una futura función de "exportar dueto/colectivo
+  // a Word" reintrodujera un XSS real reutilizando esta misma función sin saberlo.
+  const div=document.createElement('div');div.innerHTML=sanitizeHtml(entry.html||'');
   const toR=(node,f={})=>{const runs=[];node.childNodes.forEach(c=>{if(c.nodeType===Node.TEXT_NODE){if(c.textContent)runs.push(new TextRun({text:c.textContent,bold:!!f.b,italics:!!f.i,underline:f.u?{}:undefined,font:fDocx,size:fSize*2}))}else if(c.nodeType===Node.ELEMENT_NODE){const t=c.tagName.toLowerCase();const nf={...f};if(t==='strong'||t==='b')nf.b=true;if(t==='em'||t==='i')nf.i=true;if(t==='u')nf.u=true;if(t==='br')runs.push(new TextRun({break:1}));else runs.push(...toR(c,nf))}});return runs};
   const paras=[];div.childNodes.forEach(node=>{if(node.nodeType===Node.TEXT_NODE){const t=node.textContent.trim();if(t)paras.push(new Paragraph({children:[new TextRun({text:t,font:fDocx,size:fSize*2})],alignment:pA}))}else if(node.nodeType===Node.ELEMENT_NODE){const t=node.tagName.toLowerCase();if(t==='p'||t==='div'){const runs=toR(node);paras.push(new Paragraph({children:runs.length?runs:[new TextRun('')],alignment:pA,spacing:{after:200}}))}}});
   if(!paras.length)paras.push(new Paragraph({children:[new TextRun('')]}));
@@ -18158,6 +18166,10 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
       // Compañero Claude: responde en el acto, con tu propia clave de API
       // — nunca cuenta como turno "esperando", el turno vuelve a ser tuyo
       // de inmediato. No se guarda como entries (no es actividad tuya).
+      // aiFailed: si la llamada a Claude falla o vuelve vacía, lo tratamos
+      // igual — en ninguno de los dos casos ha escrito de verdad su turno,
+      // así que no se puede dar el turno por completado como si respondiera.
+      let aiFailed=false;
       if(duet.is_ai_partner&&!propose){
         setAiThinking(true);
         try{
@@ -18167,9 +18179,15 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
             newFullHtml+='<div style="border-left:2px solid rgba(30,155,240,0.35);padding-left:14px;margin:4px 0;">'+aiTurn.html+'</div>';
             newFullPlain+=(newFullPlain?'\n\n':'')+aiTurn.plain;
             newTurnCount+=1;
+          }else{
+            // Sin excepción, pero tampoco texto: Claude "respondió" en blanco.
+            // Antes esto no activaba ningún aviso — se seguía como si nada.
+            aiFailed=true;
+            setAiError('error');
           }
         }catch(e){
           console.error('generateAIDuetTurn:',e);
+          aiFailed=true;
           setAiError(e.message==='no_key'?'no_key':e.message==='invalid_key'?'invalid_key':'error');
         }
         setAiThinking(false);
@@ -18182,10 +18200,32 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
       };
       if(propose){patch.status='finish_proposed';patch.finish_proposed_by=user.id;}
       await DB.updateDuet(duet.id,patch);
-      // Mostrar primero la enhorabuena del turno; el refresco de la lista de
-      // fuera se hace al cerrar el modal (onClose), no aquí, para que este
-      // setTurnDone no compita con un posible remonte del editor.
-      setTurnDone({wordsAdded:wc,elapsed:secs});
+
+      // Bug real corregido aquí: antes se llamaba a setTurnDone() sin mirar
+      // aiFailed, así que la pantalla de "turno completado" (con la nota
+      // "Claude ya ha respondido") se mostraba SIEMPRE, incluso cuando la
+      // llamada a Claude había fallado por completo. Como esa pantalla hace
+      // un return anticipado en el render (ver más abajo, `if(turnDone)
+      // return...`), el aviso real de aiError —que ya existía en el código,
+      // con el mensaje correcto— nunca llegaba a pintarse: quedaba guardado
+      // en el estado pero tapado por la falsa pantalla de éxito. Resultado:
+      // la persona veía "tu turno" al volver a entrar, sin ninguna pista de
+      // que Claude nunca llegó a escribir su parte.
+      if(!aiFailed){
+        // Mostrar primero la enhorabuena del turno; el refresco de la lista
+        // de fuera se hace al cerrar el modal (onClose), no aquí, para que
+        // este setTurnDone no compita con un posible remonte del editor.
+        setTurnDone({wordsAdded:wc,elapsed:secs});
+      }else{
+        // Tu fragmento ya se guardó (arriba, antes de intentar el turno de
+        // Claude) — hay que vaciar el editor para que un segundo toque en
+        // "Pasar el turno" no lo vuelva a enviar como turno duplicado. La
+        // persona se queda viendo el aviso real de aiError, en su propio
+        // editor, y puede reintentarlo escribiendo el siguiente fragmento.
+        if(edRef.current)edRef.current.innerHTML='';
+        setPlainTxt('');setWc(0);startedAtRef.current=null;
+        setSaving(false);
+      }
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
 
