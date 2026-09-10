@@ -18107,7 +18107,36 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
     if(saving)return;setSaving(true);
     try{
       await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html:'',plain:'',word_count:0,turn_number:duet.turn_count+1,passed:true});
-      await DB.updateDuet(duet.id,{turn_count:duet.turn_count+1,current_turn:isA?'b':'a'});
+      if(duet.is_ai_partner){
+        // Bug real corregido aquí: esto pasaba el turno a 'b' igual que en un
+        // dueto humano-humano, asumiendo que habría alguien al otro lado que
+        // lo recogería. Pero en un dueto con Claude, 'b' no es una persona
+        // esperando su turno — Claude SOLO escribe como reacción directa a
+        // que tú pases el tuyo (ver passTurn); nunca por iniciativa propia.
+        // Nadie iba a mover nunca el dueto de 'b' de vuelta a 'a', así que se
+        // quedaba bloqueado para siempre en "Turno de Claude", sin ningún
+        // botón visible con el que desatascarlo. Aquí le pedimos a Claude que
+        // continúe él solo, sin depender de que hayas escrito nada nuevo, y
+        // el turno vuelve a ti pase lo que pase con esa llamada — nunca se
+        // deja en 'b'.
+        let newTurnCount=duet.turn_count+1;
+        let newFullHtml=duet.full_html||'';
+        let newFullPlain=duet.full_plain||'';
+        setAiThinking(true);
+        try{
+          const aiTurn=await generateAIDuetTurn(newFullPlain,duet.min_words,0,user.id);
+          if(aiTurn.plain){
+            await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html:aiTurn.html,plain:aiTurn.plain,word_count:aiTurn.wc,turn_number:newTurnCount+1,is_ai:true});
+            newFullHtml+='<div style="border-left:2px solid rgba(30,155,240,0.35);padding-left:14px;margin:4px 0;">'+aiTurn.html+'</div>';
+            newFullPlain+=(newFullPlain?'\n\n':'')+aiTurn.plain;
+            newTurnCount+=1;
+          }
+        }catch(e){console.error('generateAIDuetTurn (skip):',e);}
+        setAiThinking(false);
+        await DB.updateDuet(duet.id,{full_html:newFullHtml,full_plain:newFullPlain,turn_count:newTurnCount,current_turn:'a'});
+      }else{
+        await DB.updateDuet(duet.id,{turn_count:duet.turn_count+1,current_turn:isA?'b':'a'});
+      }
       onUpdate&&onUpdate();
       onClose();
     }catch(e){alert('Error: '+e.message);}
@@ -18429,9 +18458,22 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
               </div>
             )}
             {!myTurn&&duet.status==='active'&&(
-              <div style={{textAlign:'center',padding:'20px',background:'rgba(0,0,0,0.025)',borderRadius:12,fontSize:13,color:MUTED}}>
-                ⏳ Es el turno de {otherName}. Te avisaremos cuando te toque.
-              </div>
+              duet.is_ai_partner?(
+                // Esto no debería poder pasar nunca ya: en un dueto con Claude,
+                // current_turn solo llegaba a 'b' por el bug de "saltar mi
+                // turno" ya corregido más arriba (Claude nunca inicia nada por
+                // su cuenta). Si un dueto se creó antes de ese arreglo puede
+                // haberse quedado aquí para siempre — este botón lo desatasca
+                // sin tocar nada más, reutilizando el mismo camino que "Reintentar".
+                <div style={{textAlign:'center',padding:'20px',background:'rgba(197,34,31,0.05)',border:'0.5px solid rgba(197,34,31,0.15)',borderRadius:12,fontSize:13,color:MUTED}}>
+                  <div style={{marginBottom:10}}>Este dueto se ha quedado esperando a Claude sin que nadie se lo haya pedido — un fallo ya corregido. Puedes desatascarlo aquí mismo.</div>
+                  <Btn variant="danger" onClick={retryClaudeTurn} disabled={aiThinking} small>{aiThinking?'Continuando…':'Continuar →'}</Btn>
+                </div>
+              ):(
+                <div style={{textAlign:'center',padding:'20px',background:'rgba(0,0,0,0.025)',borderRadius:12,fontSize:13,color:MUTED}}>
+                  ⏳ Es el turno de {otherName}. Te avisaremos cuando te toque.
+                </div>
+              )
             )}
           </>
         )}
