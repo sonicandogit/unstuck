@@ -18092,6 +18092,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const [confirmSkip,setConfirmSkip]=useState(false);
   const [aiThinking,setAiThinking]=useState(false); // Claude generando su turno, tras pasar el tuyo
   const [aiError,setAiError]=useState(''); // 'no_key' | 'invalid_key' | 'error' | ''
+  const [aiErrorDetail,setAiErrorDetail]=useState(''); // motivo real cuando aiError==='error' — antes se perdía, solo quedaba en console.error
   const [showKey,setShowKey]=useState(false);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [deleting,setDeleting]=useState(false);
@@ -18212,12 +18213,13 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
             // Sin excepción, pero tampoco texto: Claude "respondió" en blanco.
             // Antes esto no activaba ningún aviso — se seguía como si nada.
             aiFailed=true;
-            setAiError('error');
+            setAiError('error');setAiErrorDetail('Claude devolvió una respuesta vacía.');
           }
         }catch(e){
           console.error('generateAIDuetTurn:',e);
           aiFailed=true;
           setAiError(e.message==='no_key'?'no_key':e.message==='invalid_key'?'invalid_key':'error');
+          setAiErrorDetail(e?.message||String(e));
         }
         setAiThinking(false);
       }
@@ -18268,8 +18270,19 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
     setAiThinking(true);
     try{
       const fresh=await DB.getDuet(duet.id);
+      // La política RLS de duet_turns (INSERT) exige que current_turn ya
+      // coincida con tu letra EN LA BASE DE DATOS en el momento exacto del
+      // insert: current_turn='a' y eres user_a, o current_turn='b' y eres
+      // user_b. En duetos con Claude, user_b siempre es null — así que si
+      // este dueto se había quedado parado en 'b' (el bug de "saltar
+      // turno" ya corregido), esa segunda rama nunca puede cumplirse: la
+      // política bloqueaba con 403 el propio intento de rescatarlo. Por
+      // eso aquí se devuelve el turno a 'a' PRIMERO — tu propio dueto,
+      // siempre puedes actualizarlo — y solo después se intenta insertar
+      // el turno de Claude, ya con el turno donde la política lo permite.
+      if(fresh.current_turn!=='a')await DB.updateDuet(duet.id,{current_turn:'a'});
       const aiTurn=await generateAIDuetTurn(fresh.full_plain||'',fresh.min_words,0,user.id);
-      if(!aiTurn.plain){setAiError('error');setAiThinking(false);return;}
+      if(!aiTurn.plain){setAiError('error');setAiErrorDetail('Claude devolvió una respuesta vacía.');setAiThinking(false);return;}
       await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html:aiTurn.html,plain:aiTurn.plain,word_count:aiTurn.wc,turn_number:fresh.turn_count+1,is_ai:true});
       await DB.updateDuet(duet.id,{
         full_html:(fresh.full_html||'')+'<div style="border-left:2px solid rgba(30,155,240,0.35);padding-left:14px;margin:4px 0;">'+aiTurn.html+'</div>',
@@ -18277,13 +18290,14 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         turn_count:fresh.turn_count+1,
         current_turn:'a',
       });
-      setAiError('');setAiThinking(false);
+      setAiError('');setAiErrorDetail('');setAiThinking(false);
       const updated=await DB.getDuet(duet.id);
       onUpdate&&onUpdate(updated);
       onClose();
     }catch(e){
       console.error('retryClaudeTurn:',e);
       setAiError(e.message==='no_key'?'no_key':e.message==='invalid_key'?'invalid_key':'error');
+      setAiErrorDetail(e?.message||String(e));
       setAiThinking(false);
     }
   };
@@ -18490,7 +18504,8 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
             <Btn variant="danger" onClick={()=>setShowKey(true)} small>Actualizar</Btn>
           </div>}
           {aiError==='error'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',boxShadow:'0 8px 24px -8px rgba(10,27,61,0.3)'}}>
-            <p style={{fontSize:13,color:'#C5221F',marginBottom:10}}>Tu turno se guardó, pero Claude no pudo responder esta vez.</p>
+            <p style={{fontSize:13,color:'#C5221F',marginBottom:aiErrorDetail?4:10}}>Claude no pudo responder esta vez.</p>
+            {aiErrorDetail&&<p style={{fontSize:11.5,color:'rgba(197,34,31,0.75)',marginBottom:10,fontFamily:"'Courier New',monospace",wordBreak:'break-word'}}>{aiErrorDetail}</p>}
             <Btn variant="danger" onClick={retryClaudeTurn} disabled={aiThinking} small>{aiThinking?'Reintentando…':'Reintentar el turno de Claude →'}</Btn>
           </div>}
           {/* Para 'no_key'/'invalid_key' el reintento no es un botón aparte: pasa
@@ -18506,8 +18521,8 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         // Si veníamos de un fallo por falta de key o key inválida, al cerrar
         // el panel reintentamos el turno de Claude directamente — así no
         // hace falta ni un clic más aparte de haber guardado la key nueva.
-        if(aiError==='no_key'||aiError==='invalid_key'){setAiError('');retryClaudeTurn();}
-        else{setAiError('');}
+        if(aiError==='no_key'||aiError==='invalid_key'){setAiError('');setAiErrorDetail('');retryClaudeTurn();}
+        else{setAiError('');setAiErrorDetail('');}
       }}/>}
 
       {/* Bottom bar (my turn) */}
