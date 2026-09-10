@@ -18229,6 +18229,36 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
 
+  // Reintentar SOLO el turno de Claude, sin pedirte que escribas nada nuevo
+  // — para cuando ya se guardó tu fragmento pero la llamada a Claude falló
+  // (ver aiError más abajo). Relee el dueto fresco de la base de datos en
+  // vez de fiarse del `duet` de las props, por si ese ya quedó desfasado
+  // tras el intento anterior.
+  const retryClaudeTurn=async()=>{
+    if(aiThinking||saving)return;
+    setAiThinking(true);
+    try{
+      const fresh=await DB.getDuet(duet.id);
+      const aiTurn=await generateAIDuetTurn(fresh.full_plain||'',fresh.min_words,0,user.id);
+      if(!aiTurn.plain){setAiError('error');setAiThinking(false);return;}
+      await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html:aiTurn.html,plain:aiTurn.plain,word_count:aiTurn.wc,turn_number:fresh.turn_count+1,is_ai:true});
+      await DB.updateDuet(duet.id,{
+        full_html:(fresh.full_html||'')+'<div style="border-left:2px solid rgba(30,155,240,0.35);padding-left:14px;margin:4px 0;">'+aiTurn.html+'</div>',
+        full_plain:(fresh.full_plain||'')+(fresh.full_plain?'\n\n':'')+aiTurn.plain,
+        turn_count:fresh.turn_count+1,
+        current_turn:'a',
+      });
+      setAiError('');setAiThinking(false);
+      const updated=await DB.getDuet(duet.id);
+      onUpdate&&onUpdate(updated);
+      onClose();
+    }catch(e){
+      console.error('retryClaudeTurn:',e);
+      setAiError(e.message==='no_key'?'no_key':e.message==='invalid_key'?'invalid_key':'error');
+      setAiThinking(false);
+    }
+  };
+
   // Borrado unilateral, solo para duetos con Claude — no hay una segunda
   // persona a la que avisar ni pedir acuerdo, así que no hace falta el
   // baile de "proponer fin" que sí necesitan los duetos humanos.
@@ -18418,11 +18448,25 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
             <Btn variant="danger" onClick={()=>setShowKey(true)} small>Actualizar</Btn>
           </div>}
           {aiError==='error'&&<div style={{background:'rgba(197,34,31,0.06)',border:'0.5px solid rgba(197,34,31,0.2)',borderRadius:9,padding:'12px 14px',boxShadow:'0 8px 24px -8px rgba(10,27,61,0.3)'}}>
-            <p style={{fontSize:13,color:'#C5221F'}}>Tu turno se guardó, pero Claude no pudo responder esta vez. Puedes seguir escribiendo tú y lo intenta de nuevo en el siguiente turno.</p>
+            <p style={{fontSize:13,color:'#C5221F',marginBottom:10}}>Tu turno se guardó, pero Claude no pudo responder esta vez.</p>
+            <Btn variant="danger" onClick={retryClaudeTurn} disabled={aiThinking} small>{aiThinking?'Reintentando…':'Reintentar el turno de Claude →'}</Btn>
           </div>}
+          {/* Para 'no_key'/'invalid_key' el reintento no es un botón aparte: pasa
+              directamente al cerrar el ApiKeyPanel (ver más abajo), ya que sin
+              arreglar la key antes no tendría sentido volver a intentarlo. Para
+              'error' sí hace falta el botón explícito de aquí arriba, porque no
+              hay ningún paso previo que lo dispare solo. En ningún caso hace
+              falta escribir un fragmento nuevo para forzar otro intento. */}
         </div>
       )}
-      {showKey&&<ApiKeyPanel userId={user.id} onClose={()=>{setShowKey(false);setAiError('');}}/>}
+      {showKey&&<ApiKeyPanel userId={user.id} onClose={()=>{
+        setShowKey(false);
+        // Si veníamos de un fallo por falta de key o key inválida, al cerrar
+        // el panel reintentamos el turno de Claude directamente — así no
+        // hace falta ni un clic más aparte de haber guardado la key nueva.
+        if(aiError==='no_key'||aiError==='invalid_key'){setAiError('');retryClaudeTurn();}
+        else{setAiError('');}
+      }}/>}
 
       {/* Bottom bar (my turn) */}
       {myTurn&&(
