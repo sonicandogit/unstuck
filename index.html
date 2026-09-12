@@ -10930,6 +10930,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
   const toggleNotifCategory=key=>saveNotifPrefs({...notifPrefs,[key]:!notifPrefs[key]});
   const [showTeams,setShowTeams]=useState(false);
   const [showSendChallenge,setShowSendChallenge]=useState(false);
+  const [showContrarelojChoice,setShowContrarelojChoice]=useState(false); // elegir entre hacerlo tú o enviarlo — antes "Contrarreloj" iba directo a enviar, herencia de cuando esta sección se llamaba "Reto" en vez de "Escribe"
   const [showUsername,setShowUsername]=useState(!user.username||(user.username||'').startsWith('user_'));
   const [showChallengesHistory,setShowChallengesHistory]=useState(false);
   const [showBiblioteca,setShowBiblioteca]=useState(false);
@@ -11186,7 +11187,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
               </button>
               {/* Social section */}
               <div style={{fontSize:10,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.14em',padding:'12px 18px 4px'}}>Social</div>
-              <button onClick={()=>{setShowSendChallenge(true);setShowHamburger(false);}}
+              <button onClick={()=>{setShowContrarelojChoice(true);setShowHamburger(false);}}
                 style={{background:'transparent',border:'none',padding:'11px 18px',cursor:'pointer',textAlign:'left',fontFamily:"'Source Sans 3',sans-serif",display:'flex',alignItems:'center',gap:12,width:'100%'}}>
                 <Icon name="timer" size={16} color={NARANJA}/><span style={{fontSize:13,fontWeight:500,color:TXT}}>Contrarreloj</span>
               </button>
@@ -11246,6 +11247,34 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
       {showProfile&&<PublicProfile user={user} viewer={user} library={library} reflections={reflections} onClose={()=>setShowProfile(false)}/>}
       {readingEntry&&<ReadingModal entry={readingEntry} user={user} onClose={()=>setReadingEntry(null)} onEdit={()=>{setReadingEntry(null);onEditEntry&&onEditEntry(readingEntry);}} onVisibilityChange={onChangeVisibility} onDelete={onDeleteEntry}/>}
       {showUsername&&<UsernamePanel user={user} onClose={()=>setShowUsername(false)} onSave={un=>{user.username=un;}}/>}
+      {showContrarelojChoice&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:255,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)setShowContrarelojChoice(false)}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:380,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',padding:'20px 20px 12px'}}>
+            <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:2}}>Contrarreloj</div>
+            <div style={{fontSize:12,color:MUTED,marginBottom:16}}>5 palabras al azar, 1 hora de reloj. ¿Lo escribes tú o se lo mandas a alguien?</div>
+            <button onClick={()=>{setShowContrarelojChoice(false);onStartLesson({type:'cuento',writingMode});}}
+              style={{display:'flex',alignItems:'center',gap:12,width:'100%',background:'transparent',border:'1px solid '+BDR,borderRadius:10,padding:'12px 14px',marginBottom:8,cursor:'pointer',textAlign:'left'}}>
+              <div style={{width:34,height:34,borderRadius:9,background:'#A8202014',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name="pencil-simple" size={16} color="#A82020"/>
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:TXT}}>Escribirlo yo</div>
+                <div style={{fontSize:11,color:FAINT,marginTop:1}}>Empiezas ahora mismo, con tus propias 5 palabras</div>
+              </div>
+            </button>
+            <button onClick={()=>{setShowContrarelojChoice(false);setShowSendChallenge(true);}}
+              style={{display:'flex',alignItems:'center',gap:12,width:'100%',background:'transparent',border:'1px solid '+BDR,borderRadius:10,padding:'12px 14px',marginBottom:8,cursor:'pointer',textAlign:'left'}}>
+              <div style={{width:34,height:34,borderRadius:9,background:'rgba(30,155,240,0.08)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name="paper-plane-tilt" size={16} color="#1E9BF0"/>
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:TXT}}>Enviárselo a alguien</div>
+                <div style={{fontSize:11,color:FAINT,marginTop:1}}>Eliges las 5 palabras y a quién se lo retas</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
       {showSendChallenge&&<SendChallengeModal user={user} onClose={()=>setShowSendChallenge(false)}/>}
       {showSendDuet&&<SendDuetModal user={user} onClose={()=>setShowSendDuet(false)}
         onCreated={duet=>{if(duet.is_ai_partner)setOpenDuetFromCreate(duet);}}/>}
@@ -11288,7 +11317,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                   <span style={{fontSize:12.5,fontWeight:600,color:AZULMED,display:'flex',alignItems:'center',gap:6}}><Icon name="lightbulb"/>Semanales</span>
                   <span style={{fontSize:10.5,color:FAINT}}>Retos de la semana</span>
                 </button>
-                <button onClick={()=>{setShowSendChallenge(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,borderTop:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
+                <button onClick={()=>{setShowContrarelojChoice(true);setShowRetosMenu(false);}} style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:1,width:'100%',background:'transparent',border:'none',padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid '+BDR,borderTop:'1px solid '+BDR,textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:NARANJA,display:'flex',alignItems:'center',gap:6}}><Icon name="timer"/>Contrarreloj</span>
                   <span style={{fontSize:10.5,color:FAINT}}>5 palabras, 1 hora</span>
                 </button>
@@ -12456,7 +12485,7 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
   // decidió el autor. Solo le queda pedir feedback y que su aportación cuente
   // para sus propias estadísticas (eso lo hace completeReflection aparte).
   const isCollabContribution=!!sessionData?.isCollabContribution;
-  const [saveToLib,setSaveToLib]=useState(true);
+  const [saveMode,setSaveMode]=useState('publish'); // 'discard' | 'draft' | 'publish' — antes era un booleano saveToLib sin opción de descartar
   const [chainStart,setChainStart]=useState(false); // ¿dejar como primer capítulo encadenable?
   const [pubVis,setPubVis]=useState('privado');
   const [saveFeedback,setSaveFeedback]=useState(true);
@@ -12486,8 +12515,10 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
   // feedback is manual — no auto-trigger
 
   const save=()=>{
+    if(!isCollabContribution&&saveMode==='discard'&&!window.confirm('¿Descartar este texto? No se guardará en ningún sitio — ni borrador ni biblioteca.\n\nEsto no se puede deshacer.'))return;
     const r={id:uid(),ts:Date.now(),date:today(),rating:null,notes:'',sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,wordsAdded:sessionData.wordsAdded??sessionData.wordCount??0,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',entryAlreadyInLibrary:alreadyInLibrary,
-      saveToLibrary:isCollabContribution?false:saveToLib,visibility:isCollabContribution?null:(saveToLib?pubVis:'ejercicio'),chainStart:!isCollabContribution&&saveToLib&&chainStart,
+      discard:!isCollabContribution&&saveMode==='discard',
+      saveToLibrary:isCollabContribution?false:saveMode==='publish',visibility:isCollabContribution?null:(saveMode==='publish'?pubVis:'ejercicio'),chainStart:!isCollabContribution&&saveMode==='publish'&&chainStart,
       entryId:sessionData.entryId||null,isCollabContribution,
       shareBackChallenge:!!sessionData?.challengeFrom&&shareBack};
     onComplete(r);
@@ -12554,20 +12585,24 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
             <div style={{display:'flex',flexDirection:'column',gap:10}}>
               <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
                 {!isCollabContribution&&(
-                  <div style={{flex:'1 1 100%',display:'flex',gap:8}}>
-                    <button onClick={()=>setSaveToLib(false)}
-                      style={{flex:1,display:'flex',flexDirection:'column',alignItems:'flex-start',gap:2,padding:'12px 14px',background:!saveToLib?'rgba(30,155,240,0.08)':'rgba(0,0,0,0.02)',borderRadius:10,cursor:'pointer',border:'1px solid '+(!saveToLib?'rgba(30,155,240,0.4)':BDR),textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                      <span style={{display:'flex',alignItems:'center',gap:6,fontSize:13,fontWeight:600,color:!saveToLib?AZUL:TXT}}><Icon name="folder-simple" size={15} color={!saveToLib?AZUL:MUTED}/>Guardar borrador</span>
-                      <span style={{fontSize:11,color:MUTED}}>Solo en tu Escritorio, para ti</span>
-                    </button>
-                    <button onClick={()=>setSaveToLib(true)}
-                      style={{flex:1,display:'flex',flexDirection:'column',alignItems:'flex-start',gap:2,padding:'12px 14px',background:saveToLib?'rgba(30,155,240,0.08)':'rgba(0,0,0,0.02)',borderRadius:10,cursor:'pointer',border:'1px solid '+(saveToLib?'rgba(30,155,240,0.4)':BDR),textAlign:'left',fontFamily:"'Source Sans 3',sans-serif"}}>
-                      <span style={{display:'flex',alignItems:'center',gap:6,fontSize:13,fontWeight:600,color:saveToLib?AZUL:TXT}}><Icon name="book-open" size={15} color={saveToLib?AZUL:MUTED}/>Publicar en biblioteca</span>
-                      <span style={{fontSize:11,color:MUTED}}>Elige quién podrá verlo</span>
-                    </button>
+                  <div style={{flex:'1 1 100%'}}>
+                    <div style={{display:'flex',gap:6}}>
+                      {[
+                        {v:'discard',icon:'trash',label:'Descartar',hint:'No se guarda',c:'#C5221F',bg:'rgba(197,34,31,0.08)',bd:'rgba(197,34,31,0.4)'},
+                        {v:'draft',icon:'folder-simple',label:'Guardar borrador',hint:'Solo tú, en tu Escritorio',c:'#1E9BF0',bg:'rgba(30,155,240,0.08)',bd:'rgba(30,155,240,0.4)'},
+                        {v:'publish',icon:'book-open',label:'Publicar',hint:'Elige quién lo verá',c:'#1E9BF0',bg:'rgba(30,155,240,0.08)',bd:'rgba(30,155,240,0.4)'},
+                      ].map(o=>(
+                        <button key={o.v} onClick={()=>setSaveMode(o.v)}
+                          style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:2,padding:'10px 6px',background:saveMode===o.v?o.bg:'rgba(0,0,0,0.02)',borderRadius:10,cursor:'pointer',border:'1px solid '+(saveMode===o.v?o.bd:BDR),textAlign:'center',fontFamily:"'Source Sans 3',sans-serif"}}>
+                          <Icon name={o.icon} size={16} color={saveMode===o.v?o.c:MUTED}/>
+                          <span style={{fontSize:12,fontWeight:saveMode===o.v?600:500,color:saveMode===o.v?o.c:TXT}}>{o.label}</span>
+                          <span style={{fontSize:9.5,color:MUTED}}>{o.hint}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
-                {fbState==='done'&&(
+                {fbState==='done'&&saveMode!=='discard'&&(
                   <div onClick={()=>setSaveFeedback(v=>!v)} style={{flex:'1 1 200px',display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(0,0,0,0.02)",borderRadius:10,cursor:"pointer",border:"0.5px solid "+BDR}}>
                     <div style={{width:18,height:18,borderRadius:4,border:"1.5px solid "+(saveFeedback?"#1B5FAA":BDR),background:saveFeedback?"#1B5FAA":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
                       {saveFeedback&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -12579,7 +12614,7 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
                   </div>
                 )}
               </div>
-              {!isCollabContribution&&canPublish&&saveToLib&&(
+              {!isCollabContribution&&canPublish&&saveMode==='publish'&&(
                 <div onClick={()=>setChainStart(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',background:'rgba(0,0,0,0.02)',borderRadius:10,cursor:'pointer',border:'0.5px solid '+BDR}}>
                   <div style={{width:18,height:18,borderRadius:4,border:'1.5px solid '+(chainStart?'#1B5FAA':BDR),background:chainStart?'#1B5FAA':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
                     {chainStart&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -12590,7 +12625,7 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
                   </div>
                 </div>
               )}
-              {sessionData?.challengeFrom&&(
+              {sessionData?.challengeFrom&&saveMode!=='discard'&&(
                 <div onClick={()=>setShareBack(v=>!v)} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 16px',background:'rgba(241,90,36,0.04)',borderRadius:10,cursor:'pointer',border:'0.5px solid '+(shareBack?'rgba(241,90,36,0.35)':BDR)}}>
                   <div style={{width:18,height:18,borderRadius:4,border:'1.5px solid '+(shareBack?NARANJA:BDR),background:shareBack?NARANJA:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
                     {shareBack&&<svg width="10" height="8" viewBox="0 0 10 8"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
@@ -12601,7 +12636,7 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
                   </div>
                 </div>
               )}
-              {!isCollabContribution&&saveToLib&&(
+              {!isCollabContribution&&saveMode==='publish'&&(
                 <div>
                   <div style={{fontSize:11,fontWeight:600,color:MUTED,marginBottom:6}}>¿Quién podrá verlo en tu biblioteca?</div>
                   <div style={{display:'flex',gap:6}}>
@@ -12629,7 +12664,7 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
                     </button>
                   </div>
                 )}
-                <Btn variant="primary" onClick={save} disabled={fbState==='loading'} style={{height:42,fontSize:14,paddingLeft:24,paddingRight:24}}>Terminar</Btn>
+                <Btn variant={saveMode==='discard'?'danger':'primary'} onClick={save} disabled={fbState==='loading'} style={{height:42,fontSize:14,paddingLeft:24,paddingRight:24}}>{saveMode==='discard'?'Descartar':'Terminar'}</Btn>
               </div>
             </div>
           </div>
@@ -21666,116 +21701,133 @@ const App=()=>{
 
   const completeReflection=async(ref)=>{
     if(ref&&user){
-      setReflections(prev=>[ref,...prev.filter(r=>r.id!==ref.id)]);
-      const dbRef={
-        id:ref.id,user_id:user.id,rating:ref.rating||null,notes:ref.notes||null,
-        feedback:ref.feedback||null,sk:ref.sk||null,
-        session_title:ref.session_title||ref.sessionTitle||null,
-        word_count:ref.word_count||ref.wordCount||0,
-        elapsed:ref.elapsed||0,mode:ref.mode||null,
-        date:ref.date||null,ts:ref.ts||Date.now(),
-      };
-      try{await DB.upsertReflection(dbRef);}catch(e){console.error('save reflection',e);}
-
-      const buildFeedbackAppend=()=>{
-        const fbParas=ref.feedback.trim().split(/\n+/).map(l=>l.trim()).filter(Boolean);
-        return{
-          plainAppend:'\n\n— — —\n\n✦ Revisión de Claude\n\n'+fbParas.join('\n'),
-          htmlAppend:'<div style="margin-top:2em;padding-top:1.2em;border-top:1px solid rgba(10,27,61,0.12)">'
-            +'<div style="font-family:\'Playfair Display\',serif;font-style:italic;font-weight:600;font-size:0.95em;color:#1B5FAA;margin-bottom:0.6em">✦ Revisión de Claude</div>'
-            +fbParas.map(p=>'<p style="color:#5B6478;font-size:0.92em;line-height:1.65;margin:0 0 0.6em">'+p.replace(/^(\d)\.\s*/,'<strong>$1.</strong> ')+'</p>').join('')
-            +'</div>',
+      if(ref.discard){
+        // Descartar: el texto ya estaba autoguardado (sessionData.entryId viene
+        // del autoguardado del Editor mientras escribías), así que "no guardar
+        // nada" en realidad significa deshacer ese autoguardado. Se reutiliza
+        // el mismo borrado "suave" que ya usa el botón de borrar de la
+        // Biblioteca: vacía html/plain pero conserva word_count/elapsed en la
+        // fila, para que la racha y las palabras de hoy no desaparezcan solo
+        // porque no querías conservar el texto en sí. A propósito NO se guarda
+        // ninguna reflexión/check ni feedback de Claude — no tendría sentido
+        // documentar comentarios sobre un texto que ya no existe.
+        if(ref.entryId){
+          try{await DB.deleteEntry(ref.entryId);}
+          catch(e){console.error('descartar entrada:',e);}
+          setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,html:'',plain:'',deleted:true}:x));
+        }
+      }else{
+        setReflections(prev=>[ref,...prev.filter(r=>r.id!==ref.id)]);
+        const dbRef={
+          id:ref.id,user_id:user.id,rating:ref.rating||null,notes:ref.notes||null,
+          feedback:ref.feedback||null,sk:ref.sk||null,
+          session_title:ref.session_title||ref.sessionTitle||null,
+          word_count:ref.word_count||ref.wordCount||0,
+          elapsed:ref.elapsed||0,mode:ref.mode||null,
+          date:ref.date||null,ts:ref.ts||Date.now(),
         };
-      };
+        try{await DB.upsertReflection(dbRef);}catch(e){console.error('save reflection',e);}
 
-      if(ref.isCollabContribution&&ref.entryId){
-        // No es mi texto: no toco su visibilidad ni "hacer encadenable" — eso es
-        // decisión del autor. Si pedí revisión de Claude y quise guardarla, se
-        // añade al documento — PERO solo si ese texto no está ya publicado en la
-        // biblioteca del autor: el feedback es una herramienta de trabajo, nunca
-        // debe filtrarse a algo que ya es público (ni siquiera el propio autor lo
-        // ha pedido). Como el texto es de otra persona, no está en mi `library`
-        // local, así que se comprueba su estado real justo antes de decidir.
-        if(ref.feedback&&ref.feedback.trim()){
-          try{
-            const freshEntry=await DB.getEntryById(ref.entryId).catch(()=>null);
-            if(!freshEntry?.in_library){
-              const{htmlAppend,plainAppend}=buildFeedbackAppend();
-              await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);
-            }
-          }catch(e){console.error('append feedback (colaboración)',e);}
-        }
-        // Mi aportación de hoy no vive en `entries` (el texto es de otra persona),
-        // así que se registra aparte como una entrada propia de tipo "colaboracion"
-        // — invisible en Mis textos (visibility:'ejercicio', igual que un check),
-        // pero cuenta para MI racha y MIS palabras porque computeStats solo mira
-        // mi `library`, nunca `sharedWithMe`.
-        const contribWords=ref.wordsAdded??ref.word_count??ref.wordCount??0;
-        if(contribWords>0){
-          try{
-            const contribId='collab_contrib_'+ref.entryId+'_'+user.id+'_'+today();
-            const existingContrib=library.find(e=>e.id===contribId);
-            await saveEntry({
-              id:contribId,sk:'colaboracion',
-              date:today(),ts:Date.now(),
-              title:'Colaboración: '+(ref.session_title||ref.sessionTitle||'texto compartido'),
-              html:'',plain:'',
-              word_count:(existingContrib?.word_count||0)+contribWords,
-              words_added:(existingContrib?.word_count||0)+contribWords,
-              elapsed:(existingContrib?.elapsed||0)+(ref.elapsed||0),
-              visibility:'ejercicio',folder:null,
-            });
-          }catch(e){console.error('registrar contribución de colaboración:',e);}
-        }
-      }else if(ref.entryId&&ref.visibility){
-        // Dueño del texto: aplicar la visibilidad elegida.
-        try{
-          if(ref.visibility==='ejercicio'){
-            // "Guardar borrador": el texto se queda en el Escritorio, completo.
-            // Antes esta rama BORRABA html/plain (solo dejaba las estadísticas),
-            // pensado para cuando "no publicar" significaba "no hay Escritorio
-            // donde guardarlo". Ahora sí lo hay, así que borrar el texto
-            // contradiría al propio botón "Guardar borrador": solo hace falta
-            // confirmar que su visibilidad quede como borrador, sin tocar el
-            // contenido (que el autoguardado ya dejó bien guardado mientras
-            // escribías).
-            await DB.updateVisibility(ref.entryId,'ejercicio');
-            let htmlAppend='',plainAppend='';
-            // La revisión de Claude SOLO se pega al documento aquí, en la rama
-            // de borrador — el texto se queda en el Escritorio, así que nadie
-            // más lo lee. Si el texto ya estaba también publicado en la
-            // biblioteca (in_library=true) de una vez anterior, NO se toca su
-            // contenido: el feedback no debe filtrarse a lo que ya es público.
-            if(ref.feedback&&ref.feedback.trim()&&!ref.entryAlreadyInLibrary){
-              ({htmlAppend,plainAppend}=buildFeedbackAppend());
-              try{await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);}
-              catch(e){console.error('append feedback (borrador)',e);}
-            }
-            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:'ejercicio',html:htmlAppend?(x.html||'')+htmlAppend:x.html,plain:plainAppend?(x.plain||'')+plainAppend:x.plain}:x));
-          }else{
-            // El usuario ha elegido guardar en su biblioteca con una visibilidad:
-            // marcamos in_library=true (Fase 2) además de la visibilidad, para que
-            // aparezca en la Biblioteca. El texto sigue en el Escritorio.
-            // IMPORTANTE: la revisión de Claude NUNCA se pega aquí — el feedback
-            // es una herramienta de trabajo para ti, no contenido para lectores.
-            // Si quieres conservarlo pegado al texto, guarda como borrador.
-            await DB.publishToLibrary(ref.entryId,ref.visibility);
-            setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,in_library:true,visibility:ref.visibility}:x));
-            // Marcar si es encadenable (primer capítulo disponible para continuar)
-            if(ref.chainStart){
-              getSB().from('entries').update({chain_start:true}).eq('id',ref.entryId)
-                .then(r=>{ if(r?.error) console.error('chain_start update:',r.error); });
-              setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,chain_start:true}:x));
-            }
+        const buildFeedbackAppend=()=>{
+          const fbParas=ref.feedback.trim().split(/\n+/).map(l=>l.trim()).filter(Boolean);
+          return{
+            plainAppend:'\n\n— — —\n\n✦ Revisión de Claude\n\n'+fbParas.join('\n'),
+            htmlAppend:'<div style="margin-top:2em;padding-top:1.2em;border-top:1px solid rgba(10,27,61,0.12)">'
+              +'<div style="font-family:\'Playfair Display\',serif;font-style:italic;font-weight:600;font-size:0.95em;color:#1B5FAA;margin-bottom:0.6em">✦ Revisión de Claude</div>'
+              +fbParas.map(p=>'<p style="color:#5B6478;font-size:0.92em;line-height:1.65;margin:0 0 0.6em">'+p.replace(/^(\d)\.\s*/,'<strong>$1.</strong> ')+'</p>').join('')
+              +'</div>',
+          };
+        };
+
+        if(ref.isCollabContribution&&ref.entryId){
+          // No es mi texto: no toco su visibilidad ni "hacer encadenable" — eso es
+          // decisión del autor. Si pedí revisión de Claude y quise guardarla, se
+          // añade al documento — PERO solo si ese texto no está ya publicado en la
+          // biblioteca del autor: el feedback es una herramienta de trabajo, nunca
+          // debe filtrarse a algo que ya es público (ni siquiera el propio autor lo
+          // ha pedido). Como el texto es de otra persona, no está en mi `library`
+          // local, así que se comprueba su estado real justo antes de decidir.
+          if(ref.feedback&&ref.feedback.trim()){
+            try{
+              const freshEntry=await DB.getEntryById(ref.entryId).catch(()=>null);
+              if(!freshEntry?.in_library){
+                const{htmlAppend,plainAppend}=buildFeedbackAppend();
+                await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);
+              }
+            }catch(e){console.error('append feedback (colaboración)',e);}
           }
-        }catch(e){console.error('apply visibility',e);}
+          // Mi aportación de hoy no vive en `entries` (el texto es de otra persona),
+          // así que se registra aparte como una entrada propia de tipo "colaboracion"
+          // — invisible en Mis textos (visibility:'ejercicio', igual que un check),
+          // pero cuenta para MI racha y MIS palabras porque computeStats solo mira
+          // mi `library`, nunca `sharedWithMe`.
+          const contribWords=ref.wordsAdded??ref.word_count??ref.wordCount??0;
+          if(contribWords>0){
+            try{
+              const contribId='collab_contrib_'+ref.entryId+'_'+user.id+'_'+today();
+              const existingContrib=library.find(e=>e.id===contribId);
+              await saveEntry({
+                id:contribId,sk:'colaboracion',
+                date:today(),ts:Date.now(),
+                title:'Colaboración: '+(ref.session_title||ref.sessionTitle||'texto compartido'),
+                html:'',plain:'',
+                word_count:(existingContrib?.word_count||0)+contribWords,
+                words_added:(existingContrib?.word_count||0)+contribWords,
+                elapsed:(existingContrib?.elapsed||0)+(ref.elapsed||0),
+                visibility:'ejercicio',folder:null,
+              });
+            }catch(e){console.error('registrar contribución de colaboración:',e);}
+          }
+        }else if(ref.entryId&&ref.visibility){
+          // Dueño del texto: aplicar la visibilidad elegida.
+          try{
+            if(ref.visibility==='ejercicio'){
+              // "Guardar borrador": el texto se queda en el Escritorio, completo.
+              // Antes esta rama BORRABA html/plain (solo dejaba las estadísticas),
+              // pensado para cuando "no publicar" significaba "no hay Escritorio
+              // donde guardarlo". Ahora sí lo hay, así que borrar el texto
+              // contradiría al propio botón "Guardar borrador": solo hace falta
+              // confirmar que su visibilidad quede como borrador, sin tocar el
+              // contenido (que el autoguardado ya dejó bien guardado mientras
+              // escribías).
+              await DB.updateVisibility(ref.entryId,'ejercicio');
+              let htmlAppend='',plainAppend='';
+              // La revisión de Claude SOLO se pega al documento aquí, en la rama
+              // de borrador — el texto se queda en el Escritorio, así que nadie
+              // más lo lee. Si el texto ya estaba también publicado en la
+              // biblioteca (in_library=true) de una vez anterior, NO se toca su
+              // contenido: el feedback no debe filtrarse a lo que ya es público.
+              if(ref.feedback&&ref.feedback.trim()&&!ref.entryAlreadyInLibrary){
+                ({htmlAppend,plainAppend}=buildFeedbackAppend());
+                try{await DB.appendFeedbackToEntry(ref.entryId,htmlAppend,plainAppend);}
+                catch(e){console.error('append feedback (borrador)',e);}
+              }
+              setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,visibility:'ejercicio',html:htmlAppend?(x.html||'')+htmlAppend:x.html,plain:plainAppend?(x.plain||'')+plainAppend:x.plain}:x));
+            }else{
+              // El usuario ha elegido guardar en su biblioteca con una visibilidad:
+              // marcamos in_library=true (Fase 2) además de la visibilidad, para que
+              // aparezca en la Biblioteca. El texto sigue en el Escritorio.
+              // IMPORTANTE: la revisión de Claude NUNCA se pega aquí — el feedback
+              // es una herramienta de trabajo para ti, no contenido para lectores.
+              // Si quieres conservarlo pegado al texto, guarda como borrador.
+              await DB.publishToLibrary(ref.entryId,ref.visibility);
+              setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,in_library:true,visibility:ref.visibility}:x));
+              // Marcar si es encadenable (primer capítulo disponible para continuar)
+              if(ref.chainStart){
+                getSB().from('entries').update({chain_start:true}).eq('id',ref.entryId)
+                  .then(r=>{ if(r?.error) console.error('chain_start update:',r.error); });
+                setLibrary(prev=>prev.map(x=>x.id===ref.entryId?{...x,chain_start:true}:x));
+              }
+            }
+          }catch(e){console.error('apply visibility',e);}
+        }
       }
     }
     // Si esta sesión viene de un reto tipo "check" aceptado, marca ese
     // reto como completado ahora que ya sabemos el entryId real — el
     // flujo normal de check (a diferencia del Contrarreloj) no tenía
     // ninguna noción de "esto viene de un reto pendiente".
-    if(ref?.entryId&&pendingCheckChallenge){
+    if(ref?.entryId&&pendingCheckChallenge&&!ref.discard){
       DB.markChallengeCompleted(pendingCheckChallenge.id,ref.entryId).catch(e=>console.error('markChallengeCompleted (check):',e));
       // Compartir de vuelta es una decisión del autor, marcada en PostSession
       // (mismo criterio que "Devolver relato" en Contrarreloj) — independiente
