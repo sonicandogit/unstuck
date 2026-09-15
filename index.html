@@ -11029,6 +11029,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
         <div style={{flex:1,minWidth:0,paddingRight:18}}>
           <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:3,fontFamily:'"Playfair Display",Georgia,serif'}}>{c.title}</div>
           <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5}}>{c.teaser}</div>
+          <div style={{fontSize:11.5,fontWeight:600,color:c.color,marginTop:6}}>Leer más →</div>
         </div>
         <button onClick={e=>{e.stopPropagation();dismiss(c.id);}} title="Ocultar" style={{position:'absolute',top:10,right:10,background:'transparent',border:'none',cursor:'pointer',padding:4,color:FAINT,lineHeight:0}}>
           <Icon name="x" size={14} color={FAINT}/>
@@ -11038,7 +11039,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
     {openCard&&(
       <div style={{position:'fixed',inset:0,zIndex:280,background:'rgba(10,27,61,0.55)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
         onClick={e=>{if(e.target===e.currentTarget)closeTip();}}>
-        <div style={{background:PAGE_BG,borderRadius:18,width:'100%',maxWidth:440,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 24px 60px -14px rgba(10,27,61,0.5)'}}>
+        <div className="fi" style={{background:PAGE_BG,borderRadius:18,width:'100%',maxWidth:440,maxHeight:'calc(var(--app-height,100dvh) - 32px)',overflowY:'auto',boxShadow:'0 24px 60px -14px rgba(10,27,61,0.5)'}}>
           <div style={{padding:'22px 24px 4px',display:'flex',gap:12,alignItems:'flex-start'}}>
             <div style={{width:40,height:40,borderRadius:11,background:openCard.modalIconColor+'20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
               <Icon name={openCard.modalIcon} size={19} color={openCard.modalIconColor}/>
