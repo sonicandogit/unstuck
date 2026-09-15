@@ -233,6 +233,11 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
 .mk-badge{font-size:8px;font-weight:600;background:rgba(241,90,36,0.12);color:#F15A24;border-radius:4px;padding:2px 5px;flex-shrink:0;}
 .mk-modes{display:flex;gap:7px;}
 .mk-mode{flex:1;background:var(--card-bg,#fff);border:1px solid var(--border,rgba(10,27,61,.1));border-radius:6px;padding:8px;}
+/* Tarjeta de captura de ejemplo, usada dentro de los pop-ups de
+   DiscoveryCards (17 explicativos) — faltaba esta regla: sin ella, las
+   capturas dentro de esos pop-ups se veían sin borde, sin fondo y sin
+   esquinas redondeadas. */
+.ui-card{background:var(--card-bg,#fff);border:1px solid var(--border,rgba(10,27,61,.1));border-radius:11px;padding:16px;}
 .mk-mode-tag{font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3,#8a7f74);margin-bottom:5px;}
 .mk-mode.rio .mk-mode-tag{color:#1E9BF0}.mk-mode.limite .mk-mode-tag{color:#1B5FAA}.mk-mode.presion .mk-mode-tag{color:#F15A24;}
 .mk-mode-lines{display:flex;flex-direction:column;gap:3px;}
@@ -4741,6 +4746,22 @@ const DB = {
     const { error } = await getSB().from('profiles').update({ avatar }).eq('id', uid);
     if (error) throw error;
   },
+  // Reto semanal fotográfico (paso 1) — la foto activa ahora mismo, si hay
+  // alguna. single() no vale aquí porque puede no haber ninguna fila
+  // activa todavía (antes de que se configure la primera).
+  getActivePhotoChallenge: async () => {
+    const { data, error } = await getSB().from('photo_challenges').select('*').eq('active', true).order('created_at', { ascending: false }).limit(1);
+    if (error) throw error;
+    return (data && data[0]) || null;
+  },
+  // Paso 2: cuántas personas han escrito sobre este reto fotográfico, y
+  // quiénes (solo las que no lo dejaron puramente privado — ver el
+  // criterio de privacidad en RETO_FOTOGRAFICO_PASO2.sql).
+  getPhotoChallengeStats: async (challengeId) => {
+    const { data, error } = await getSB().rpc('get_photo_challenge_stats', { p_challenge_id: challengeId });
+    if (error) throw error;
+    return data || { count: 0, contributors: [] };
+  },
   getTotalUsers: async () => {
     const { data, error } = await getSB().from('profiles').select('id');
     if (error) throw error;
@@ -5148,28 +5169,39 @@ const DB = {
     return data || [];
   },
   // Quién sigue un dueto/colectivo, con su perfil — para que los autores
-  // vean cuántas personas y quiénes, no solo el número.
+  // vean cuántas personas y quiénes, no solo el número. Se incluye
+  // invited_by para que la interfaz solo ofrezca "expulsar" a quien de
+  // verdad invitó a esa persona (null en filas de antes de que existiera
+  // esta columna — a esas no se las puede expulsar por aquí).
   getDuetFollowersList: async (duetId) => {
-    const { data: follows } = await getSB().from('duet_followers').select('user_id').eq('duet_id', duetId);
+    const { data: follows } = await getSB().from('duet_followers').select('user_id, invited_by').eq('duet_id', duetId);
     const ids = (follows || []).map(f => f.user_id);
     if (!ids.length) return [];
     const { data, error } = await getSB().from('profiles')
       .select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
     if (error) throw error;
-    return data || [];
+    return (data || []).map(p => ({ ...p, invited_by: follows.find(f => f.user_id === p.id)?.invited_by || null }));
   },
   getCollectiveFollowersList: async (collectiveId) => {
-    const { data: follows } = await getSB().from('collective_followers').select('user_id').eq('collective_id', collectiveId);
+    const { data: follows } = await getSB().from('collective_followers').select('user_id, invited_by').eq('collective_id', collectiveId);
     const ids = (follows || []).map(f => f.user_id);
     if (!ids.length) return [];
     const { data, error } = await getSB().from('profiles')
       .select('id, name, username, initials, accent, bg, avatar, text_col').in('id', ids);
     if (error) throw error;
-    return data || [];
+    return (data || []).map(p => ({ ...p, invited_by: follows.find(f => f.user_id === p.id)?.invited_by || null }));
   },
   inviteDuetFollowers: async (duetId) => {
     const { error } = await getSB().rpc('invite_duet_followers', { p_duet_id: duetId });
     if (error) console.error('inviteDuetFollowers:', error.message);
+  },
+  // Fija TU PROPIA preferencia de avisar a tu círculo — el servidor decide
+  // si eres user_a o user_b, nunca se lo decimos nosotros. Si dices que sí
+  // y el dueto ya está activo, dispara el aviso a tu círculo ahí mismo; si
+  // dices que no, no pasa nada más — nunca bloquea seguir escribiendo.
+  setDuetSharePreference: async (duetId, share) => {
+    const { error } = await getSB().rpc('set_duet_share_preference', { p_duet_id: duetId, p_share: share });
+    if (error) throw error;
   },
   // Aceptar una invitación a seguir — vale para la automática (según
   // visibilidad) y la manual (una persona concreta, incluso en privado).
@@ -5184,6 +5216,23 @@ const DB = {
   // (comprobado en el servidor, no solo aquí).
   inviteSpecificFollower: async (entityType, entityId, targetUserId) => {
     const { error } = await getSB().rpc('invite_specific_follower', { p_entity_type: entityType, p_entity_id: entityId, p_target_user_id: targetUserId });
+    if (error) throw error;
+  },
+  // Invitaciones que YO he enviado para esta historia y siguen sin
+  // responder — para poder listarlas junto al botón de invitar y ofrecer
+  // cancelarlas. El propio servidor filtra por actor_id = quien llama, así
+  // que nunca devuelve invitaciones ajenas aunque se le pida otra historia.
+  getSentFollowInvites: async (entityType, entityId) => {
+    const { data, error } = await getSB().rpc('get_sent_follow_invites', { p_entity_type: entityType, p_entity_id: entityId });
+    if (error) throw error;
+    return data || [];
+  },
+  // Cancela una invitación que envié — funciona tanto si la persona
+  // todavía no ha respondido (se borra el aviso) como si ya la había
+  // aceptado (se la expulsa de la historia). El servidor comprueba que de
+  // verdad fui yo quien la invitó antes de tocar nada.
+  cancelFollowInvite: async (entityType, entityId, targetUserId) => {
+    const { error } = await getSB().rpc('cancel_follow_invite', { p_entity_type: entityType, p_entity_id: entityId, p_target_user_id: targetUserId });
     if (error) throw error;
   },
   // Reacciones de duetos — POR TURNO, igual que en colectivos.
@@ -5395,6 +5444,12 @@ const DB = {
   // Seguir colectivos sin escribir (FEATURE_FOLLOW_COLLECTIVES_ENABLED)
   inviteCollectiveFollowers: async(collectiveId)=>{
     const{error}=await getSB().rpc('invite_collective_followers',{p_collective_id:collectiveId});
+    if(error)throw error;
+  },
+  // Igual que setDuetSharePreference, pero por miembro de collective_members
+  // en vez de por columna 'a'/'b' — cada persona decide por su cuenta.
+  setCollectiveSharePreference: async(collectiveId,share)=>{
+    const{error}=await getSB().rpc('set_collective_share_preference',{p_collective_id:collectiveId,p_share:share});
     if(error)throw error;
   },
   // Seguir un colectivo ahora SIEMPRE pasa por acceptFollowInvite — el
@@ -10815,48 +10870,140 @@ const AuthScreen=({onAuth})=>{
 // ══════════════════════════════════════════════════════════════════
 const discoveredKey=(id,uid)=>'pretexto:discovered:'+(uid||'anon')+':'+id;
 
-const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,onNewChallenge,onOpenTeams,onOpenVoiceInfo})=>{
+const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,onNewChallenge,onContinue})=>{
   const [dismissed,setDismissed]=useState({});
+  const [openId,setOpenId]=useState(null); // id de la tarjeta cuyo pop-up está abierto
+  const [shotIdx,setShotIdx]=useState(0); // paso actual del carrusel del pop-up abierto
   const dismiss=(id)=>{ S.set(discoveredKey(id,user?.id),Date.now()); setDismissed(d=>({...d,[id]:true})); };
   const seen=(id)=>!!S.get(discoveredKey(id,user?.id))||dismissed[id];
 
-  // Señales de "ya usó la función" para retirar la tarjeta correspondiente.
+  // Señales de "ya usó la función" para retirar la tarjeta correspondiente —
+  // solo donde hay una señal clara y ya calculada; el resto del catálogo
+  // (mayoría de las 17) se queda visible hasta que la persona la cierre a
+  // mano con la × — igual que ya pasaba con un par de las 6 originales.
   const usedCollab=library.some(e=>['dueto','colectivo','chain','encadenado','cadena'].includes(e.sk));
-  const usedPublic=library.some(e=>e.visibility==='abierto'||e.visibility==='amigos');
   const usedCuento=library.some(e=>e.sk==='cuento');
 
-  // Catálogo de tarjetas. Cada una: condición de seguir mostrándose + acción.
   const catalog=[
-    {id:'disc_collab', show:!usedCollab, icon:'hands-clapping', color:NARANJA,
-      title:'Escribe con otras personas',
-      body:'A cuatro manos, con relatos encadenados o en colectivo: escribid una historia por turnos. Es una de las mejores formas de desatascarse y volver a disfrutar escribiendo.',
-      cta:'Pruébalo con un amigo',
-      action:()=>{ onOpenCollab&&onOpenCollab(); dismiss('disc_collab'); }},
-    {id:'disc_biblioteca', show:!usedPublic, icon:'books', color:AZULMED,
-      title:'Publica en la biblioteca',
-      body:'Escribimos por muchos motivos, pero uno de ellos es que queremos que nos lean. Por eso existe la biblioteca: un lugar donde compartir tus textos con la comunidad y descubrir los de los demás.',
-      cta:'Comparte un texto',
-      action:()=>{ onOpenLibrary&&onOpenLibrary(); dismiss('disc_biblioteca'); }},
-    {id:'disc_contrarreloj', show:!usedCuento, icon:'timer', color:'#F15A24',
-      title:'Prueba un reto contrarreloj',
-      body:'Cinco palabras al azar. Una hora. Toda tu creatividad. De vez en cuando conviene ponerse contra las cuerdas y descubrir qué sale.',
-      cta:'¿Preparado?',
+    {id:'disc_checks', show:true, icon:'flame', color:AZULMED,
+      title:"Checks diarios",
+      teaser:(<>Usa la racha como un <i>pretexto</i> para mantenerte en forma.</>),
+      modalIcon:'flame', modalIconColor:NARANJA,
+      body:(<><p style={{marginBottom:'12px'}}>Selecciona las ganas que tienes de escribir o ve directamente a «Escribe» para ver los checks diarios. En el primer caso, elegimos el ejercicio por ti, a medida para ese día. En el segundo, eliges tú entre los 128 retos disponibles el que más te apetece en ese momento.</p><p>Los que ya has completado cambian de color. ¿Conseguirás hacerlos todos?</p></>),
+      shots:[{label:null,content:(<><div className="ui-card"><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'18px'}}><div style={{fontSize:'15px',fontWeight:'600',color:NAVY}}>¿Cuántas ganas tienes de escribir hoy?</div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'32px',color:NARANJA}}>7</div></div><div style={{position:'relative',height:'3px',background:'rgba(10,27,61,.14)',borderRadius:'2px',marginBottom:'10px'}}><div style={{position:'absolute',left:'63%',top:'50%',transform:'translate(-50%,-50%)',width:'22px',height:'22px',borderRadius:'50%',background:'#fff',border:'1px solid rgba(10,27,61,.1)',boxShadow:'0 2px 6px rgba(10,27,61,.15)'}}></div></div><div style={{display:'flex',justifyContent:'space-between',fontSize:'12.5px',color:FAINT,marginBottom:'16px'}}><span>sin energía</span><span>a tope</span></div><div style={{borderLeft:'3px solid '+NARANJA,background:'rgba(241,90,36,.05)',borderRadius:'0 8px 8px 0',padding:'12px 14px',marginBottom:'16px',fontSize:'12.5px',lineHeight:'1.5',color:MUTED}}>Buena energía. El reto de la semana o tu proyecto te están esperando.</div><button style={{width:'100%',font:'600 13.5px \'Source Sans 3\'',color:'#fff',background:NAVY,border:'none',borderRadius:'10px',padding:'12px',cursor:'pointer'}}>Ver sesión de hoy →</button></div></>)}],
+      action:()=>{ onContinue&&onContinue(); dismiss('disc_checks'); }},
+    {id:'disc_colectivo', show:!usedCollab, icon:'users-three', color:NARANJA,
+      title:"Escribe un relato colaborativo",
+      teaser:(<>Pierde el control, gana toda la diversión.</>),
+      modalIcon:'users-three', modalIconColor:NARANJA,
+      body:(<><p>Entra en Escribe → Relatos colectivos. Elige la frase de apertura (o un disparador al azar), el título, el mínimo de palabras por turno y el número de rondas. Añade a los participantes buscándolos por @usuario y define su orden de turno. Por último, decide quién puede seguir el relato sin participar en él.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-users-three" style={{fontSize:'17px',color:AZULMED}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Nuevo relato colectivo</span></div><span style={{fontSize:'11px',color:FAINT}}>Paso 1 de 5</span></div><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'6px'}}>Frase de apertura</div><div style={{fontSize:'11.5px',color:MUTED,lineHeight:'1.5',marginBottom:'10px'}}>La primera frase que todos los participantes verán antes de escribir.</div><div className="ui-card" style={{padding:'12px',marginBottom:'12px'}}><div style={{fontFamily:'\'Playfair Display\',serif',fontStyle:'italic',fontSize:'13.5px',lineHeight:'1.5'}}>Tres personas recibieron la misma llave el mismo día sin conocerse entre sí.</div></div><div style={{display:'inline-flex',alignItems:'center',gap:'6px',background:'#EAF2FB',borderRadius:'8px',padding:'7px 12px',font:'600 11.5px \'Source Sans 3\'',color:AZULMED}}><i className="ph-light ph-shuffle" style={{fontSize:'13px'}}></i>Al azar</div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-users-three" style={{fontSize:'17px',color:AZULMED}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Nuevo relato colectivo</span></div><span style={{fontSize:'11px',color:FAINT}}>Paso 2 de 5</span></div><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'8px'}}>Configuración</div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Título del relato</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'12px',color:'#a8a399',fontSize:'12px'}}>Título…</div><div style={{fontSize:'11.5px',marginBottom:'6px'}}>Mínimo de palabras por turno: <b>100</b></div><div style={{height:'3px',background:'rgba(10,27,61,.14)',borderRadius:'2px',marginBottom:'14px'}}></div><div style={{fontSize:'11.5px',marginBottom:'6px'}}>Rondas: <b>3</b></div><div style={{height:'3px',background:'rgba(10,27,61,.14)',borderRadius:'2px'}}></div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-users-three" style={{fontSize:'17px',color:AZULMED}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Nuevo relato colectivo</span></div><span style={{fontSize:'11px',color:FAINT}}>Paso 3 de 5</span></div><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'10px'}}>Participantes</div><div className="ui-card" style={{display:'flex',flexDirection:'column',gap:'9px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><div style={{width:'26px',height:'26px',borderRadius:'50%',background:NAVY,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',font:'700 11px \'Source Sans 3\''}}>T</div><div style={{flex:'1'}}><div style={{fontSize:'12.5px',fontWeight:'600'}}>Tú</div><div style={{fontSize:'10.5px',color:FAINT}}>Creador</div></div><i className="ph-light ph-crown-simple" style={{fontSize:'14px',color:NARANJA}}></i></div><div style={{display:'flex',alignItems:'center',gap:'9px',borderTop:'1px solid '+BDR,paddingTop:'9px'}}><div style={{width:'26px',height:'26px',borderRadius:'50%',background:'#DCE7F5',color:AZULMED,display:'flex',alignItems:'center',justifyContent:'center',font:'700 11px \'Source Sans 3\''}}>U</div><div style={{flex:'1'}}><div style={{fontSize:'12.5px',fontWeight:'600'}}>Usuario X</div><div style={{fontSize:'10.5px',color:FAINT}}>@usuariox</div></div></div><div style={{display:'flex',alignItems:'center',gap:'9px',borderTop:'1px solid '+BDR,paddingTop:'9px'}}><div style={{width:'26px',height:'26px',borderRadius:'50%',background:'#F3DCDC',color:'#B4655F',display:'flex',alignItems:'center',justifyContent:'center',font:'700 11px \'Source Sans 3\''}}>U</div><div style={{flex:'1'}}><div style={{fontSize:'12.5px',fontWeight:'600'}}>Usuario Y</div><div style={{fontSize:'10.5px',color:FAINT}}>@usuarioy</div></div></div></div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-users-three" style={{fontSize:'17px',color:AZULMED}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Nuevo relato colectivo</span></div><span style={{fontSize:'11px',color:FAINT}}>Paso 4 de 5</span></div><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'10px'}}>Orden de turno</div><div className="ui-card" style={{display:'flex',flexDirection:'column',gap:'9px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',color:FAINT,width:'14px'}}>1</span><div style={{width:'24px',height:'24px',borderRadius:'50%',background:NAVY,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',font:'700 10px \'Source Sans 3\''}}>T</div><span style={{fontSize:'12.5px',flex:'1'}}>Tú</span><i className="ph-light ph-crown-simple" style={{fontSize:'13px',color:NARANJA,marginRight:'8px'}}></i><i className="ph-light ph-arrow-up" style={{fontSize:'13px',color:'rgba(10,27,61,.25)',marginRight:'6px'}}></i><i className="ph-light ph-arrow-down" style={{fontSize:'13px',color:'rgba(10,27,61,.55)'}}></i></div><div style={{display:'flex',alignItems:'center',gap:'9px',borderTop:'1px solid '+BDR,paddingTop:'9px'}}><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',color:FAINT,width:'14px'}}>2</span><div style={{width:'24px',height:'24px',borderRadius:'50%',background:'#DCE7F5',color:AZULMED,display:'flex',alignItems:'center',justifyContent:'center',font:'700 10px \'Source Sans 3\''}}>U</div><span style={{fontSize:'12.5px',flex:'1'}}>Usuario X</span><i className="ph-light ph-arrow-up" style={{fontSize:'13px',color:'rgba(10,27,61,.55)',marginRight:'6px'}}></i><i className="ph-light ph-arrow-down" style={{fontSize:'13px',color:'rgba(10,27,61,.55)'}}></i></div><div style={{display:'flex',alignItems:'center',gap:'9px',borderTop:'1px solid '+BDR,paddingTop:'9px'}}><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',color:FAINT,width:'14px'}}>3</span><div style={{width:'24px',height:'24px',borderRadius:'50%',background:'#F3DCDC',color:'#B4655F',display:'flex',alignItems:'center',justifyContent:'center',font:'700 10px \'Source Sans 3\''}}>U</div><span style={{fontSize:'12.5px',flex:'1'}}>Usuario Y</span><i className="ph-light ph-arrow-up" style={{fontSize:'13px',color:'rgba(10,27,61,.55)',marginRight:'6px'}}></i><i className="ph-light ph-arrow-down" style={{fontSize:'13px',color:'rgba(10,27,61,.25)'}}></i></div></div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-users-three" style={{fontSize:'17px',color:AZULMED}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Nuevo relato colectivo</span></div><span style={{fontSize:'11px',color:FAINT}}>Paso 5 de 5</span></div><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'10px'}}>¿Quién puede verlo?</div><div style={{display:'flex',flexDirection:'column',gap:'8px'}}><div className="ui-card" style={{borderColor:AZULMED,background:'rgba(30,155,240,.05)',padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-lock-simple" style={{fontSize:'14px',color:AZULMED}}></i><span style={{fontSize:'12.5px',fontWeight:'600',color:AZULMED}}>Privado</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Solo quienes escriben pueden verlo</div></div><div className="ui-card" style={{padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-users-three" style={{fontSize:'14px',color:MUTED}}></i><span style={{fontSize:'12.5px',fontWeight:'600'}}>Amigos</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Los amigos de cualquiera del grupo pueden seguirlo</div></div><div className="ui-card" style={{padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-globe" style={{fontSize:'14px',color:MUTED}}></i><span style={{fontSize:'12.5px',fontWeight:'600'}}>Abierto</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Cualquiera que siga a alguien del grupo puede seguirlo</div></div></div></>)}],
+      action:()=>{ onOpenCollab&&onOpenCollab(); dismiss('disc_colectivo'); }},
+    {id:'disc_escritorio_biblioteca', show:true, icon:'arrows-left-right', color:AZULMED,
+      title:"¿Escritorio? ¿Biblioteca?",
+      teaser:(<>Dónde se trabaja y dónde se publica.</>),
+      modalIcon:'arrows-left-right', modalIconColor:AZULMED,
+      body:(<><p>Todos los checks, ejercicios y proyectos propios viven en tu escritorio. Elige qué publicas en la biblioteca: tu colección privada de textos terminados, o tus textos compartidos con la comunidad o con tus amigos. Separamos ambas pestañas para diferenciar bien dónde se escribe y dónde se lee.</p></>),
+      shots:[{label:"Escritorio",content:(<><div className="ui-card" style={{display:'flex',flexDirection:'column',gap:'0'}}><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0'}}><i className="ph-light ph-book-open" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Relato</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-books" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Novela</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-pen-nib" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Ensayo</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-feather" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Poesía</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-film-slate" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Guion</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-video-camera" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Cortometraje</span></div></div></>)},{label:"Biblioteca",content:(<><div className="ui-card" style={{display:'flex',flexDirection:'column',gap:'0'}}><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0'}}><i className="ph-light ph-lock-simple" style={{fontSize:'16px',color:FAINT}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Privado</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-users-three" style={{fontSize:'16px',color:AZULMED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Amigos</span></div><div style={{display:'flex',alignItems:'center',gap:'11px',padding:'10px 0',borderTop:'1px solid '+BDR}}><i className="ph-light ph-globe" style={{fontSize:'16px',color:NARANJA}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Público</span></div></div></>)}],
+      action:()=>{ onOpenLibrary&&onOpenLibrary(); dismiss('disc_escritorio_biblioteca'); }},
+    {id:'disc_invitar_editor', show:true, icon:'user-plus', color:NARANJA,
+      title:"Invita a un editor",
+      teaser:(<>Que alguien pula los últimos detalles contigo.</>),
+      modalIcon:'user-plus', modalIconColor:NARANJA,
+      body:(<><p>Igual quieres que otro usuario acceda a tu texto para ayudarte a pulir los últimos detalles. Invita a un editor con el botón de añadir usuario, disponible en la parte superior de cualquier texto tuyo.</p></>),
+      shots:[{label:null,content:(<><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px',marginBottom:'10px'}}>Lorem ipsum dolor sit amet</div><div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'12px'}}><div style={{display:'flex',alignItems:'center',gap:'6px',background:NAVY,color:'#fff',borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\''}}><i className="ph-light ph-pencil-simple" style={{fontSize:'13px'}}></i>Editar</div><div style={{display:'flex',alignItems:'center',gap:'6px',background:'#EAF2FB',color:AZULMED,border:'1px solid rgba(30,155,240,.3)',borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\''}}><i className="ph-light ph-book-open" style={{fontSize:'13px'}}></i>Publicar en biblioteca</div></div><div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}><div style={{display:'flex',alignItems:'center',gap:'6px',border:'1px solid '+BDR,borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\'',color:MUTED}}><i className="ph-light ph-folder" style={{fontSize:'13px'}}></i>Mover</div><div style={{display:'flex',alignItems:'center',gap:'6px',border:'1px solid '+BDR,borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\'',color:MUTED}}><i className="ph-light ph-cloud-arrow-down" style={{fontSize:'13px'}}></i>Offline</div><div style={{display:'flex',alignItems:'center',gap:'6px',background:'rgba(30,155,240,.1)',border:'1.5px solid '+AZULMED,borderRadius:'20px',padding:'8px 14px',font:'700 11.5px \'Source Sans 3\'',color:AZULMED}}><i className="ph-light ph-user-plus" style={{fontSize:'13px'}}></i>Invitar</div></div></>)},{label:null,content:(<><div className="ui-card" style={{padding:'14px'}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'9px'}}><span style={{font:'600 10px \'Source Sans 3\'',color:AZULMED,background:'#EAF2FB',borderRadius:'6px',padding:'3px 9px'}}>Borrador</span><div style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'10.5px',color:FAINT}}>hoy<i className="ph-light ph-cloud-arrow-down" style={{fontSize:'14px',color:'rgba(10,27,61,.22)'}}></i><i className="ph-light ph-users-three" style={{fontSize:'14px',color:AZULMED}}></i></div></div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px',marginBottom:'6px'}}>Lorem ipsum dolor sit amet</div><div style={{fontSize:'11.5px',color:MUTED,lineHeight:'1.5'}}>Consectetur adipiscing elit sed do eiusmod tempor incididunt.</div></div></>)}],
+      action:()=>{  dismiss('disc_invitar_editor'); }},
+    {id:'disc_avion', show:true, icon:'airplane', color:AZULMED,
+      title:"Continúa tu texto en el avión",
+      teaser:(<>Escribe sin cobertura y sin restricciones.</>),
+      modalIcon:'airplane', modalIconColor:AZULMED,
+      body:(<><p>¿Quieres seguir escribiendo tu historia pero estás a punto de quedarte sin cobertura durante horas? Descarga el texto a tu dispositivo y sigue escribiendo sin restricciones. En cualquier texto de tu biblioteca, pulsa el botón de descarga (una nube con una flecha). Despreocúpate: cuando vuelvas a tener internet, lo subiremos de vuelta.</p></>),
+      shots:[{label:null,content:(<><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px',marginBottom:'10px'}}>Lorem ipsum dolor sit amet</div><div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'12px'}}><div style={{display:'flex',alignItems:'center',gap:'6px',background:NAVY,color:'#fff',borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\''}}><i className="ph-light ph-pencil-simple" style={{fontSize:'13px'}}></i>Editar</div><div style={{display:'flex',alignItems:'center',gap:'6px',background:'#EAF2FB',color:AZULMED,border:'1px solid rgba(30,155,240,.3)',borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\''}}><i className="ph-light ph-book-open" style={{fontSize:'13px'}}></i>Publicar en biblioteca</div></div><div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}><div style={{display:'flex',alignItems:'center',gap:'6px',border:'1px solid '+BDR,borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\'',color:MUTED}}><i className="ph-light ph-folder" style={{fontSize:'13px'}}></i>Mover</div><div style={{display:'flex',alignItems:'center',gap:'6px',background:'rgba(30,155,240,.1)',border:'1.5px solid '+AZULMED,borderRadius:'20px',padding:'8px 14px',font:'700 11.5px \'Source Sans 3\'',color:AZULMED}}><i className="ph-light ph-cloud-arrow-down" style={{fontSize:'13px'}}></i>Offline</div><div style={{display:'flex',alignItems:'center',gap:'6px',border:'1px solid '+BDR,borderRadius:'20px',padding:'8px 14px',font:'600 11.5px \'Source Sans 3\'',color:MUTED}}><i className="ph-light ph-user-plus" style={{fontSize:'13px'}}></i>Invitar</div></div></>)},{label:null,content:(<><div className="ui-card" style={{padding:'14px'}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'9px'}}><span style={{font:'600 10px \'Source Sans 3\'',color:AZULMED,background:'#EAF2FB',borderRadius:'6px',padding:'3px 9px'}}>Borrador</span><div style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'10.5px',color:FAINT}}>hoy<i className="ph-light ph-cloud-arrow-down" style={{fontSize:'14px',color:AZULMED}}></i><i className="ph-light ph-users-three" style={{fontSize:'14px',color:'rgba(10,27,61,.22)'}}></i></div></div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px',marginBottom:'6px'}}>Lorem ipsum dolor sit amet</div><div style={{fontSize:'11.5px',color:MUTED,lineHeight:'1.5'}}>Consectetur adipiscing elit sed do eiusmod tempor incididunt.</div></div></>)}],
+      action:()=>{  dismiss('disc_avion'); }},
+    {id:'disc_publico', show:true, icon:'broadcast', color:NARANJA,
+      title:"Escribe con público",
+      teaser:(<>Abre tus duetos e historias colaborativas a quien quieras.</>),
+      modalIcon:'broadcast', modalIconColor:NARANJA,
+      body:(<><p>Los duetos y las historias colaborativas son divertidísimos de escribir y también de seguir. Por eso puedes dejar tu texto abierto a amigos o seguidores, o abrirlo a seguidores concretos, usando el botón de añadir seguidores en la parte superior del texto.</p></>),
+      shots:[{label:null,content:(<><div className="ui-card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 16px'}}><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-handshake" style={{fontSize:'15px',color:NARANJA}}></i><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'600',fontSize:'14px'}}>En el metro</div></div><div style={{display:'flex',alignItems:'center',gap:'6px',font:'600 11.5px \'Source Sans 3\'',color:NARANJA,background:'rgba(241,90,36,.1)',borderRadius:'8px',padding:'7px 11px'}}><i className="ph-light ph-user-circle-plus" style={{fontSize:'14px'}}></i>Añadir seguidores</div></div></>)},{label:null,content:(<><div className="ui-card" style={{display:'flex',flexDirection:'column',gap:'8px'}}><div style={{fontSize:'11.5px',fontWeight:'600',marginBottom:'2px'}}>¿Cómo quieres dejarlo?</div><div style={{display:'flex',alignItems:'center',gap:'9px'}}><i className="ph-light ph-globe" style={{fontSize:'15px',color:NARANJA}}></i><span style={{fontSize:'12px'}}>Abierto a todos</span></div><div style={{display:'flex',alignItems:'center',gap:'9px',borderTop:'1px solid '+BDR,paddingTop:'8px'}}><i className="ph-light ph-users-three" style={{fontSize:'15px',color:AZULMED}}></i><span style={{fontSize:'12px'}}>Solo amigos</span></div><div style={{display:'flex',alignItems:'center',gap:'9px',borderTop:'1px solid '+BDR,paddingTop:'8px'}}><i className="ph-light ph-lock-simple" style={{fontSize:'15px',color:FAINT}}></i><span style={{fontSize:'12px'}}>Privado</span></div></div></>)}],
+      action:()=>{  dismiss('disc_publico'); }},
+    {id:'disc_seguir_historias', show:true, icon:'bell-ringing', color:AZULMED,
+      title:"Sigue historias vivas",
+      teaser:(<>Historias colaborativas en directo, sin ser parte activa.</>),
+      modalIcon:'bell-ringing', modalIconColor:AZULMED,
+      body:(<><p>Los duetos y las historias colaborativas son divertidísimos de escribir, pero también de seguir. Te avisaremos con una notificación cuando tus amigos escriban en abierto y te inviten a seguir sus historias colaborativas.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',alignItems:'center',gap:'10px',padding:'12px 16px',borderBottom:'1px solid '+BDR,background:'#fff'}}><div style={{display:'flex',alignItems:'center',gap:'5px',font:'600 13px \'Source Sans 3\'',color:NARANJA}}><i className="ph-light ph-lightning" style={{fontSize:'15px'}}></i>Escribe</div><div style={{flex:'1'}}></div><div style={{position:'relative'}}><i className="ph-light ph-bell" style={{fontSize:'16px',color:MUTED}}></i><span style={{position:'absolute',top:'-4px',right:'-5px',width:'13px',height:'13px',borderRadius:'50%',background:NARANJA,color:'#fff',font:'700 8px/13px \'Source Sans 3\'',textAlign:'center'}}>1</span></div><div style={{display:'flex',gap:'2px',background:'rgba(10,27,61,.06)',borderRadius:'20px',padding:'2px'}}><span style={{font:'600 10.5px \'Source Sans 3\'',background:'#fff',borderRadius:'18px',padding:'4px 10px',boxShadow:'0 1px 2px rgba(10,27,61,.1)'}}>Claro</span><span style={{font:'600 10.5px \'Source Sans 3\'',color:FAINT,padding:'4px 10px'}}>Oscuro</span></div><div style={{width:'24px',height:'24px',borderRadius:'50%',background:'#DCE7F5',color:AZULMED,display:'flex',alignItems:'center',justifyContent:'center',font:'700 10px \'Source Sans 3\''}}>U</div></div><div style={{padding:'16px'}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px'}}><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px'}}>Notificaciones</span><span style={{font:'600 11px \'Source Sans 3\'',color:AZULMED}}>Marcar todo leído</span></div><div style={{background:'rgba(30,155,240,.06)',borderRadius:'10px',padding:'12px 14px',display:'flex',gap:'10px'}}><i className="ph-light ph-eye" style={{fontSize:'15px',color:MUTED,marginTop:'2px'}}></i><div style={{flex:'1'}}><div style={{fontSize:'12.5px',display:'flex',alignItems:'center',gap:'6px'}}><span>Usuario X te ha invitado a seguir una historia</span><span style={{width:'6px',height:'6px',borderRadius:'50%',background:NARANJA,flexShrink:'0'}}></span></div><div style={{fontSize:'11.5px',color:MUTED,marginTop:'3px'}}>«En el metro» — puedes seguirla sin escribir.</div><div style={{display:'flex',gap:'8px',marginTop:'9px'}}><span style={{background:AZUL,color:'#fff',font:'600 11px \'Source Sans 3\'',borderRadius:'7px',padding:'6px 12px'}}>Seguir</span><span style={{border:'1px solid '+BDR,color:MUTED,font:'600 11px \'Source Sans 3\'',borderRadius:'7px',padding:'6px 12px'}}>No, gracias</span></div><div style={{fontSize:'10.5px',color:FAINT,marginTop:'7px'}}>ahora</div></div></div></div></>)}],
+      action:()=>{  dismiss('disc_seguir_historias'); }},
+    {id:'disc_dueto_claude', show:true, icon:'robot', color:NARANJA,
+      title:"Escribe un dueto con Claude",
+      teaser:(<>Un compañero virtual que te sorprenderá a cada turno.</>),
+      modalIcon:'robot', modalIconColor:NARANJA,
+      body:(<><p>Ve a Escribir → Dueto con Claude. Añade un título y una premisa, ambos opcionales, y define el mínimo de palabras por turno. Por último, decide quién puede seguir el relato sin participar.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',alignItems:'center',gap:'9px',marginBottom:'4px'}}><i className="ph-light ph-robot" style={{fontSize:'17px',color:NAVY}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Dueto con Claude</span></div><div style={{fontSize:'11.5px',color:MUTED,marginBottom:'14px'}}>Escribid por turnos. Tú empiezas.</div><div style={{fontSize:'12px',fontWeight:'600',marginBottom:'6px'}}>¿Con quién escribes?</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'10px',color:'#a8a399',fontSize:'12px'}}>Buscar entre tus amigos…</div><div style={{border:'1.5px solid '+AZULMED,background:'rgba(30,155,240,.06)',borderRadius:'11px',padding:'9px 12px',marginBottom:'14px',display:'flex',alignItems:'center',gap:'8px',color:AZULMED,font:'700 12px \'Source Sans 3\''}}><i className="ph-light ph-sparkle" style={{fontSize:'14px'}}></i>O escribe con Claude</div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Título (opcional)</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'12px',color:'#a8a399',fontSize:'12px'}}>Dueto con Claude</div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Premisa inicial (opcional)</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'14px',color:'#a8a399',fontSize:'11.5px',lineHeight:'1.5'}}>Un faro abandonado. Alguien enciende la luz por primera vez en 30 años.</div><div style={{display:'flex',justifyContent:'space-between',fontSize:'11.5px',marginBottom:'6px'}}><span>Mínimo de palabras por turno</span><b style={{color:AZULMED}}>25</b></div><div style={{height:'3px',background:'rgba(10,27,61,.14)',borderRadius:'2px'}}></div></>)},{label:null,content:(<><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'10px'}}>¿Quién puede verlo?</div><div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'14px'}}><div className="ui-card" style={{borderColor:AZULMED,background:'rgba(30,155,240,.05)',padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-lock-simple" style={{fontSize:'14px',color:AZULMED}}></i><span style={{fontSize:'12.5px',fontWeight:'600',color:AZULMED}}>Privado</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Solo quien escribe puede verlo</div></div><div className="ui-card" style={{padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-users-three" style={{fontSize:'14px',color:MUTED}}></i><span style={{fontSize:'12.5px',fontWeight:'600'}}>Amigos</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Tus amigos pueden seguirlo</div></div><div className="ui-card" style={{padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-globe" style={{fontSize:'14px',color:MUTED}}></i><span style={{fontSize:'12.5px',fontWeight:'600'}}>Abierto</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Cualquiera que te siga puede seguirlo</div></div></div><div style={{background:NAVY,color:'#fff',borderRadius:'11px',padding:'11px',textAlign:'center',font:'600 12.5px \'Source Sans 3\'',display:'flex',alignItems:'center',justifyContent:'center',gap:'7px'}}><i className="ph-light ph-sparkle" style={{fontSize:'14px'}}></i>Empezar a escribir</div></>)}],
+      action:()=>{  dismiss('disc_dueto_claude'); }},
+    {id:'disc_cuatro_manos', show:true, icon:'hand-fist', color:AZULMED,
+      title:"Escribe a cuatro manos",
+      teaser:(<>El pretexto de que otra persona espere tu turno.</>),
+      modalIcon:'hand-fist', modalIconColor:AZULMED,
+      body:(<><p>Ve a Escribir → A cuatro manos. Busca con quién escribes (o pide que escriba Claude), añade un título y una premisa, ambos opcionales, y define el mínimo de palabras por turno. Por último, decide quién puede seguir el relato sin participar.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',alignItems:'center',gap:'9px',marginBottom:'4px'}}><i className="ph-light ph-hand-fist" style={{fontSize:'17px',color:NAVY}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Relato a cuatro manos</span></div><div style={{fontSize:'11.5px',color:MUTED,marginBottom:'14px'}}>Escribid por turnos. Tú empiezas.</div><div style={{fontSize:'12px',fontWeight:'600',marginBottom:'6px'}}>¿Con quién escribes?</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'10px',color:'#a8a399',fontSize:'12px'}}>Buscar entre tus amigos…</div><div style={{border:'1px dashed '+AZULMED,borderRadius:'11px',padding:'9px 12px',marginBottom:'14px',display:'flex',alignItems:'center',gap:'8px',color:AZULMED,font:'600 12px \'Source Sans 3\''}}><i className="ph-light ph-sparkle" style={{fontSize:'14px'}}></i>O escribe con Claude</div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Título (opcional)</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'12px',color:'#a8a399',fontSize:'12px'}}>Relato a cuatro manos</div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Premisa inicial (opcional)</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'14px',color:'#a8a399',fontSize:'11.5px',lineHeight:'1.5'}}>Un faro abandonado. Alguien enciende la luz por primera vez en 30 años.</div><div style={{display:'flex',justifyContent:'space-between',fontSize:'11.5px',marginBottom:'6px'}}><span>Mínimo de palabras por turno</span><b style={{color:AZULMED}}>25</b></div><div style={{height:'3px',background:'rgba(10,27,61,.14)',borderRadius:'2px'}}></div></>)},{label:null,content:(<><div style={{fontSize:'12.5px',fontWeight:'600',marginBottom:'10px'}}>¿Quién puede verlo?</div><div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'14px'}}><div className="ui-card" style={{borderColor:AZULMED,background:'rgba(30,155,240,.05)',padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-lock-simple" style={{fontSize:'14px',color:AZULMED}}></i><span style={{fontSize:'12.5px',fontWeight:'600',color:AZULMED}}>Privado</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Solo quien escribe puede verlo</div></div><div className="ui-card" style={{padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-users-three" style={{fontSize:'14px',color:MUTED}}></i><span style={{fontSize:'12.5px',fontWeight:'600'}}>Amigos</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Los amigos de cualquiera de los dos pueden seguirlo</div></div><div className="ui-card" style={{padding:'11px 13px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><i className="ph-light ph-globe" style={{fontSize:'14px',color:MUTED}}></i><span style={{fontSize:'12.5px',fontWeight:'600'}}>Abierto</span></div><div style={{fontSize:'10.5px',color:MUTED,marginTop:'3px',marginLeft:'22px'}}>Cualquiera que siga a alguno de los dos puede seguirlo</div></div></div><div style={{background:'rgba(10,27,61,.08)',color:'rgba(10,27,61,.4)',borderRadius:'11px',padding:'11px',textAlign:'center',font:'600 12.5px \'Source Sans 3\'',display:'flex',alignItems:'center',justifyContent:'center',gap:'7px'}}><i className="ph-light ph-hand-fist" style={{fontSize:'14px'}}></i>Enviar invitación</div></>)}],
+      action:()=>{  dismiss('disc_cuatro_manos'); }},
+    {id:'disc_cadaver_exquisito', show:true, icon:'link', color:NARANJA,
+      title:"Escribe un cadáver exquisito",
+      teaser:(<>Roba una frase y encadena un texto nuevo.</>),
+      modalIcon:'link', modalIconColor:NARANJA,
+      body:(<><p>Los surrealistas amaban la sorpresa de juntar solo una pequeña parte de una obra. Ve a Escribir → Relato encadenado y escribe el primer capítulo. Al terminar, decides quién continúa.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',alignItems:'center',gap:'9px',marginBottom:'14px'}}><i className="ph-light ph-link" style={{fontSize:'17px',color:NAVY}}></i><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Relato encadenado</span></div><div style={{fontSize:'12.5px',lineHeight:'1.65',color:TXT,marginBottom:'12px'}}>Escribe un primer capítulo de al menos <b>600 palabras</b>. Al terminar, eliges quién continúa: una persona concreta, varias (la primera en escribir se queda el turno), o dejas la nominación abierta para cualquiera.</div><div style={{fontSize:'12.5px',lineHeight:'1.65',color:TXT,marginBottom:'18px'}}>Cada nuevo capítulo debe empezar con la última frase del anterior.</div><div style={{display:'flex',gap:'10px'}}><div style={{flex:'1',textAlign:'center',border:'1px solid '+BDR,borderRadius:'11px',padding:'12px',font:'600 13px \'Source Sans 3\'',color:MUTED}}>Cancelar</div><div style={{flex:'2',textAlign:'center',background:NARANJA,color:'#fff',borderRadius:'11px',padding:'12px',font:'600 13px \'Source Sans 3\''}}>Empezar a escribir →</div></div></>)}],
+      action:()=>{  dismiss('disc_cadaver_exquisito'); }},
+    {id:'disc_contrarreloj', show:!usedCuento, icon:'timer', color:AZULMED,
+      title:"Escribe un cuento contrarreloj",
+      teaser:(<>Cinco palabras. Una hora. Una historia que no esperabas.</>),
+      modalIcon:'timer', modalIconColor:AZULMED,
+      body:(<><p>Cinco palabras. Una hora. Un desafío que siempre te deja una historia sorprendente que no esperabas. Ideal para viajes de tren, horas muertas o bromas entre amigos que precisan palabras concretas. Ve a Escribir → Cuento contrarreloj, o directamente desde «Ver sesión de hoy» en tu escritorio.</p></>),
+      shots:[{label:null,content:(<><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'18px',marginBottom:'8px'}}>Contrarreloj</div><div style={{fontSize:'12px',color:MUTED,lineHeight:'1.5',marginBottom:'14px'}}>5 palabras al azar, 1 hora de reloj. ¿Lo escribes tú o se lo mandas a alguien?</div><div className="ui-card" style={{display:'flex',gap:'12px',alignItems:'flex-start',marginBottom:'9px'}}><div style={{width:'38px',height:'38px',borderRadius:'10px',background:'rgba(241,90,36,.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:'0'}}><i className="ph-light ph-pencil-simple" style={{fontSize:'17px',color:NARANJA}}></i></div><div><div style={{fontSize:'13px',fontWeight:'600'}}>Escribirlo yo</div><div style={{fontSize:'11px',color:MUTED,marginTop:'2px'}}>Empiezas ahora mismo, con tus propias 5 palabras</div></div></div><div className="ui-card" style={{display:'flex',gap:'12px',alignItems:'flex-start'}}><div style={{width:'38px',height:'38px',borderRadius:'10px',background:'rgba(30,155,240,.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:'0'}}><i className="ph-light ph-paper-plane-tilt" style={{fontSize:'17px',color:AZULMED}}></i></div><div><div style={{fontSize:'13px',fontWeight:'600'}}>Enviárselo a alguien</div><div style={{fontSize:'11px',color:MUTED,marginTop:'2px'}}>Eliges las 5 palabras y a quién se lo retas</div></div></div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',marginBottom:'2px'}}><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'16px'}}>Enviar reto contrarreloj</span></div><div style={{fontSize:'11px',color:MUTED,marginBottom:'14px'}}>Elige 5 palabras y elige a quién se lo envías</div><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'9px'}}><span style={{fontSize:'12px',fontWeight:'600'}}>Las 5 palabras</span><span style={{display:'inline-flex',alignItems:'center',gap:'5px',background:'#EAF2FB',color:AZULMED,borderRadius:'8px',padding:'5px 10px',font:'600 11px \'Source Sans 3\''}}><i className="ph-light ph-shuffle" style={{fontSize:'12px'}}></i>Al azar</span></div><div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'14px'}}><div style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'11.5px',color:FAINT,width:'14px'}}>1.</span><div className="ui-card" style={{flex:'1',padding:'9px 12px',color:'#a8a399',fontSize:'12px'}}>palabra…</div></div><div style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'11.5px',color:FAINT,width:'14px'}}>2.</span><div className="ui-card" style={{flex:'1',padding:'9px 12px',color:'#a8a399',fontSize:'12px'}}>palabra…</div></div><div style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'11.5px',color:FAINT,width:'14px'}}>3.</span><div className="ui-card" style={{flex:'1',padding:'9px 12px',color:'#a8a399',fontSize:'12px'}}>palabra…</div></div><div style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'11.5px',color:FAINT,width:'14px'}}>4.</span><div className="ui-card" style={{flex:'1',padding:'9px 12px',color:'#a8a399',fontSize:'12px'}}>palabra…</div></div><div style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'11.5px',color:FAINT,width:'14px'}}>5.</span><div className="ui-card" style={{flex:'1',padding:'9px 12px',color:'#a8a399',fontSize:'12px'}}>palabra…</div></div></div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Destinatario</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'12px',color:'#a8a399',fontSize:'12px',display:'flex',alignItems:'center',gap:'7px'}}><i className="ph-light ph-magnifying-glass" style={{fontSize:'13px'}}></i>Buscar entre tus amigos…</div><div style={{fontSize:'11px',color:FAINT,marginBottom:'5px'}}>Mensaje (opcional)</div><div className="ui-card" style={{padding:'9px 12px',marginBottom:'14px',color:'#a8a399',fontSize:'11.5px',lineHeight:'1.5'}}>¡Te reto a escribir un cuento con estas palabras!</div><div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'14px'}}><div style={{width:'34px',height:'19px',borderRadius:'10px',background:'rgba(10,27,61,.14)',position:'relative',flexShrink:'0'}}><div style={{width:'15px',height:'15px',borderRadius:'50%',background:'#fff',position:'absolute',top:'2px',left:'2px'}}></div></div><div><div style={{fontSize:'12px',fontWeight:'600'}}>Pedir un mínimo de palabras</div><div style={{fontSize:'10.5px',color:FAINT,marginTop:'1px'}}>Orientativo — se podrá publicar igual sin llegar</div></div></div><div style={{background:'rgba(10,27,61,.08)',color:'rgba(10,27,61,.4)',borderRadius:'11px',padding:'11px',textAlign:'center',font:'600 12.5px \'Source Sans 3\'',display:'flex',alignItems:'center',justifyContent:'center',gap:'7px'}}>Enviar reto <i className="ph-light ph-sparkle" style={{fontSize:'13px'}}></i></div></>)},{label:null,content:(<><div style={{background:NAVY,padding:'16px 20px',color:'#fff'}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'14px'}}><div style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'rgba(245,241,232,.7)'}}><i className="ph-light ph-arrow-left" style={{fontSize:'13px'}}></i>Salir</div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'26px',color:AZUL}}>1:00:00</div><div style={{textAlign:'right',fontSize:'11px',color:'rgba(245,241,232,.55)'}}>0 palabras<div style={{marginTop:'1px'}}>sin mínimo</div></div></div><div style={{fontSize:'9.5px',letterSpacing:'.12em',color:'rgba(245,241,232,.4)',marginBottom:'9px'}}>PALABRAS:</div><div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}><span style={{background:'rgba(255,255,255,.1)',borderRadius:'20px',padding:'6px 13px',font:'600 12px \'Source Sans 3\''}}>umbría</span><span style={{background:'rgba(255,255,255,.1)',borderRadius:'20px',padding:'6px 13px',font:'600 12px \'Source Sans 3\''}}>susurro</span><span style={{background:'rgba(255,255,255,.1)',borderRadius:'20px',padding:'6px 13px',font:'600 12px \'Source Sans 3\''}}>laberinto</span><span style={{background:'rgba(255,255,255,.1)',borderRadius:'20px',padding:'6px 13px',font:'600 12px \'Source Sans 3\''}}>cicatriz</span><span style={{background:'rgba(255,255,255,.1)',borderRadius:'20px',padding:'6px 13px',font:'600 12px \'Source Sans 3\''}}>muralla</span></div></div><div style={{padding:'20px'}}><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'17px',color:'rgba(10,27,61,.35)',marginBottom:'10px'}}>Ponle un título a tu cuento…</div><div style={{fontFamily:'\'Playfair Display\',serif',fontStyle:'italic',fontSize:'14px',color:'rgba(10,27,61,.3)'}}>Empieza a escribir y arranca el contador…</div></div></>)}],
       action:()=>{ onNewChallenge&&onNewChallenge(); dismiss('disc_contrarreloj'); }},
-    {id:'disc_equipos', show:FEATURE_TEAMS_ENABLED, icon:'users', color:'#F15A24',
-      title:'Crea tu propio equipo',
-      body:'Quizá ya tengáis un grupo con el que escribís de vez en cuando. Mandaros retos, leer vuestros textos y compartir estadísticas. Si es así, en Pretexto os lo ponemos fácil.',
-      cta:'Crea tu equipo',
-      action:()=>{ onOpenTeams&&onOpenTeams(); dismiss('disc_equipos'); }},
-    {id:'disc_voz', show:true, icon:'microphone', color:'#1E9BF0',
-      title:'Igual te funciona «escribir» en voz alta',
-      body:'Hay quien se desbloquea hablando en voz alta. Primero se graba y luego reescribe el texto. ¿Quieres probarlo? Busca el icono del micrófono en cualquier editor.',
-      cta:'Entendido',
-      action:()=>{ dismiss('disc_voz'); }},
-    {id:'disc_modo', show:true, icon:'film-slate', color:AZULMED,
-      title:'¿Sabías que aquí puedes escribir guiones?',
-      body:'Pasa del modo Literatura al modo Guion cuando quieras. Los ejercicios, las lecciones y el editor se adaptan automáticamente.',
-      cta:'Probar modo guion',
-      action:()=>{ onToggleMode&&onToggleMode(); dismiss('disc_modo'); }},
+    {id:'disc_ia_pretexto', show:true, icon:'sparkle', color:NARANJA,
+      title:"¿IA como pretexto?",
+      teaser:(<>Conecta tu cuenta de Claude y recibe otra clase de compañía.</>),
+      modalIcon:'sparkle', modalIconColor:NARANJA,
+      body:(<><p>Anthropic no nos paga nada, pero hemos querido añadir una función que tira de su API. Si conectas tu cuenta de Claude, podrás recibir <i>feedback</i> de tus textos y también escribir duetos con la IA. No solo no te va a quitar de escribir: te va a dar guerra, ya verás.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',flexDirection:'column'}}><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-bell" style={{fontSize:'17px',color:MUTED}}></i><span style={{flex:'1',fontSize:'13px',fontWeight:'600'}}>Notificaciones</span><div style={{width:'30px',height:'17px',borderRadius:'10px',background:AZUL,position:'relative'}}><div style={{width:'13px',height:'13px',borderRadius:'50%',background:'#fff',position:'absolute',top:'2px',right:'2px'}}></div></div></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-sliders-horizontal" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Editar perfil</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-chart-bar" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Estadísticas</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-calendar-blank" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Calendario</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid rgba(30,155,240,.25)',background:'rgba(30,155,240,.06)'}}><i className="ph-light ph-key" style={{fontSize:'17px',color:AZULMED}}></i><span style={{flex:'1',fontSize:'13px',fontWeight:'700',color:AZULMED}}>API key de Claude</span><span style={{width:'8px',height:'8px',borderRadius:'50%',background:AZUL}}></span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px'}}><i className="ph-light ph-arrow-square-down" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Backup (.zip)</span></div></div></>)},{label:"2 · Pega tu clave",content:(<><div className="ui-card"><div style={{fontSize:'11.5px',color:FAINT,marginBottom:'6px'}}>console.anthropic.com</div><div style={{fontFamily:'monospace',fontSize:'11.5px',background:PAGE_BG,borderRadius:'6px',padding:'8px 10px'}}>sk-ant-••••••••••••</div></div></>)},{label:"3 · Conectado",content:(<><div className="ui-card" style={{display:'flex',alignItems:'center',justifyContent:'center'}}><span style={{font:'600 11.5px \'Source Sans 3\'',color:AZUL,background:'#eaf5ff',padding:'6px 12px',borderRadius:'7px'}}>Conectado</span></div></>)}],
+      action:()=>{  dismiss('disc_ia_pretexto'); }},
+    {id:'disc_revision_claude', show:true, icon:'chat-circle-dots', color:AZULMED,
+      title:"Revisa con Claude",
+      teaser:(<>Un primer lector disponible las 24 horas.</>),
+      modalIcon:'chat-circle-dots', modalIconColor:AZULMED,
+      body:(<><p>Queremos que nos lean, queremos mejorar, queremos ver nuestro texto con ojos frescos. Pero no siempre tenemos a alguien a mano. Claude está aquí las 24 horas para señalarte lo que funciona, algún consejo para mejorar o sugerirte una dirección nueva. Cada vez que termines un relato, aparecerá el botón «Revisión con Claude» — recuerda que ahí Pretexto se conecta vía API con tu cuenta. Volverá con sugerencias que podrás conservar para más adelante.</p></>),
+      shots:[{label:null,content:(<><span style={{position:'absolute',right:'-10px',top:'70px',fontFamily:'\'Playfair Display\',serif',fontSize:'120px',color:'rgba(241,90,36,.08)',lineHeight:'1',pointerEvents:'none'}}>✱</span><div style={{font:'700 10px/1 \'Source Sans 3\'',letterSpacing:'.16em',textTransform:'uppercase',color:FAINT,marginBottom:'8px'}}>Sesión completada</div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'19px',marginBottom:'16px',position:'relative'}}>Lorem ipsum dolor sit amet</div><div style={{display:'flex',gap:'22px',borderTop:'1px solid '+BDR,borderBottom:'1px solid '+BDR,padding:'12px 0',marginBottom:'16px',position:'relative'}}><div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'17px'}}>53</div><div style={{fontSize:'10px',color:FAINT,marginTop:'2px'}}>Palabras</div></div><div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'17px'}}>4:20</div><div style={{fontSize:'10px',color:FAINT,marginTop:'2px'}}>Tiempo</div></div><div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'17px'}}>Normal</div><div style={{fontSize:'10px',color:FAINT,marginTop:'2px'}}>Modo</div></div><div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'17px'}}>+80</div><div style={{fontSize:'10px',color:FAINT,marginTop:'2px'}}>XP</div></div></div><div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'10px',position:'relative'}}><div style={{width:'32px',height:'32px',borderRadius:'9px',background:NAVY,display:'flex',alignItems:'center',justifyContent:'center'}}><i className="ph-light ph-sparkle" style={{fontSize:'15px',color:'#fff'}}></i></div><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px'}}>Revisión de Claude</span></div><div style={{fontSize:'12px',color:MUTED,lineHeight:'1.55',marginBottom:'14px',position:'relative'}}>Claude lee tu texto y te da tres puntos: qué funciona, qué explorar y una pregunta para la próxima vez.</div><div style={{background:NAVY,color:'#fff',borderRadius:'11px',padding:'12px',textAlign:'center',font:'600 13px \'Source Sans 3\'',display:'flex',alignItems:'center',justifyContent:'center',gap:'7px',position:'relative'}}><i className="ph-light ph-sparkle" style={{fontSize:'14px'}}></i>Pedir revisión de Claude</div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'12px'}}><i className="ph-light ph-sparkle" style={{fontSize:'14px',color:AZULMED}}></i><span style={{font:'700 10px \'Source Sans 3\'',letterSpacing:'.12em',textTransform:'uppercase',color:AZULMED}}>Revisión de Claude</span></div><div className="ui-card" style={{padding:'14px',marginBottom:'10px'}}><div style={{fontFamily:'\'Playfair Display\',serif',fontSize:'12.5px',lineHeight:'1.7',color:TXT}}>La casa llevaba <span style={{background:'rgba(30,155,240,.18)',borderRadius:'3px',padding:'1px 2px'}}>veinte años cerrada</span>, y aun así, cada vez que pasaba por delante, <span style={{background:'rgba(241,90,36,.16)',borderRadius:'3px',padding:'1px 2px'}}>algo en mí esperaba encontrarla abierta</span>.</div></div><div style={{display:'flex',gap:'9px',alignItems:'flex-start',background:'rgba(30,155,240,.06)',borderRadius:'9px',padding:'10px 12px',marginBottom:'8px'}}><i className="ph-light ph-quotes" style={{fontSize:'13px',color:AZULMED,flexShrink:'0',marginTop:'2px'}}></i><div style={{fontSize:'11px',lineHeight:'1.5',color:MUTED}}>Esta imagen funciona muy bien: la espera contenida en un detalle cotidiano.</div></div><div style={{display:'flex',gap:'9px',alignItems:'flex-start',background:'rgba(241,90,36,.06)',borderRadius:'9px',padding:'10px 12px'}}><i className="ph-light ph-quotes" style={{fontSize:'13px',color:NARANJA,flexShrink:'0',marginTop:'2px'}}></i><div style={{fontSize:'11px',lineHeight:'1.5',color:MUTED}}>Esta frase podría ser más directa — el «algo en mí» diluye la emoción.</div></div></>)}],
+      action:()=>{  dismiss('disc_revision_claude'); }},
+    {id:'disc_privacidad', show:true, icon:'shield-check', color:NARANJA,
+      title:"¿Están seguros mis textos?",
+      teaser:(<>Todo lo tuyo es tuyo.</>),
+      modalIcon:'shield-check', modalIconColor:NARANJA,
+      body:(<><p>Nadie está completamente seguro en internet, pero en <i>Pretexto</i> hemos hecho un esfuerzo importante en mantener tus textos privados: solo se abrirá al público lo que tú decidas mostrar a tus amigos o a la comunidad. Todo lo tuyo es tuyo. Para cualquier duda, consulta la política de privacidad.</p></>),
+      shots:[{label:null,content:(<><div className="ui-card" style={{display:'flex',alignItems:'center',justifyContent:'center',gap:'10px',padding:'20px'}}><i className="ph-light ph-lock-key" style={{fontSize:'22px',color:AZULMED}}></i><span style={{font:'600 12.5px \'Source Sans 3\''}}>Comparte solo lo que quieras</span></div></>)}],
+      action:()=>{  dismiss('disc_privacidad'); }},
+    {id:'disc_calendario', show:true, icon:'calendar-check', color:AZULMED,
+      title:"Resérvate tiempo con tus textos",
+      teaser:(<>Una cita contigo mismo, con tus personajes.</>),
+      modalIcon:'calendar-check', modalIconColor:AZULMED,
+      body:(<><p>Nos cuesta sentarnos a escribir. Un buen pretexto es tener una cita contigo, con tus personajes. Entra en Perfil → Calendario y reserva una cita contigo mismo: se crea una «sala virtual» en la que puedes entrar un poco antes y salir un poco después. Dentro, elige el proyecto en el que quieres trabajar; al cumplir el tiempo acordado, se activa el botón «Cita cumplida». Cumple tres veces seguidas y consigues un nuevo comodín.</p></>),
+      shots:[{label:null,content:(<><div style={{display:'flex',flexDirection:'column'}}><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-bell" style={{fontSize:'17px',color:MUTED}}></i><span style={{flex:'1',fontSize:'13px',fontWeight:'600'}}>Notificaciones</span><div style={{width:'30px',height:'17px',borderRadius:'10px',background:AZUL,position:'relative'}}><div style={{width:'13px',height:'13px',borderRadius:'50%',background:'#fff',position:'absolute',top:'2px',right:'2px'}}></div></div></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-sliders-horizontal" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Editar perfil</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-chart-bar" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Estadísticas</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid rgba(30,155,240,.25)',background:'rgba(30,155,240,.06)'}}><i className="ph-light ph-calendar-blank" style={{fontSize:'17px',color:AZULMED}}></i><span style={{flex:'1',fontSize:'13px',fontWeight:'700',color:AZULMED}}>Calendario</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px',borderBottom:'1px solid '+BDR}}><i className="ph-light ph-tray" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>Buzón de retos</span></div><div style={{display:'flex',alignItems:'center',gap:'12px',padding:'13px 18px'}}><i className="ph-light ph-key" style={{fontSize:'17px',color:MUTED}}></i><span style={{fontSize:'13px',fontWeight:'600'}}>API key de Claude</span></div></div></>)},{label:null,content:(<><div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px'}}><i className="ph-light ph-arrow-left" style={{fontSize:'14px',color:MUTED}}></i><span style={{font:'600 12px \'Source Sans 3\'',color:MUTED}}>Menú</span><span style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'17px',marginLeft:'6px'}}>Calendario</span></div><div style={{background:'rgba(241,90,36,.08)',border:'1px solid rgba(241,90,36,.2)',borderRadius:'12px',padding:'12px 14px',display:'flex',gap:'11px',marginBottom:'14px'}}><i className="ph-light ph-sparkle" style={{fontSize:'16px',color:NARANJA,flexShrink:'0',marginTop:'1px'}}></i><div><div style={{fontSize:'12.5px',fontWeight:'700'}}>2/3 citas cumplidas hacia tu próximo comodín</div><div style={{fontSize:'11px',color:MUTED,marginTop:'3px',lineHeight:'1.5'}}>Cuentan días distintos — varias citas el mismo día solo suman una vez.</div></div></div><div style={{background:NAVY,color:'#fff',borderRadius:'11px',padding:'11px',textAlign:'center',font:'600 12.5px \'Source Sans 3\'',display:'flex',alignItems:'center',justifyContent:'center',gap:'7px',marginBottom:'16px'}}><i className="ph-light ph-plus" style={{fontSize:'13px'}}></i>Nueva cita</div><div style={{font:'700 9.5px/1 \'Source Sans 3\'',letterSpacing:'.14em',textTransform:'uppercase',color:FAINT,marginBottom:'8px'}}>Domingo 13 de septiembre</div><div className="ui-card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 14px'}}><div><div style={{fontFamily:'\'Playfair Display\',serif',fontWeight:'700',fontSize:'15px'}}>17:30</div><div style={{fontSize:'11px',color:FAINT,marginTop:'1px'}}>30 min</div></div><div style={{display:'flex',gap:'12px',color:'rgba(10,27,61,.35)'}}><i className="ph-light ph-pause" style={{fontSize:'15px'}}></i><i className="ph-light ph-trash" style={{fontSize:'15px'}}></i></div></div></>)},{label:null,content:(<><div className="ui-card" style={{display:'flex',alignItems:'center',justifyContent:'center'}}><button style={{font:'600 12px \'Source Sans 3\'',color:'#fff',background:NARANJA,border:'none',borderRadius:'8px',padding:'9px 16px'}}>Cita cumplida ✓</button></div></>)}],
+      action:()=>{  dismiss('disc_calendario'); }},
+    {id:'disc_editores', show:true, icon:'sliders-horizontal', color:NARANJA,
+      title:"4 editores, sensación única",
+      teaser:(<>Distintas formas de ayudarte a fluir mejor.</>),
+      modalIcon:'sliders-horizontal', modalIconColor:NARANJA,
+      body:(<><p>¿Te editas mucho? Prueba «Río» o «Límite». ¿Relees demasiado? Prueba «Túnel». ¿Te duermes en los laureles? «Presión». Distintas formas de ayudarte a fluir mejor que con un editor «Normal» (que, por supuesto, también tenemos). En cualquier editor, a la derecha puedes cambiar entre ellos cuando quieras.</p></>),
+      shots:[{label:null,content:(<><div className="ui-card" style={{textAlign:'center',padding:'20px'}}><i className="ph-light ph-wind" style={{fontSize:'22px',color:AZUL}}></i><div style={{font:'700 11px/1 \'Source Sans 3\'',letterSpacing:'.1em',textTransform:'uppercase',color:AZUL,marginTop:'10px'}}>Río</div><div style={{fontSize:'12px',color:MUTED,marginTop:'6px'}}>Solo hacia adelante. Sin editar.</div></div></>)},{label:null,content:(<><div className="ui-card" style={{textAlign:'center',padding:'20px'}}><i className="ph-light ph-ruler" style={{fontSize:'22px',color:AZULMED}}></i><div style={{font:'700 11px/1 \'Source Sans 3\'',letterSpacing:'.1em',textTransform:'uppercase',color:AZULMED,marginTop:'10px'}}>Límite</div><div style={{fontSize:'12px',color:MUTED,marginTop:'6px'}}>Correcciones máximas por párrafo.</div></div></>)},{label:null,content:(<><div className="ui-card" style={{textAlign:'center',padding:'20px'}}><i className="ph-light ph-circle-dashed" style={{fontSize:'22px',color:'#1A6B8A'}}></i><div style={{font:'700 11px/1 \'Source Sans 3\'',letterSpacing:'.1em',textTransform:'uppercase',color:'#1A6B8A',marginTop:'10px'}}>Túnel</div><div style={{fontSize:'12px',color:MUTED,marginTop:'6px'}}>Lo anterior se desvanece.</div></div></>)},{label:null,content:(<><div className="ui-card" style={{textAlign:'center',padding:'20px'}}><i className="ph-light ph-timer" style={{fontSize:'22px',color:NARANJA}}></i><div style={{font:'700 11px/1 \'Source Sans 3\'',letterSpacing:'.1em',textTransform:'uppercase',color:NARANJA,marginTop:'10px'}}>Presión</div><div style={{fontSize:'12px',color:MUTED,marginTop:'6px'}}>Para. El texto se borra.</div></div></>)}],
+      action:()=>{  dismiss('disc_editores'); }},
+    {id:'disc_comparte', show:true, icon:'share-network', color:AZULMED,
+      title:"Comparte Pretexto",
+      teaser:(<>Cuantos más seamos, más rica será la biblioteca.</>),
+      modalIcon:'share-network', modalIconColor:AZULMED,
+      body:(<><p>Cuantos más seamos, más rica será la biblioteca y más palabras sumaremos juntos. Comparte <i>Pretexto</i> con tus amigos por correo o por WhatsApp.</p></>),
+      shots:[{label:null,content:(<><div className="ui-card" style={{display:'flex',gap:'12px',justifyContent:'center',padding:'16px'}}><div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'6px'}}><div style={{width:'38px',height:'38px',borderRadius:'50%',background:'rgba(30,155,240,.12)',display:'flex',alignItems:'center',justifyContent:'center'}}><i className="ph-light ph-envelope-simple" style={{fontSize:'17px',color:AZULMED}}></i></div><span style={{fontSize:'10.5px',color:MUTED}}>Correo</span></div><div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'6px'}}><div style={{width:'38px',height:'38px',borderRadius:'50%',background:'rgba(241,90,36,.1)',display:'flex',alignItems:'center',justifyContent:'center'}}><i className="ph-light ph-whatsapp-logo" style={{fontSize:'17px',color:NARANJA}}></i></div><span style={{fontSize:'10.5px',color:MUTED}}>WhatsApp</span></div></div></>)}],
+      action:()=>{  dismiss('disc_comparte'); }},
   ];
 
   // Pendientes = no vistas/descartadas y cuya función aún no se ha usado.
@@ -10868,26 +11015,81 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
   // misma, y al día siguiente rota a la siguiente pendiente.
   const dayNum=Math.floor(Date.now()/86400000); // días desde epoch (estable por jornada)
   const c=pending[dayNum%pending.length];
+  const openCard=catalog.find(x=>x.id===openId);
 
-  return(
+  const openTip=()=>{ setShotIdx(0); setOpenId(c.id); };
+  const closeTip=()=>setOpenId(null);
+
+  return(<>
     <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:18}}>
-      <div style={{position:'relative',display:'flex',alignItems:'flex-start',gap:13,background:CARD_BG,border:'0.5px solid '+c.color+'40',borderLeft:'3px solid '+c.color,borderRadius:12,padding:'15px 16px 15px 15px'}}>
+      <div onClick={openTip} style={{position:'relative',display:'flex',alignItems:'flex-start',gap:13,background:CARD_BG,border:'0.5px solid '+c.color+'40',borderLeft:'3px solid '+c.color,borderRadius:12,padding:'15px 16px 15px 15px',cursor:'pointer'}}>
         <div style={{flexShrink:0,width:38,height:38,borderRadius:10,background:c.color+'15',display:'flex',alignItems:'center',justifyContent:'center'}}>
           <Icon name={c.icon} size={20} color={c.color}/>
         </div>
         <div style={{flex:1,minWidth:0,paddingRight:18}}>
           <div style={{fontSize:14,fontWeight:600,color:TXT,marginBottom:3,fontFamily:'"Playfair Display",Georgia,serif'}}>{c.title}</div>
-          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:10}}>{c.body}</div>
-          <button onClick={c.action} style={{display:'inline-flex',alignItems:'center',gap:5,background:c.color,color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-            {c.cta}<Icon name="arrow-right" size={12} color="#fff"/>
-          </button>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5}}>{c.teaser}</div>
         </div>
-        <button onClick={()=>dismiss(c.id)} title="Ocultar" style={{position:'absolute',top:10,right:10,background:'transparent',border:'none',cursor:'pointer',padding:4,color:FAINT,lineHeight:0}}>
+        <button onClick={e=>{e.stopPropagation();dismiss(c.id);}} title="Ocultar" style={{position:'absolute',top:10,right:10,background:'transparent',border:'none',cursor:'pointer',padding:4,color:FAINT,lineHeight:0}}>
           <Icon name="x" size={14} color={FAINT}/>
         </button>
       </div>
     </div>
-  );
+    {openCard&&(
+      <div style={{position:'fixed',inset:0,zIndex:280,background:'rgba(10,27,61,0.55)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
+        onClick={e=>{if(e.target===e.currentTarget)closeTip();}}>
+        <div style={{background:PAGE_BG,borderRadius:18,width:'100%',maxWidth:440,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 24px 60px -14px rgba(10,27,61,0.5)'}}>
+          <div style={{padding:'22px 24px 4px',display:'flex',gap:12,alignItems:'flex-start'}}>
+            <div style={{width:40,height:40,borderRadius:11,background:openCard.modalIconColor+'20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <Icon name={openCard.modalIcon} size={19} color={openCard.modalIconColor}/>
+            </div>
+            <div style={{flex:1,fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:19,color:TXT,lineHeight:1.25,paddingTop:2}}>{openCard.title}</div>
+            <button onClick={closeTip} style={{background:'transparent',border:'none',color:FAINT,cursor:'pointer',fontSize:19,padding:4,lineHeight:1}}>×</button>
+          </div>
+          <div style={{padding:'6px 24px 4px',fontSize:13.5,lineHeight:1.65,color:MUTED}}>{openCard.body}</div>
+          {openCard.shots&&openCard.shots.length>0&&(
+            <div style={{position:'relative',margin:'16px 24px 6px',borderRadius:12,overflow:'hidden',background:CARD_BG,border:'1px solid '+BDR,boxShadow:'0 6px 20px -10px rgba(10,27,61,0.25)'}}>
+              {openCard.shots[shotIdx].label&&(
+                <div style={{position:'absolute',top:10,left:10,font:'600 9.5px "Source Sans 3"',letterSpacing:'.1em',textTransform:'uppercase',color:'#fff',background:'rgba(10,27,61,0.7)',borderRadius:5,padding:'3px 8px',zIndex:2}}>
+                  {openCard.shots[shotIdx].label}
+                </div>
+              )}
+              <div style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG}}>
+                {openCard.shots[shotIdx].content}
+              </div>
+            </div>
+          )}
+          {openCard.shots&&openCard.shots.length>1&&(
+            <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'4px 24px 18px'}}>
+              {openCard.shots.map((s,i)=>(
+                <div key={i} onClick={()=>setShotIdx(i)} style={{width:i===shotIdx?16:6,height:6,borderRadius:i===shotIdx?3:'50%',background:i===shotIdx?NARANJA:BDR,cursor:'pointer',transition:'all 0.15s'}}/>
+              ))}
+            </div>
+          )}
+          <div style={{padding:'10px 24px 24px'}}>
+            {openCard.id==='disc_comparte'?(
+              <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+                <a href={"mailto:?subject=Pretexto&body="+encodeURIComponent('Llevo un tiempo escribiendo en Pretexto y creo que te gustaría — https://pretexto.app')} onClick={()=>dismiss(openCard.id)}
+                  style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,textDecoration:'none'}}>
+                  <div style={{width:42,height:42,borderRadius:'50%',background:AZULMED+'20',display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="envelope-simple" size={18} color={AZULMED}/></div>
+                  <span style={{fontSize:11,color:MUTED}}>Correo</span>
+                </a>
+                <a href={"https://wa.me/?text="+encodeURIComponent('Llevo un tiempo escribiendo en Pretexto y creo que te gustaría — https://pretexto.app')} target="_blank" rel="noopener noreferrer" onClick={()=>dismiss(openCard.id)}
+                  style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,textDecoration:'none'}}>
+                  <div style={{width:42,height:42,borderRadius:'50%',background:NARANJA+'1a',display:'flex',alignItems:'center',justifyContent:'center'}}><Icon name="whatsapp-logo" size={18} color={NARANJA}/></div>
+                  <span style={{fontSize:11,color:MUTED}}>WhatsApp</span>
+                </a>
+              </div>
+            ):(
+              <button onClick={()=>{openCard.action();closeTip();}} style={{width:'100%',background:NAVY,color:'#fff',border:'none',borderRadius:10,padding:'12px',fontSize:13.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                {['disc_colectivo','disc_escritorio_biblioteca','disc_checks','disc_contrarreloj'].includes(openCard.id)?'Vamos allá →':'Entendido'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+  </>);
 };
 
 const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAccepted,onEntrySaved,refreshKey=0,onContinue,onLogout,onDeleteEntry,onOpenLibrary,onStartLesson,syncStatus,isOffline=false,pendingCount=0,onNewChallenge=()=>{},driveData,driveConnected,onDriveUpdate,onRefresh,receivedChallenges,onAcceptChallenge,onSaveChallenge,onDeclineChallenge,onEditEntry,onChangeVisibility,onChangeFolder,onPublishToLibrary,onUnpublishFromLibrary,followers=[],following=[],onFollow,saveProject,autoOpenMyProjects=false,onAutoOpenMyProjectsConsumed})=>{
@@ -11457,7 +11659,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
           onOpenCollab={()=>setShowCollectives(true)}
           onOpenLibrary={()=>onOpenLibrary&&onOpenLibrary()}
           onNewChallenge={()=>onNewChallenge&&onNewChallenge()}
-          onOpenTeams={()=>setShowTeams(true)}/>
+          onContinue={()=>onContinue(energy)}/>
         <SharedBackBanner user={user} refreshKey={refreshKey}/>
         <CollabInviteBanner user={user} onAccepted={onCollabAccepted} refreshKey={refreshKey}/>
         <FollowedCollectivesHub user={user} refreshKey={refreshKey}
@@ -12384,6 +12586,18 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
     const prev=S.get(k)||[];if(!prev.includes(r.id)){S.set(k,[...prev,r.id]);DB.markLessonRead(user.id,r.id).catch(()=>{});}
   };
 
+  // Reto semanal fotográfico. null mientras carga o si no hay ninguno
+  // configurado todavía: en ese caso la tarjeta simplemente no se muestra.
+  const [photoChallenge,setPhotoChallenge]=useState(null);
+  const [photoStats,setPhotoStats]=useState(null); // paso 2: {count, contributors} — null hasta que carga
+  useEffect(()=>{
+    DB.getActivePhotoChallenge().then(pc=>{
+      setPhotoChallenge(pc);
+      if(pc)DB.getPhotoChallengeStats(pc.id).then(setPhotoStats).catch(()=>setPhotoStats(null));
+    }).catch(()=>setPhotoChallenge(null));
+  },[]);
+  const photoWc=photoChallenge?library.filter(e=>(e.week_id||e.weekId)===photoChallenge.id).reduce((s,e)=>s+(e.wordCount||e.word_count||0),0):0;
+
   return(
     <div style={{height:'var(--app-height,100dvh)',overflow:'auto',background:'transparent',display:'flex',flexDirection:'column'}}>
       {showLeccion&&<LeccionModal reto={leccionReto} onClose={()=>setShowLeccion(false)}/>}
@@ -12449,6 +12663,47 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
           </div>
         </SectionCard>
 
+        {photoChallenge&&(
+          <SectionCard accent={NARANJA} tag="Reto de la semana · Fotográfico" title={photoChallenge.title}>
+            <div style={{padding:'14px 18px 18px'}}>
+              <div style={{borderRadius:12,overflow:'hidden',height:180,marginBottom:14,position:'relative',background:'#33363b',backgroundImage:'url('+photoChallenge.photo_url+')',backgroundPosition:'center',backgroundSize:'cover',backgroundRepeat:'no-repeat'}}>
+                {photoStats&&photoStats.count>0&&(<>
+                  <div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,rgba(10,27,61,0) 55%,rgba(10,27,61,.75) 100%)'}}/>
+                  <div style={{position:'absolute',bottom:12,left:14,right:14,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div style={{display:'flex'}}>
+                      {photoStats.contributors.map((c,i)=>(
+                        <div key={c.id} style={{marginLeft:i===0?0:-8,borderRadius:'50%',border:'2px solid #fff',lineHeight:0}}>
+                          <UserAvatar user={c} size={26}/>
+                        </div>
+                      ))}
+                    </div>
+                    <span style={{fontSize:11,color:'rgba(255,255,255,.9)',fontWeight:500,whiteSpace:'nowrap'}}>
+                      {photoStats.count} {photoStats.count===1?'relato ya escrito':'relatos ya escritos'}
+                    </span>
+                  </div>
+                </>)}
+              </div>
+              <p style={{fontSize:13,color:MUTED,lineHeight:1.75,marginBottom:14}}>{photoChallenge.description}</p>
+              {photoChallenge.min_words>0&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:MUTED,marginBottom:5}}>
+                    <span>{photoWc} / {photoChallenge.min_words} palabras</span>
+                    <span style={{fontWeight:700,color:TXT}}>{Math.min(100,Math.round(photoWc/photoChallenge.min_words*100))}%</span>
+                  </div>
+                  <div style={{height:5,background:'rgba(10,27,61,0.08)',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{height:'100%',width:Math.min(100,Math.round(photoWc/photoChallenge.min_words*100))+'%',background:NARANJA,borderRadius:3,transition:'width 0.4s'}}/>
+                  </div>
+                </div>
+              )}
+              <button onClick={()=>onStart({type:'reto_foto',writingMode,weekId:photoChallenge.id,
+                reto:{titulo:photoChallenge.title,desc:photoChallenge.description,goal:photoChallenge.min_words,photo_url:photoChallenge.photo_url}})}
+                style={{width:'100%',height:42,background:SESSION_BTN_BG,border:'none',borderRadius:9,color:SESSION_BTN_TXT,fontSize:13.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                {photoWc>0?'Continuar →':'Escribir a partir de la foto →'}
+              </button>
+            </div>
+          </SectionCard>
+        )}
+
         {/* CUENTO CONTRARELOJ */}
         <div style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:14,overflow:'hidden',marginBottom:14,display:'flex',flexDirection:'column'}}>
           <div style={{padding:'14px 16px',borderBottom:'1px solid '+BDR,display:'flex',alignItems:'center',gap:10}}>
@@ -12479,7 +12734,7 @@ const SessionBriefing=({user,energy,library,projects,saveProject,onStart,onBack,
 /* ─── POST SESSION ───────────────────────────────── */
 const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=>{
   const [showVisIntro,dismissVisIntro]=useFirstTime('visibilidad',user?.id,!(sessionData?.isCollabContribution));
-  const canPublish=(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto');
+  const canPublish=(sessionData?.sk==='proyecto'||sessionData?.sk==='cuento'||sessionData?.sk==='reto'||sessionData?.sk==='reto_foto');
   // Si quien termina es colaborador (no el dueño del texto), no le corresponde
   // decidir si se guarda en "su" biblioteca ni qué visibilidad tiene — eso ya lo
   // decidió el autor. Solo le queda pedir feedback y que su aportación cuente
@@ -12991,7 +13246,7 @@ const usePresenceWarning=(entryId,userId,hasCollaborators,initialTs)=>{
 };
 
 const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,sessionConfig})=>{
-  const sk=sessionConfig.sk||(sessionConfig.type==='reto'?'reto':sessionConfig.type==='proyecto'?'proyecto':'check');
+  const sk=sessionConfig.sk||(sessionConfig.type==='reto_foto'?'reto_foto':sessionConfig.type==='reto'?'reto':sessionConfig.type==='proyecto'?'proyecto':'check');
   const [showProjIntro,dismissProjIntro]=useFirstTime('proyecto',user?.id,sk==='proyecto');
   const customExercise=sessionConfig.exercise||null;
   const customReto=sessionConfig.reto||null;
@@ -13074,12 +13329,12 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     if(!titleMounted.current){titleMounted.current=true;return;} // no guardar en el primer render
     if(plainTxt.trim())saveNow(true); // solo si ya hay contenido cargado/escrito que guardar
   },[effectiveTitle]);
-  const headerFamily=customExercise?.family||customReto?'Reto de la semana':currentProject?.type||'Proyecto';
+  const headerFamily=customExercise?.family||(customReto?(customReto.photo_url?'Reto fotográfico':'Reto de la semana'):currentProject?.type||'Proyecto');
   const headerDescShort=customExercise?customExercise.family+' · '+customExercise.mode+' · '+customExercise.min+' pal. mín.'
     :customReto?wc+'/'+(customReto.goal||0)+' palabras'
     :currentProject?(currentProject.type+' · '+(currentProject.wordCount||0)+' palabras'):'';
-  const headerAccent=sk==='check'?AZUL:sk==='reto'?NARANJA:sk==='proyecto'?AZULMED:sk==='cuento'?'#A82020':sk==='dueto'?'#1A6B8A':AZUL;
-  const headerBg=sk==='check'?'rgba(30,155,240,0.06)':sk==='reto'?'rgba(241,90,36,0.06)':sk==='proyecto'?'rgba(27,95,170,0.06)':sk==='cuento'?'rgba(168,32,32,0.06)':'rgba(30,155,240,0.06)';
+  const headerAccent=sk==='check'?AZUL:(sk==='reto'||sk==='reto_foto')?NARANJA:sk==='proyecto'?AZULMED:sk==='cuento'?'#A82020':sk==='dueto'?'#1A6B8A':AZUL;
+  const headerBg=sk==='check'?'rgba(30,155,240,0.06)':(sk==='reto'||sk==='reto_foto')?'rgba(241,90,36,0.06)':sk==='proyecto'?'rgba(27,95,170,0.06)':sk==='cuento'?'rgba(168,32,32,0.06)':'rgba(30,155,240,0.06)';
   const timerDur=sessionConfig?.scheduleContext?sessionConfig.scheduleContext.durationMinutes*60:(sk==='check'?7*60:null); // reto & proyecto normales: sin countdown — salvo que vengan de una cita
   // "Cita cumplida" se comporta como un cambio de turno: solo se puede
   // pulsar al llegar al 75% del tiempo marcado — el mismo margen que
@@ -13104,7 +13359,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     const TYPE_TO_FOLDER={'Poemario':'poesia','Relato corto':'relato','Microrrelatos':'relato','Novela':'novela','Ensayo':'ensayo','Diario creativo':'ensayo'};
     const inferredProjectFolder=currentProject?.folder
       ??(currentProject?.type?TYPE_TO_FOLDER[currentProject.type]||null:null);
-    const defaultFolder=['check','reto','cuento'].includes(sk)?'retos'
+    const defaultFolder=['check','reto','reto_foto','cuento'].includes(sk)?'retos'
       :(sk==='proyecto'?inferredProjectFolder:null);
     const folder=existing?(existing.folder!==undefined?existing.folder:defaultFolder):defaultFolder;
     // Reedición de un cuento contrareloj ya publicado: el "elapsed" original queda fijo,
@@ -13421,6 +13676,18 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
             </div>
           </div>
 
+          {/* La foto del reto fotográfico también hace falta visible en
+              móvil — el panel lateral donde ya se muestra (más arriba)
+              está oculto por debajo de 600px, y aquí la foto ES el
+              enunciado del reto, no un adorno: sin verla no se sabe sobre
+              qué escribir. */}
+          {customReto?.photo_url&&window.innerWidth<600&&(
+            <div style={{padding:'8px 18px',background:headerBg,borderBottom:'0.5px solid '+BDR,flexShrink:0,display:'flex',gap:10,alignItems:'center'}}>
+              <div style={{width:44,height:44,borderRadius:8,flexShrink:0,backgroundImage:'url('+customReto.photo_url+')',backgroundPosition:'center',backgroundSize:'cover',backgroundRepeat:'no-repeat'}}/>
+              <div style={{fontSize:11,color:MUTED,lineHeight:1.5,flex:1}}>{customReto.desc}</div>
+            </div>
+          )}
+
           {done&&<div style={{padding:'7px 18px',background:'rgba(30,155,240,0.07)',borderBottom:'0.5px solid rgba(30,155,240,0.18)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
             <span style={{fontSize:13,color:'#1E9BF0',fontWeight:500}}>✓ Completado — {wc} palabras</span>
             <div style={{display:'flex',gap:6}}>
@@ -13493,7 +13760,8 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
           <div style={{padding:12}}>
             {/* Exercise description */}
             {(customExercise||customReto)&&<div style={{marginBottom:12}}>
-              <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>{customExercise?'Ejercicio':'Reto'}</div>
+              <div style={{fontSize:10,fontWeight:500,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>{customExercise?'Ejercicio':customReto?.photo_url?'Reto fotográfico':'Reto'}</div>
+              {customReto?.photo_url&&<div style={{borderRadius:7,overflow:'hidden',height:100,marginBottom:6,backgroundImage:'url('+customReto.photo_url+')',backgroundPosition:'center',backgroundSize:'cover',backgroundRepeat:'no-repeat'}}/>}
               <div style={{background:'rgba(0,0,0,0.03)',border:'0.5px solid '+BDR,borderRadius:8,padding:'9px 10px'}}>
                 <div style={{fontSize:11,fontWeight:500,color:TXT,marginBottom:4}}>{customExercise?.title||customReto?.titulo||customReto?.title}</div>
                 <div style={{fontSize:11,color:MUTED,lineHeight:1.65}}>{customExercise?.desc||customReto?.desc}</div>
@@ -17243,7 +17511,7 @@ const EstadísticasScreen=({library,reflections,onClose,stats})=>{
   const catWords={};const catMins={};
   library.forEach(e=>{
     const _sl=e.session_label||e.sessionLabel||'';
-const _dm=_sl.toLowerCase();const k=e.sk==='dueto'?'A cuatro manos':e.sk==='cuento'&&(_dm.includes('cuatro manos')||_dm.includes('dos manos'))?'A cuatro manos':{check:'Check diario',reto:'Reto semanal',proyecto:'Proyecto',cuento:'Cuento contrareloj'}[e.sk]||'Otro';
+const _dm=_sl.toLowerCase();const k=e.sk==='dueto'?'A cuatro manos':e.sk==='cuento'&&(_dm.includes('cuatro manos')||_dm.includes('dos manos'))?'A cuatro manos':{check:'Check diario',reto:'Reto semanal',reto_foto:'Reto fotográfico',proyecto:'Proyecto',cuento:'Cuento contrareloj'}[e.sk]||'Otro';
     catWords[k]=(catWords[k]||0)+(e.word_count||e.wordCount||0);
     catMins[k]=(catMins[k]||0)+Math.round((e.elapsed||0)/60);
   });
@@ -17379,7 +17647,10 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
           name_a:user.name,username_a:user.username||user.name,
           current_turn:'a',
         });
-        if(visibility!=='privado')DB.inviteDuetFollowers(duet.id).catch(e=>console.error('inviteDuetFollowers:',e));
+        // El aviso automático a amigos/seguidores ya NO se dispara aquí —
+        // se pregunta a cada participante por separado la primera vez que
+        // abre el dueto (ver el nuevo prompt en DuetEditor), para no
+        // avisar al círculo de nadie sin que esa persona lo haya decidido.
         setStatus('¡Empieza cuando quieras!');
         setTimeout(()=>{onCreated&&onCreated(duet);onClose();},1000);
         return;
@@ -17742,7 +18013,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
         html,plain,word_count:wordCount,elapsed,meta_words:format,
         date:today(),ts:Date.now(),
         visibility:sessionConfig?.existingVisibility||'privado', // preserva la visibilidad ya elegida
-        folder:sk==='reto'?'retos':null,deleted:false,
+        folder:(sk==='reto'||sk==='reto_foto')?'retos':null,deleted:false,
       });
       if(!silent)setToast({msg:'Guardado',col:AZUL});
     }catch(e){if(!silent)setToast({msg:'Error al guardar',col:DANGER});}
@@ -18047,7 +18318,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
    a quiénes — compartido entre DuetEditor y CollectiveEditor, para no
    duplicar la misma lógica en los dos. No se muestra nada si nadie sigue
    todavía, para no meter ruido en historias sin audiencia. */
-const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true})=>{
+const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true,user})=>{
   // Duetos: el conteo es público (para cualquier usuario logueado, sirve
   // para decidir si seguirlo), pero la LISTA de quiénes son solo la ven
   // los dos escritores — canSeeIdentities lo decide quien llama a este
@@ -18056,10 +18327,18 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true})=>{
   // corrección (canSeeIdentities no se usa en esa rama).
   const [count,setCount]=useState(null); // null=cargando
   const [followers,setFollowers]=useState(null); // lista completa, solo si canSeeIdentities
+  const [pending,setPending]=useState([]); // invitaciones que YO envié, sin responder — solo si canSeeIdentities
   const [showList,setShowList]=useState(false);
+  const [busyId,setBusyId]=useState(null); // evita doble clic al cancelar/expulsar
+
+  const loadPending=()=>{
+    if(!canSeeIdentities){setPending([]);return;}
+    DB.getSentFollowInvites(entityType,entityId).then(setPending).catch(()=>setPending([]));
+  };
 
   useEffect(()=>{
     setFollowers(null);setShowList(false);
+    loadPending();
     if(entityType==='duet'){
       getSB().rpc('get_duet_follower_count',{p_duet_id:entityId})
         .then(({data,error})=>{if(error)throw error;setCount(data??0);})
@@ -18067,7 +18346,7 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true})=>{
     }else{
       DB.getCollectiveFollowersList(entityId).then(list=>{setFollowers(list);setCount(list.length);}).catch(()=>{setFollowers([]);setCount(0);});
     }
-  },[entityId,entityType]);
+  },[entityId,entityType,canSeeIdentities]);
 
   const openList=()=>{
     if(entityType==='duet'&&canSeeIdentities&&followers===null){
@@ -18076,13 +18355,32 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true})=>{
     setShowList(true);
   };
 
-  if(count===null||count===0)return null;
+  // Cancela una invitación pendiente, o expulsa a quien ya la había
+  // aceptado — desde aquí es la misma acción y el mismo botón para las
+  // dos cosas; el servidor decide cuál toca según si ya hay fila en
+  // *_followers o solo queda la notificación sin responder.
+  const cancelInvite=async(targetUserId)=>{
+    if(busyId)return;
+    setBusyId(targetUserId);
+    try{
+      await DB.cancelFollowInvite(entityType,entityId,targetUserId);
+      setPending(prev=>prev.filter(p=>p.id!==targetUserId));
+      setFollowers(prev=>prev?prev.filter(f=>f.id!==targetUserId):prev);
+      setCount(prev=>(followers||[]).some(f=>f.id===targetUserId)?Math.max(0,(prev||0)-1):prev);
+    }catch(e){alert('Error: '+e.message);}
+    setBusyId(null);
+  };
+
+  if((count===null||count===0)&&pending.length===0)return null;
   const clickable=entityType!=='duet'||canSeeIdentities;
+  const label=count>0
+    ?(count+' '+(count===1?'persona siguiendo':'personas siguiendo'))
+    :(pending.length+' '+(pending.length===1?'invitación pendiente':'invitaciones pendientes'));
 
   return(<>
     <button onClick={clickable?openList:undefined}
       style={{background:'transparent',border:'none',color,fontSize:11,fontWeight:600,cursor:clickable?'pointer':'default',display:'flex',alignItems:'center',gap:4,padding:0,flexShrink:0,whiteSpace:'nowrap',fontFamily:"'Source Sans 3',sans-serif"}}>
-      <Icon name="eye" size={12} color={color}/>{count} {count===1?'persona siguiendo':'personas siguiendo'}
+      <Icon name={count>0?'eye':'paper-plane-tilt'} size={12} color={color}/>{label}
     </button>
     {showList&&clickable&&(
       <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:260,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
@@ -18092,16 +18390,43 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true})=>{
             <div style={{fontSize:14.5,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Quién sigue esta historia</div>
             <button onClick={()=>setShowList(false)} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
           </div>
+          {canSeeIdentities&&pending.length>0&&(
+            <div style={{padding:'10px 20px 4px',borderBottom:'1px solid '+BDR}}>
+              <div style={{fontSize:10,fontWeight:700,color:FAINT,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:6}}>Invitaciones pendientes</div>
+              {pending.map(f=>(
+                <div key={f.id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 0'}}>
+                  <UserAvatar user={f} size={28}/>
+                  <div style={{minWidth:0,flex:1}}>
+                    <div style={{fontSize:12.5,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name}</div>
+                    <div style={{fontSize:10.5,color:FAINT}}>@{f.username||'?'} · sin responder</div>
+                  </div>
+                  <button onClick={()=>cancelInvite(f.id)} disabled={busyId===f.id} title="Cancelar invitación"
+                    style={{background:'transparent',border:'none',color:'#C5221F',cursor:'pointer',padding:4,flexShrink:0,opacity:busyId===f.id?0.5:1}}>
+                    <Icon name="x" size={14} color="#C5221F"/>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{padding:'8px 0'}}>
             {(followers||[]).map(f=>(
               <div key={f.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 20px'}}>
                 <UserAvatar user={f} size={32}/>
-                <div style={{minWidth:0}}>
+                <div style={{minWidth:0,flex:1}}>
                   <div style={{fontSize:13,fontWeight:600,color:TXT,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.name}</div>
                   <div style={{fontSize:11,color:FAINT}}>@{f.username||'?'}</div>
                 </div>
+                {canSeeIdentities&&user&&f.invited_by===user.id&&(
+                  <button onClick={()=>cancelInvite(f.id)} disabled={busyId===f.id} title="Dejar de compartir con esta persona"
+                    style={{background:'transparent',border:'none',color:FAINT,cursor:'pointer',padding:4,flexShrink:0,opacity:busyId===f.id?0.5:1}}>
+                    <Icon name="x" size={14} color={FAINT}/>
+                  </button>
+                )}
               </div>
             ))}
+            {!followers?.length&&!pending.length&&(
+              <div style={{padding:'10px 20px',fontSize:12,color:FAINT}}>Nadie sigue esto todavía.</div>
+            )}
           </div>
         </div>
       </div>
@@ -18133,6 +18458,24 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const [deleting,setDeleting]=useState(false);
   const [showInviteFollower,setShowInviteFollower]=useState(false);
   const [inviteStatus,setInviteStatus]=useState(''); // mensaje breve tras invitar
+  // Preferencia de "avisar a mi círculo" — independiente para cada uno de
+  // los dos participantes (ver CONSENTIMIENTO_SEGUIDORES_POR_PARTICIPANTE.sql).
+  // null = todavía sin decidir → se pregunta; true/false = ya decidido, no
+  // se vuelve a preguntar.
+  const myShareField=isA?'share_with_friends_a':'share_with_friends_b';
+  const [sharePref,setSharePref]=useState(duet[myShareField]??null);
+  const [shareBusy,setShareBusy]=useState(false);
+  const showSharePrompt=duet.status==='active'&&duet.visibility&&duet.visibility!=='privado'&&sharePref==null;
+  const answerShare=async(val)=>{
+    if(shareBusy)return;
+    setShareBusy(true);
+    try{
+      await DB.setDuetSharePreference(duet.id,val);
+      setSharePref(val);
+      onUpdate&&onUpdate({...duet,[myShareField]:val});
+    }catch(e){console.error('setDuetSharePreference:',e);}
+    setShareBusy(false);
+  };
   const edRef=useRef(null);
 
   // Saltar mi turno SIN escribir — para cuando no llego a tiempo y no quiero
@@ -18445,7 +18788,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span style={{fontSize:11,color:'rgba(255,255,255,0.5)',flexShrink:0}}>con {otherName} · mín. {duet.min_words} pal./turno</span>
           <div style={{flex:1}}/>
-          <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)" canSeeIdentities={user.id===duet.user_a||user.id===duet.user_b}/>
+          <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)" canSeeIdentities={user.id===duet.user_a||user.id===duet.user_b} user={user}/>
           <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,flexShrink:0,display:'flex'}}>
             <Icon name="user-plus" size={16} color="rgba(255,255,255,0.4)"/>
@@ -18596,6 +18939,26 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
           </div>
         </div>
       )}
+      {showSharePrompt&&(
+        <div style={{position:'fixed',inset:0,zIndex:270,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:360,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',padding:'22px 22px 18px'}}>
+            <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:8}}>¿Avisamos a tu círculo?</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.55,marginBottom:18}}>
+              Este dueto es visible para {duet.visibility==='amigos'?'amigos':'cualquiera'}. Eso es decisión de quien lo creó — pero avisar a {duet.visibility==='amigos'?'tus amigos':'tus seguidores'} de que puedes seguir aquí es aparte, y depende solo de ti. Decir que no no cambia nada de tu participación en el relato.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>answerShare(false)} disabled={shareBusy}
+                style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer'}}>
+                No, gracias
+              </button>
+              <button onClick={()=>answerShare(true)} disabled={shareBusy}
+                style={{flex:1,background:AZUL,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+                {shareBusy?'Un momento…':'Sí, avisar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {confirmDelete&&(
         <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
           onClick={e=>{if(e.target===e.currentTarget&&!deleting)setConfirmDelete(false);}}>
@@ -18659,7 +19022,8 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount,onEntrySaved})=>{
   const accept=async(d)=>{
     try{
       await DB.updateDuet(d.id,{status:'active'});
-      if(d.visibility&&d.visibility!=='privado')DB.inviteDuetFollowers(d.id).catch(e=>console.error('inviteDuetFollowers:',e));
+      // Igual que en la creación: ya no se avisa aquí a los amigos de los
+      // dos a la vez. Cada uno decide por su cuenta al abrir el dueto.
       load();
     }
     catch(e){alert('Error: '+e.message);}
@@ -19221,14 +19585,10 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
       await DB.addCollectiveMembers(allMembers.map((m,i)=>({
         collective_id:col.id,user_id:m.id,name:m.name,username:m.username,turn_order:i+1,
       })));
-      // Avisa a amigos/seguidores de todo el grupo inicial, si procede. La
-      // función del servidor ya es un no-op seguro para colectivos
-      // 'privado', así que esta llamada es inofensiva incluso con la
-      // bandera apagada — pero se evita igualmente para no gastar una
-      // llamada de red de balde mientras la función esté oculta.
-      if(FEATURE_FOLLOW_COLLECTIVES_ENABLED&&visibility!=='privado'){
-        DB.inviteCollectiveFollowers(col.id).catch(e=>console.error('inviteCollectiveFollowers:',e));
-      }
+      // Ya no se avisa aquí a los amigos/seguidores de todo el grupo
+      // inicial de golpe — cada miembro (incluida esta misma persona que
+      // acaba de crearlo) decide por su cuenta la primera vez que abre el
+      // colectivo (ver el nuevo prompt en CollectiveEditor).
       onCreated(col,allMembers);
     }catch(e){alert('Error al crear: '+e.message);}
     setSaving(false);
@@ -19425,6 +19785,25 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
   const nextMember=members.find(m=>m.turn_order===nextOrder);
   const myVote=myMember?.voted_finish||false;
 
+  // Preferencia de "avisar a mi círculo" — igual que en DuetEditor, pero
+  // por fila de collective_members en vez de por columna 'a'/'b'. Solo
+  // llega a preguntarse de verdad si la función de seguidores en
+  // colectivos está encendida (FEATURE_FOLLOW_COLLECTIVES_ENABLED) — si no,
+  // col.visibility se queda siempre en 'privado' y esto no hace nada.
+  const [shareBusy,setShareBusy]=useState(false);
+  const showSharePrompt=FEATURE_FOLLOW_COLLECTIVES_ENABLED&&col.visibility&&col.visibility!=='privado'&&myMember&&(myMember.share_with_friends??null)==null;
+  const answerShare=async(val)=>{
+    if(shareBusy)return;
+    setShareBusy(true);
+    try{
+      await DB.setCollectiveSharePreference(col.id,val);
+      const updated={...col,members:col.members.map(m=>m.user_id===user.id?{...m,share_with_friends:val}:m)};
+      setCol(updated);
+      onUpdate&&onUpdate(updated);
+    }catch(e){console.error('setCollectiveSharePreference:',e);}
+    setShareBusy(false);
+  };
+
   // ── Incorporar un participante a mitad de relato (solo el creador) ──
   const isCreator=col.created_by===user.id;
   const [showSettings,setShowSettings]=useState(false);
@@ -19610,6 +19989,26 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
 
   return(
     <div style={{position:'fixed',inset:0,zIndex:180,background:PAGE_BG,display:'flex',flexDirection:'column'}}>{showIntro&&<ContextualPopup id='colectivos' onClose={dismissIntro}/>}
+      {showSharePrompt&&(
+        <div style={{position:'fixed',inset:0,zIndex:270,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:360,boxShadow:'0 16px 50px -16px rgba(10,27,61,0.35)',padding:'22px 22px 18px'}}>
+            <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:8}}>¿Avisamos a tu círculo?</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.55,marginBottom:18}}>
+              Este colectivo es visible para {col.visibility==='amigos'?'amigos':'cualquiera'}. Eso lo decidió quien lo creó — pero avisar a {col.visibility==='amigos'?'tus amigos':'tus seguidores'} de que puedes seguir aquí es aparte, y depende solo de ti. Decir que no no cambia nada de tu participación en el relato.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>answerShare(false)} disabled={shareBusy}
+                style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer'}}>
+                No, gracias
+              </button>
+              <button onClick={()=>answerShare(true)} disabled={shareBusy}
+                style={{flex:1,background:AZUL,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+                {shareBusy?'Un momento…':'Sí, avisar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showSettings&&(
         <div onClick={e=>{if(e.target===e.currentTarget)setShowSettings(false);}}
           style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
@@ -19747,7 +20146,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
           })()}</span>
         </div>
         <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,flexWrap:'wrap'}}>
-          <FollowersIndicator entityId={col.id} entityType="collective" color="rgba(255,255,255,0.75)"/>
+          <FollowersIndicator entityId={col.id} entityType="collective" color="rgba(255,255,255,0.75)" user={user}/>
           <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
             style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.4)',cursor:'pointer',padding:4,display:'flex'}}>
             <Icon name="user-plus" size={15} color="rgba(255,255,255,0.4)"/>
