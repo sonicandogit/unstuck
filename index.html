@@ -11055,7 +11055,8 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
                   {openCard.shots[shotIdx].label}
                 </div>
               )}
-              <div style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG}}>
+              <div onClick={openCard.shots.length>1?()=>setShotIdx(i=>(i+1)%openCard.shots.length):undefined}
+                style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG,cursor:openCard.shots.length>1?'pointer':'default'}}>
                 {openCard.shots[shotIdx].content}
               </div>
             </div>
@@ -11063,7 +11064,9 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
           {openCard.shots&&openCard.shots.length>1&&(
             <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'4px 24px 18px'}}>
               {openCard.shots.map((s,i)=>(
-                <div key={i} onClick={()=>setShotIdx(i)} style={{width:i===shotIdx?16:6,height:6,borderRadius:i===shotIdx?3:'50%',background:i===shotIdx?NARANJA:BDR,cursor:'pointer',transition:'all 0.15s'}}/>
+                <div key={i} onClick={()=>setShotIdx(i)} style={{padding:9,margin:-9,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <div style={{width:i===shotIdx?16:6,height:6,borderRadius:i===shotIdx?3:'50%',background:i===shotIdx?NARANJA:BDR,transition:'all 0.15s'}}/>
+                </div>
               ))}
             </div>
           )}
