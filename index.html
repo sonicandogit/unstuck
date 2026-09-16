@@ -10874,6 +10874,21 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
   const [dismissed,setDismissed]=useState({});
   const [openId,setOpenId]=useState(null); // id de la tarjeta cuyo pop-up está abierto
   const [shotIdx,setShotIdx]=useState(0); // paso actual del carrusel del pop-up abierto
+  const touchStart=useRef(null); // {x,y} al empezar a tocar, para detectar swipe
+  const onShotTouchStart=e=>{ const t=e.touches[0]; touchStart.current={x:t.clientX,y:t.clientY}; };
+  const onShotTouchEnd=(e,total)=>{
+    if(!touchStart.current)return;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-touchStart.current.x, dy=t.clientY-touchStart.current.y;
+    touchStart.current=null;
+    // Solo cuenta como swipe si el movimiento es sobre todo horizontal (si no,
+    // es gente haciendo scroll vertical del pop-up, no queremos robarles eso)
+    // y suficientemente largo para no confundirlo con un toque accidental.
+    if(Math.abs(dx)<40||Math.abs(dx)<Math.abs(dy))return; // toque normal: se deja pasar al onClick (avanza igual, cíclico)
+    e.preventDefault(); // evita que el click sintético que sigue al touchend vuelva a avanzar por su cuenta
+    if(dx<0)setShotIdx(i=>Math.min(total-1,i+1)); // swipe a la izquierda → siguiente
+    else setShotIdx(i=>Math.max(0,i-1)); // swipe a la derecha → anterior
+  };
   const dismiss=(id)=>{ S.set(discoveredKey(id,user?.id),Date.now()); setDismissed(d=>({...d,[id]:true})); };
   const seen=(id)=>!!S.get(discoveredKey(id,user?.id))||dismissed[id];
 
@@ -11056,7 +11071,9 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
                 </div>
               )}
               <div onClick={openCard.shots.length>1?()=>setShotIdx(i=>(i+1)%openCard.shots.length):undefined}
-                style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG,cursor:openCard.shots.length>1?'pointer':'default'}}>
+                onTouchStart={openCard.shots.length>1?onShotTouchStart:undefined}
+                onTouchEnd={openCard.shots.length>1?e=>onShotTouchEnd(e,openCard.shots.length):undefined}
+                style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG,cursor:openCard.shots.length>1?'pointer':'default',touchAction:openCard.shots.length>1?'pan-y':'auto'}}>
                 {openCard.shots[shotIdx].content}
               </div>
             </div>
