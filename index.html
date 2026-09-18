@@ -10884,8 +10884,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
     // Solo cuenta como swipe si el movimiento es sobre todo horizontal (si no,
     // es gente haciendo scroll vertical del pop-up, no queremos robarles eso)
     // y suficientemente largo para no confundirlo con un toque accidental.
-    if(Math.abs(dx)<40||Math.abs(dx)<Math.abs(dy))return; // toque normal: se deja pasar al onClick (avanza igual, cíclico)
-    e.preventDefault(); // evita que el click sintético que sigue al touchend vuelva a avanzar por su cuenta
+    if(Math.abs(dx)<30||Math.abs(dx)<Math.abs(dy))return;
     if(dx<0)setShotIdx(i=>Math.min(total-1,i+1)); // swipe a la izquierda → siguiente
     else setShotIdx(i=>Math.max(0,i-1)); // swipe a la derecha → anterior
   };
@@ -11017,8 +11016,14 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
       teaser:(<>Cuantos más seamos, más rica será la biblioteca.</>),
       modalIcon:'share-network', modalIconColor:AZULMED,
       body:(<><p>Cuantos más seamos, más rica será la biblioteca y más palabras sumaremos juntos. Comparte <i>Pretexto</i> con tus amigos por correo o por WhatsApp.</p></>),
-      shots:[{label:null,content:(<><div className="ui-card" style={{display:'flex',gap:'12px',justifyContent:'center',padding:'16px'}}><div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'6px'}}><div style={{width:'38px',height:'38px',borderRadius:'50%',background:'rgba(30,155,240,.12)',display:'flex',alignItems:'center',justifyContent:'center'}}><i className="ph-light ph-envelope-simple" style={{fontSize:'17px',color:AZULMED}}></i></div><span style={{fontSize:'10.5px',color:MUTED}}>Correo</span></div><div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'6px'}}><div style={{width:'38px',height:'38px',borderRadius:'50%',background:'rgba(241,90,36,.1)',display:'flex',alignItems:'center',justifyContent:'center'}}><i className="ph-light ph-whatsapp-logo" style={{fontSize:'17px',color:NARANJA}}></i></div><span style={{fontSize:'10.5px',color:MUTED}}>WhatsApp</span></div></div></>)}],
-      action:()=>{  dismiss('disc_comparte'); }},
+      // Sin shots: los iconos de Correo/WhatsApp ya se muestran abajo, en la
+      // rama especial de openCard.id==='disc_comparte' (líneas más abajo),
+      // como enlaces reales (mailto:/wa.me). Antes también había una captura
+      // estática con los mismos dos iconos aquí arriba, sin ningún enlace
+      // real detrás — la duplicación que se veía era exactamente esa: el de
+      // arriba decorativo, el de abajo el único que de verdad funcionaba.
+      shots:[],
+      action:()=>{ dismiss('disc_comparte'); }},
   ];
 
   // Pendientes = no vistas/descartadas y cuya función aún no se ha usado.
@@ -11070,10 +11075,11 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
                   {openCard.shots[shotIdx].label}
                 </div>
               )}
-              <div onClick={openCard.shots.length>1?()=>setShotIdx(i=>(i+1)%openCard.shots.length):undefined}
+              <div
                 onTouchStart={openCard.shots.length>1?onShotTouchStart:undefined}
                 onTouchEnd={openCard.shots.length>1?e=>onShotTouchEnd(e,openCard.shots.length):undefined}
-                style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG,cursor:openCard.shots.length>1?'pointer':'default',touchAction:openCard.shots.length>1?'pan-y':'auto'}}>
+                onTouchCancel={openCard.shots.length>1?()=>{touchStart.current=null;}:undefined}
+                style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG,touchAction:openCard.shots.length>1?'pan-y':'auto'}}>
                 {openCard.shots[shotIdx].content}
               </div>
             </div>
