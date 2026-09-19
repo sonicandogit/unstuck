@@ -11059,7 +11059,11 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
     {openCard&&(
       <div style={{position:'fixed',inset:0,zIndex:280,background:'rgba(10,27,61,0.55)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}
         onClick={e=>{if(e.target===e.currentTarget)closeTip();}}>
-        <div className="fi" style={{background:PAGE_BG,borderRadius:18,width:'100%',maxWidth:440,maxHeight:'calc(var(--app-height,100dvh) - 32px)',overflowY:'auto',boxShadow:'0 24px 60px -14px rgba(10,27,61,0.5)'}}>
+        <div className="fi"
+          onTouchStart={openCard.shots&&openCard.shots.length>1?onShotTouchStart:undefined}
+          onTouchEnd={openCard.shots&&openCard.shots.length>1?e=>onShotTouchEnd(e,openCard.shots.length):undefined}
+          onTouchCancel={openCard.shots&&openCard.shots.length>1?()=>{touchStart.current=null;}:undefined}
+          style={{background:PAGE_BG,borderRadius:18,width:'100%',maxWidth:440,maxHeight:'calc(var(--app-height,100dvh) - 32px)',overflowY:'auto',boxShadow:'0 24px 60px -14px rgba(10,27,61,0.5)',touchAction:openCard.shots&&openCard.shots.length>1?'pan-y':'auto'}}>
           <div style={{padding:'22px 24px 4px',display:'flex',gap:12,alignItems:'flex-start'}}>
             <div style={{width:40,height:40,borderRadius:11,background:openCard.modalIconColor+'20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
               <Icon name={openCard.modalIcon} size={19} color={openCard.modalIconColor}/>
@@ -11075,11 +11079,7 @@ const DiscoveryCards=({user,library=[],onToggleMode,onOpenCollab,onOpenLibrary,o
                   {openCard.shots[shotIdx].label}
                 </div>
               )}
-              <div
-                onTouchStart={openCard.shots.length>1?onShotTouchStart:undefined}
-                onTouchEnd={openCard.shots.length>1?e=>onShotTouchEnd(e,openCard.shots.length):undefined}
-                onTouchCancel={openCard.shots.length>1?()=>{touchStart.current=null;}:undefined}
-                style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG,touchAction:openCard.shots.length>1?'pan-y':'auto'}}>
+              <div style={{padding:20,fontFamily:"'Source Sans 3',sans-serif",color:TXT,background:PAGE_BG}}>
                 {openCard.shots[shotIdx].content}
               </div>
             </div>
