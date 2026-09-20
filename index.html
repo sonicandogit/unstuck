@@ -10710,13 +10710,13 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
-  const [ci,setCi]=useState(0);
+  const [ci]=useState(()=>Math.floor(Math.random()*USER_COLORS.length)); // color del avatar: ya no se elige a mano, se asigna solo — el selector no aportaba nada en el momento de registrarte
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
   const [legalOk,setLegalOk]=useState(false);
   const [showPrivacy,setShowPrivacy]=useState(false);
   const [showTerms,setShowTerms]=useState(false);
-  const [theme,setTheme]=useTheme();
+  useTheme(); // aplica el tema guardado (si vuelves y ya tenías oscuro, por ejemplo) — sin selector visible aquí, no pinta nada antes de entrar
 
   const submit=async()=>{
     if(mode==='recover'){
@@ -10770,8 +10770,7 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
 
     {isSignup&&<>
       <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Nombre</label>
-      <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Tu nombre" style={{marginBottom:12,width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
-      <div style={{display:'flex',gap:7,marginBottom:18}}>{USER_COLORS.map((c,i)=><button key={i} onClick={()=>setCi(i)} style={{width:25,height:25,borderRadius:'50%',background:c.accent,border:ci===i?'2px solid '+TXT:'2px solid transparent',cursor:'pointer',padding:0}}/>)}</div>
+      <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre de usuario" style={{marginBottom:18,width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
     </>}
 
     {!isRecover||isRecover?(
@@ -10837,11 +10836,6 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
       ¿Ya tienes cuenta?{' '}
       <button onClick={()=>setMode('login')} style={{font:"600 13.5px/1 'Source Sans 3'",color:AZULMED,background:'transparent',border:'none',cursor:'pointer',padding:0}}>Entra aquí</button>
     </div>}
-
-    {/* Theme toggle */}
-    <div style={{display:'flex',justifyContent:'center',marginTop:6}}>
-      <ThemeToggle theme={theme} setTheme={setTheme} small/>
-    </div>
     </>
   );
 };
