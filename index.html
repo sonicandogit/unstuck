@@ -10699,8 +10699,13 @@ const BetaDisclaimerModal=({user,onAccepted})=>{
   );
 };
 
-const AuthScreen=({onAuth})=>{
-  const [mode,setMode]=useState('login');
+// AuthForm: el formulario real (pestañas, campos, validación, DB.signUp/
+// signIn/resetPassword) sin ningún envoltorio de página — así lo puede usar
+// tanto AuthScreen (pantalla desnuda, para quien ya conoce la app y vuelve
+// a entrar) como la última diapositiva de PreLoginOnboarding (el carrusel
+// nuevo de antes del login), sin duplicar ni un ápice de la lógica real.
+const AuthForm=({onAuth,defaultMode='login'})=>{
+  const [mode,setMode]=useState(defaultMode);
   const [recoverSent,setRecoverSent]=useState(false); // 'login' | 'signup' | 'recover'
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
@@ -10754,114 +10759,213 @@ const AuthScreen=({onAuth})=>{
     <>
     {showPrivacy&&<PrivacyModal onClose={()=>setShowPrivacy(false)}/>}
     {showTerms&&<TermsModal onClose={()=>setShowTerms(false)}/>}
-    <div style={{height:'var(--app-height,100dvh)',background:PAGE_BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto',transition:'background 0.25s'}}>
-      <div style={{width:'100%',maxWidth:400,position:'relative'}}>
 
-        <div style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:18,overflow:'hidden',boxShadow:'0 32px 70px -28px rgba(10,27,61,0.35)',position:'relative'}}>
-          <Signo char="&ldquo;" size={170} top={-12} left={6} color="azul"/>
+    {/* Tabs */}
+    {!isRecover&&<div style={{display:'flex',marginBottom:26,borderBottom:'1px solid '+BDR}}>
+      {[['login','Entrar'],['signup','Crear cuenta']].map(([m,l])=>(
+        <button key={m} onClick={()=>{setMode(m);setError('');}} style={{flex:1,background:'transparent',border:'none',borderBottom:mode===m?'2px solid '+NAVY:'2px solid transparent',padding:'9px 0',fontSize:13.5,fontWeight:mode===m?600:400,color:mode===m?TXT:MUTED,cursor:'pointer',marginBottom:-1,fontFamily:"'Source Sans 3',sans-serif"}}>{l}</button>
+      ))}
+    </div>}
+    {isRecover&&<div style={{fontSize:14,color:MUTED,marginBottom:24,lineHeight:1.5}}>Te enviaremos un enlace para crear una nueva contraseña.</div>}
 
-          {/* Header: logo */}
-          <div style={{position:'relative',zIndex:1,textAlign:'center',padding:'38px 32px 0'}}>
-            <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:25,color:TXT,marginBottom:26}}>Pretexto</div>
+    {isSignup&&<>
+      <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Nombre</label>
+      <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Tu nombre" style={{marginBottom:12,width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
+      <div style={{display:'flex',gap:7,marginBottom:18}}>{USER_COLORS.map((c,i)=><button key={i} onClick={()=>setCi(i)} style={{width:25,height:25,borderRadius:'50%',background:c.accent,border:ci===i?'2px solid '+TXT:'2px solid transparent',cursor:'pointer',padding:0}}/>)}</div>
+    </>}
 
-            {/* Tabs */}
-            {!isRecover&&<div style={{display:'flex',marginBottom:26,borderBottom:'1px solid '+BDR}}>
-              {[['login','Entrar'],['signup','Crear cuenta']].map(([m,l])=>(
-                <button key={m} onClick={()=>{setMode(m);setError('');}} style={{flex:1,background:'transparent',border:'none',borderBottom:mode===m?'2px solid '+NAVY:'2px solid transparent',padding:'9px 0',fontSize:13.5,fontWeight:mode===m?600:400,color:mode===m?TXT:MUTED,cursor:'pointer',marginBottom:-1,fontFamily:"'Source Sans 3',sans-serif"}}>{l}</button>
-              ))}
-            </div>}
-            {isRecover&&<div style={{fontSize:14,color:MUTED,marginBottom:24,lineHeight:1.5}}>Te enviaremos un enlace para crear una nueva contraseña.</div>}
-          </div>
-
-          {/* Form */}
-          <div style={{position:'relative',zIndex:1,padding:'0 32px 28px'}}>
-
-            {isSignup&&<>
-              <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Nombre</label>
-              <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="Tu nombre" style={{marginBottom:12,width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
-              <div style={{display:'flex',gap:7,marginBottom:18}}>{USER_COLORS.map((c,i)=><button key={i} onClick={()=>setCi(i)} style={{width:25,height:25,borderRadius:'50%',background:c.accent,border:ci===i?'2px solid '+TXT:'2px solid transparent',cursor:'pointer',padding:0}}/>)}</div>
-            </>}
-
-            {!isRecover||isRecover?(
-              <div style={{marginBottom:14}}>
-                <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Email</label>
-                <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="tu@email.com" style={{width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
-              </div>
-            ):null}
-
-            {!isRecover&&<div style={{marginBottom:22}}>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:7}}>
-                <label style={{font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT}}>Contraseña{isSignup&&' (mín. 6)'}</label>
-                {isLogin&&<button onClick={()=>{setMode('recover');setError('');setRecoverSent(false);}} style={{font:"500 12px/1 'Source Sans 3'",color:AZULMED,background:'transparent',border:'none',cursor:'pointer',padding:0}}>¿La olvidaste?</button>}
-              </div>
-              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="••••••••" style={{width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
-            </div>}
-
-            {error&&<div style={{fontSize:12.5,color:DANGER,marginBottom:16,padding:'9px 12px',background:'rgba(197,34,31,0.07)',borderRadius:8,border:'1px solid rgba(197,34,31,0.2)'}}>{error}</div>}
-
-            {isSignup&&<label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',marginBottom:18}}>
-              <input type="checkbox" id="legal-check" checked={legalOk} onChange={e=>setLegalOk(e.target.checked)} style={{marginTop:2,flexShrink:0,cursor:'pointer'}}/>
-              <span style={{fontSize:11.5,color:MUTED,lineHeight:1.6}}>
-                He leído y acepto la{' '}
-                <button type="button" onClick={e=>{e.preventDefault();setShowPrivacy(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Política de Privacidad</button>
-                {' '}y los{' '}
-                <button type="button" onClick={e=>{e.preventDefault();setShowTerms(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Términos de Servicio</button>
-              </span>
-            </label>}
-
-            {/* CTA */}
-            <button onClick={()=>{
-              if(isSignup&&!document.getElementById('legal-check')?.checked){
-                setError('Debes aceptar la Política de Privacidad y los Términos de Servicio');return;
-              }
-              submit();
-            }} disabled={loading} style={{
-              width:'100%',
-              background:isSignup?NARANJA:ADVANCE_BG,
-              border:'none',borderRadius:11,padding:'14px',
-              fontSize:14.5,fontWeight:600,color:isSignup?'#fff':ADVANCE_TXT,
-              cursor:'pointer',opacity:loading?0.6:1,
-              boxShadow:isSignup?'0 8px 20px -8px rgba(241,90,36,0.65)':'none',
-              fontFamily:"'Source Sans 3',sans-serif",
-              marginBottom:16,
-            }}>
-              {loading?'…':isLogin?'Entrar →':isRecover?'Enviar enlace de recuperación':'Crear cuenta →'}
-            </button>
-
-            {recoverSent&&<div style={{background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.3)',borderRadius:9,padding:'13px 14px',marginBottom:14,fontSize:13,color:AZUL,lineHeight:1.5,textAlign:'center'}}>
-              ✓ Te hemos enviado un email con el enlace para cambiar tu contraseña. Revisa también el spam.
-            </div>}
-
-            {isRecover&&<div style={{textAlign:'center',fontSize:13.5}}>
-              <button onClick={()=>{setMode('login');setRecoverSent(false);setError('');}} style={{background:'transparent',border:'none',color:AZULMED,cursor:'pointer',fontSize:13.5,fontWeight:600}}>← Volver al inicio de sesión</button>
-            </div>}
-
-            {isLogin&&<div style={{textAlign:'center',fontSize:13.5,color:FAINT}}>
-              ¿Aún no tienes cuenta?{' '}
-              <button onClick={()=>setMode('signup')} style={{font:"600 13.5px/1 'Source Sans 3'",color:NARANJA,background:'transparent',border:'none',cursor:'pointer',padding:0}}>Créala gratis</button>
-            </div>}
-
-            {isSignup&&<div style={{textAlign:'center',fontSize:13.5,color:FAINT}}>
-              ¿Ya tienes cuenta?{' '}
-              <button onClick={()=>setMode('login')} style={{font:"600 13.5px/1 'Source Sans 3'",color:AZULMED,background:'transparent',border:'none',cursor:'pointer',padding:0}}>Entra aquí</button>
-            </div>}
-          </div>
-
-          {/* Theme toggle */}
-          <div style={{position:'relative',zIndex:1,display:'flex',justifyContent:'center',paddingBottom:22}}>
-            <ThemeToggle theme={theme} setTheme={setTheme} small/>
-          </div>
-        </div>
-
-        <div style={{textAlign:'center',marginTop:18,fontSize:12,color:FAINT}}>editor de escritura creativa</div>
+    {!isRecover||isRecover?(
+      <div style={{marginBottom:14}}>
+        <label style={{display:'block',font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT,marginBottom:7}}>Email</label>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="tu@email.com" style={{width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
       </div>
+    ):null}
+
+    {!isRecover&&<div style={{marginBottom:22}}>
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:7}}>
+        <label style={{font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT}}>Contraseña{isSignup&&' (mín. 6)'}</label>
+        {isLogin&&<button onClick={()=>{setMode('recover');setError('');setRecoverSent(false);}} style={{font:"500 12px/1 'Source Sans 3'",color:AZULMED,background:'transparent',border:'none',cursor:'pointer',padding:0}}>¿La olvidaste?</button>}
+      </div>
+      <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="••••••••" style={{width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
+    </div>}
+
+    {error&&<div style={{fontSize:12.5,color:DANGER,marginBottom:16,padding:'9px 12px',background:'rgba(197,34,31,0.07)',borderRadius:8,border:'1px solid rgba(197,34,31,0.2)'}}>{error}</div>}
+
+    {isSignup&&<label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',marginBottom:18}}>
+      <input type="checkbox" id="legal-check" checked={legalOk} onChange={e=>setLegalOk(e.target.checked)} style={{marginTop:2,flexShrink:0,cursor:'pointer'}}/>
+      <span style={{fontSize:11.5,color:MUTED,lineHeight:1.6}}>
+        He leído y acepto la{' '}
+        <button type="button" onClick={e=>{e.preventDefault();setShowPrivacy(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Política de Privacidad</button>
+        {' '}y los{' '}
+        <button type="button" onClick={e=>{e.preventDefault();setShowTerms(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Términos de Servicio</button>
+      </span>
+    </label>}
+
+    {/* CTA */}
+    <button onClick={()=>{
+      if(isSignup&&!document.getElementById('legal-check')?.checked){
+        setError('Debes aceptar la Política de Privacidad y los Términos de Servicio');return;
+      }
+      submit();
+    }} disabled={loading} style={{
+      width:'100%',
+      background:isSignup?NARANJA:ADVANCE_BG,
+      border:'none',borderRadius:11,padding:'14px',
+      fontSize:14.5,fontWeight:600,color:isSignup?'#fff':ADVANCE_TXT,
+      cursor:'pointer',opacity:loading?0.6:1,
+      boxShadow:isSignup?'0 8px 20px -8px rgba(241,90,36,0.65)':'none',
+      fontFamily:"'Source Sans 3',sans-serif",
+      marginBottom:16,
+    }}>
+      {loading?'…':isLogin?'Entrar →':isRecover?'Enviar enlace de recuperación':'Crear cuenta →'}
+    </button>
+
+    {recoverSent&&<div style={{background:'rgba(30,155,240,0.08)',border:'1px solid rgba(30,155,240,0.3)',borderRadius:9,padding:'13px 14px',marginBottom:14,fontSize:13,color:AZUL,lineHeight:1.5,textAlign:'center'}}>
+      ✓ Te hemos enviado un email con el enlace para cambiar tu contraseña. Revisa también el spam.
+    </div>}
+
+    {isRecover&&<div style={{textAlign:'center',fontSize:13.5}}>
+      <button onClick={()=>{setMode('login');setRecoverSent(false);setError('');}} style={{background:'transparent',border:'none',color:AZULMED,cursor:'pointer',fontSize:13.5,fontWeight:600}}>← Volver al inicio de sesión</button>
+    </div>}
+
+    {isLogin&&<div style={{textAlign:'center',fontSize:13.5,color:FAINT}}>
+      ¿Aún no tienes cuenta?{' '}
+      <button onClick={()=>setMode('signup')} style={{font:"600 13.5px/1 'Source Sans 3'",color:NARANJA,background:'transparent',border:'none',cursor:'pointer',padding:0}}>Créala gratis</button>
+    </div>}
+
+    {isSignup&&<div style={{textAlign:'center',fontSize:13.5,color:FAINT}}>
+      ¿Ya tienes cuenta?{' '}
+      <button onClick={()=>setMode('login')} style={{font:"600 13.5px/1 'Source Sans 3'",color:AZULMED,background:'transparent',border:'none',cursor:'pointer',padding:0}}>Entra aquí</button>
+    </div>}
+
+    {/* Theme toggle */}
+    <div style={{display:'flex',justifyContent:'center',marginTop:6}}>
+      <ThemeToggle theme={theme} setTheme={setTheme} small/>
     </div>
     </>
   );
 };
 
+// AuthScreen: la pantalla desnuda de siempre — para quien ya ha visto el
+// carrusel de antes del login (o ya tiene cuenta) y vuelve a entrar
+// directamente, sin las diapositivas informativas por delante.
+const AuthScreen=({onAuth})=>(
+  <div style={{height:'var(--app-height,100dvh)',background:PAGE_BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'24px 16px',overflow:'auto',transition:'background 0.25s'}}>
+    <div style={{width:'100%',maxWidth:400,position:'relative'}}>
+      <div style={{background:CARD_BG,border:'1px solid '+BDR,borderRadius:18,overflow:'hidden',boxShadow:'0 32px 70px -28px rgba(10,27,61,0.35)',position:'relative'}}>
+        <Signo char="&ldquo;" size={170} top={-12} left={6} color="azul"/>
+        <div style={{position:'relative',zIndex:1,textAlign:'center',padding:'38px 32px 0'}}>
+          <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:25,color:TXT,marginBottom:26}}>Pretexto</div>
+        </div>
+        <div style={{position:'relative',zIndex:1,padding:'0 32px 28px'}}>
+          <AuthForm onAuth={onAuth} defaultMode="login"/>
+        </div>
+      </div>
+      <div style={{textAlign:'center',marginTop:18,fontSize:12,color:FAINT}}>editor de escritura creativa</div>
+    </div>
+  </div>
+);
 
-// ══════════════════════════════════════════════════════════════════
+// PreLoginOnboarding: el carrusel nuevo de antes del login — 4 diapositivas,
+// la última de las cuales ES la pantalla de registro real (AuthForm), no
+// una simulación aparte. Solo lo ve quien entra a pretexto.app por primera
+// vez (ver pretexto_preauth_seen en App); quien vuelve a entrar más tarde
+// ve directamente AuthScreen, sin las diapositivas informativas.
+const PreLoginOnboarding=({onAuth})=>{
+  const [cur,setCur]=useState(0);
+  const TOTAL=4;
+  const goldColor='#E8A33D';
+  useEffect(()=>{ try{localStorage.setItem('pretexto_preauth_seen','true');}catch(e){} },[]);
+  const cardStyle={position:'relative',width:'100%',maxWidth:440,background:PAGE_BG,borderRadius:22,boxShadow:'0 24px 60px -18px rgba(10,27,61,.45)',overflow:'hidden',minHeight:640,maxHeight:'calc(var(--app-height,100dvh) - 40px)',display:'flex',flexDirection:'column'};
+
+  const featureCard=(bg,icon,title,desc)=>(
+    <div style={{background:bg,borderRadius:16,padding:16,color:'#fff',display:'flex',flexDirection:'column',alignItems:'center',textAlign:'center',justifyContent:'center'}}>
+      <Icon name={icon} size={40} color="#fff" style={{marginBottom:9}}/>
+      <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:13.5,marginBottom:4}}>{title}</div>
+      <div style={{fontSize:10,lineHeight:1.35,color:'rgba(255,255,255,.85)'}}>{desc}</div>
+    </div>
+  );
+  const platformCard=(bg,icon,title,desc)=>(
+    <div style={{background:bg,borderRadius:16,padding:'22px 20px',color:'#fff',display:'flex',alignItems:'center',gap:16}}>
+      <Icon name={icon} size={34} color="#fff" style={{flexShrink:0}}/>
+      <div>
+        <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:15,marginBottom:4}}>{title}</div>
+        <div style={{fontSize:11.5,lineHeight:1.5,color:'rgba(255,255,255,.85)'}}>{desc}</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{height:'var(--app-height,100dvh)',background:PAGE_BG,display:'flex',alignItems:'center',justifyContent:'center',padding:20,overflow:'auto'}}>
+      <div style={cardStyle}>
+
+        {cur===0&&(
+          <div style={{flex:1,display:'flex',flexDirection:'column',padding:'0 40px',alignItems:'center',justifyContent:'center',textAlign:'center',position:'relative',overflow:'hidden'}}>
+            <span style={{position:'absolute',top:36,left:0,right:0,textAlign:'center',fontFamily:'"Playfair Display",Georgia,serif',fontWeight:900,fontSize:220,color:'rgba(30,155,240,.16)',lineHeight:1,pointerEvents:'none',userSelect:'none'}}>&ldquo;</span>
+            <div style={{position:'relative',zIndex:1}}>
+              <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:600,fontSize:29,lineHeight:1.25,marginBottom:16,color:TXT}}>Escribir duele.<br/>Con <em>Pretexto</em>, duele menos.</div>
+              <div style={{fontSize:13.5,lineHeight:1.6,color:MUTED,maxWidth:300,margin:'0 auto'}}>Una app que te deja sin excusas para hacer algo que te encanta.</div>
+            </div>
+          </div>
+        )}
+
+        {cur===1&&(
+          <div style={{flex:1,display:'flex',flexDirection:'column',padding:'32px 26px 0'}}>
+            <div style={{minHeight:'25%',display:'flex',flexDirection:'column',justifyContent:'center',marginBottom:18}}>
+              <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:600,fontSize:25,lineHeight:1.2,marginBottom:10,color:TXT}}>Vuelve a disfrutarlo.</div>
+              <div style={{fontSize:12.5,lineHeight:1.5,color:MUTED}}>Deja atrás el autojuicio, el perfeccionismo, la presión por publicar.</div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gridTemplateRows:'1fr 1fr',gap:10,flex:1,marginBottom:16}}>
+              {featureCard(AZULMED,'sliders-horizontal','Editores de texto innovadores','Creados para romper bloqueos y dejar que fluyan tus ideas.')}
+              {featureCard(NARANJA,'flame','Checks y retos','Cientos de disparadores para tu imaginación.')}
+              {featureCard(NAVY,'calendar-check','Compromiso','Rachas diarias y citas contigo y tus personajes, para que vuelvas cada día.')}
+              {featureCard(goldColor,'users-three','Con la comunidad','Duetos, relatos a varias manos, incluso historias colectivas en directo y con público.')}
+            </div>
+          </div>
+        )}
+
+        {cur===2&&(
+          <div style={{flex:1,display:'flex',flexDirection:'column',padding:'32px 26px 0',position:'relative',overflow:'hidden'}}>
+            <span style={{position:'absolute',top:-40,right:-40,fontFamily:'"Playfair Display",Georgia,serif',fontWeight:900,fontSize:220,color:'rgba(241,90,36,.16)',lineHeight:1,pointerEvents:'none',userSelect:'none'}}>*</span>
+            <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:600,fontSize:22,marginBottom:6,position:'relative',zIndex:1,color:TXT}}>¿Para escritorio… o para móvil?<br/>Las dos cosas.</div>
+            <div style={{fontSize:12.5,color:MUTED,marginBottom:18,position:'relative',zIndex:1}}>Es una <em>webapp</em> pensada para que la lleves a todas partes. Que la inspiración siempre te pille con Pretexto a mano.</div>
+            <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'center',gap:14,position:'relative',zIndex:1,paddingBottom:20}}>
+              {platformCard(AZULMED,'desktop','Pensado para desktop','Que sea tu escritorio, tu biblioteca, el lugar de siempre para sentarte con tus ideas.')}
+              {platformCard(NARANJA,'device-mobile','Y para móvil','Para esas ideas que si no, se olvidan. Para seguir las historias de tus amigos.')}
+              {platformCard(NAVY,'sparkle','Añade IA, si quieres','Claude puede darte su opinión sobre tus textos, o acompañarte página a página, a cuatro manos.')}
+            </div>
+          </div>
+        )}
+
+        {cur===3&&(
+          <div style={{flex:1,display:'flex',flexDirection:'column',padding:'36px 30px 0',position:'relative',overflow:'auto'}}>
+            <span style={{position:'absolute',top:22,left:0,right:0,textAlign:'center',fontFamily:'"Playfair Display",Georgia,serif',fontWeight:900,fontSize:240,color:'rgba(30,155,240,.13)',lineHeight:1,pointerEvents:'none',userSelect:'none'}}>&ldquo;</span>
+            <div style={{textAlign:'center',marginBottom:20,marginTop:70,position:'relative',zIndex:1}}>
+              <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:700,fontSize:26,marginBottom:8,color:TXT}}>¿Te apuntas?</div>
+              <div style={{fontSize:13,color:MUTED}}>Es gratis, ¿qué más quieres?</div>
+            </div>
+            <div style={{position:'relative',zIndex:1,paddingBottom:12}}>
+              <AuthForm onAuth={onAuth} defaultMode="signup"/>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'20px 30px 26px',position:'relative',zIndex:2,flexShrink:0}}>
+          <div style={{display:'flex',gap:7}}>
+            {Array.from({length:TOTAL},(_,i)=>(
+              <div key={i} onClick={()=>setCur(i)} style={{width:i===cur?18:6,height:6,borderRadius:i===cur?3:'50%',background:i===cur?NARANJA:'rgba(10,27,61,.18)',cursor:'pointer',transition:'all 0.15s'}}/>
+            ))}
+          </div>
+          {cur<TOTAL-1&&(
+            <button onClick={()=>setCur(c=>c+1)} style={{font:"600 13px 'Source Sans 3'",color:'#fff',background:NAVY,border:'none',borderRadius:10,padding:'11px 20px',cursor:'pointer'}}>Siguiente →</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 // TARJETAS DE DESCUBRIMIENTO
 // Funciones que están "escondidas" y que nadie pulsaría si no se las
 // presenta en el dashboard. Cada tarjeta invita a probar una función que
@@ -21444,168 +21548,6 @@ const IOSInstallGuide=({onClose})=>(
   </div>
 );
 
-const WelcomeCarousel=({onClose})=>{
-  const TOTAL=5;
-  const [cur,setCur]=useState(0);
-  const [noShow,setNoShow]=useState(false);
-  const [theme,setTheme]=useTheme();
-
-  const go=n=>setCur(n);
-
-  const handleNext=()=>{
-    if(cur<TOTAL-1){setCur(c=>c+1);}
-    else{
-      if(noShow)localStorage.setItem('pretexto_welcome_seen','true');
-      onClose();
-    }
-  };
-
-  const slides=[
-    /* SLIDE 1 */
-    <div key="s1" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:165,top:'-10px',right:'8px'}} aria-hidden="true">“</span>
-      <div><div className="wc-eyebrow"><span className="wc-eyebrow-ic" style={{background:'rgba(10,27,61,.08)'}}><Icon name="quotes" size={12} color="#0A1B3D"/></span>Bienvenida</div>
-        <div className="wc-title">Escribir duele.<br/>Pero con pretexto duele menos.</div></div>
-      <div className="wc-body">
-        <p>Si estás aquí es porque quieres escribir. Puede que sea lo que más satisfacción te da en este mundo. Pero, curiosamente, siempre tienes una excusa para no hacerlo.</p>
-        <p>Porque hay algo extraño en escribir cuando nadie te lo pide. Si no hay nota, si no hay fecha, si no hay obligación. Si solo estáis tú, el cursor y el silencio.</p>
-        <p>Al principio duele. A unos, el folio en blanco; a otros, la primera frase torpe o la sensación de que todo lo que tecleas ya lo escribió alguien mejor. Pero también sucede algo: con cada día que vuelves, duele un poco menos.</p>
-        <p>Pretexto existe para acompañarte en ese proceso. Aquí encontrarás desafíos que te pican un poco para que te rasques escribiendo sin darte cuenta; textos de otros que también se sientan a escribir, con o sin excusa; y lecciones que abren perspectivas frescas para que te atasques menos.</p>
-        <p>Lo importante es que estás aquí.</p>
-        <p>Ahora elige tu pretexto y escribe.</p>
-      </div>
-      <div className="wc-mockup">
-        <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:14}}>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,paddingBottom:8,borderBottom:'1px solid rgba(10,27,61,.07)'}}>
-            <span style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:13,color:'#0A1B3D'}}>pretexto</span>
-            <div style={{marginLeft:'auto',display:'flex',gap:5}}><div style={{width:22,height:4,borderRadius:2,background:'#F15A24'}}/><div style={{width:22,height:4,borderRadius:2,background:'rgba(10,27,61,.12)'}}/><div style={{width:22,height:4,borderRadius:2,background:'rgba(10,27,61,.12)'}}/></div>
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}><Icon name="cursor-text" size={13} color="#F15A24"/><div style={{fontSize:12,color:'rgba(10,27,61,.35)'}}>Empieza a escribir…</div></div>
-          <div style={{display:'flex',flexDirection:'column',gap:5}}><div style={{height:5,background:'rgba(10,27,61,.1)',borderRadius:2}}/><div style={{height:5,background:'rgba(10,27,61,.1)',borderRadius:2,width:'72%'}}/></div>
-        </div>
-      </div>
-    </div>,
-    /* SLIDE 2 — Instalación PWA (movido al 2º puesto para máxima conversión) */
-    <div key="s7" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:165,top:'-10px',right:'8px'}} aria-hidden="true">↓</span>
-      <div><div className="wc-eyebrow naranja"><span className="wc-eyebrow-ic" style={{background:'rgba(241,90,36,.12)'}}><Icon name="device-mobile" size={12} color="#F15A24"/></span>Llévalo contigo</div>
-        <div className="wc-title">Instálalo como app<br/>y no pierdas el hilo.</div></div>
-      <div className="wc-body">
-        <p>Descarga Pretexto y escribe desde donde quieras. Recibe notificaciones de tus retos y textos colaborativos, de los comentarios en tus textos y de las nuevas publicaciones de los autores que sigas. Disponible para móvil y para PC. Mejor así. Créenos.</p>
-        <div style={{marginTop:20,marginBottom:8}}><InstallPWA variant="block"/></div>
-        <p style={{fontSize:12,opacity:0.7,marginTop:10}}>Si ya la tienes instalada o estás en el ordenador, puedes saltar este paso.</p>
-      </div>
-    </div>,
-    /* SLIDE 2 */
-    <div key="s2" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:150,top:'-20px',right:'-10px'}} aria-hidden="true">*</span>
-      <div><div className="wc-eyebrow naranja"><span className="wc-eyebrow-ic" style={{background:'rgba(241,90,36,.12)'}}><Icon name="flame" size={12} color="#F15A24"/></span>Retos</div>
-        <div className="wc-title">Lo importante es escribir.<br/>Y si fallas, hay red.</div></div>
-      <div className="wc-body">
-        <p>Del 0 al 10... ¿cuántas ganas de escribir tienes hoy? ¿Pocas? Reto sencillo, pues. ¿Muchas? Arremángate. También puedes dejar de lado los retos y centrarte en ese proyecto personal que no te puedes sacar de la cabeza.</p>
-        <p>Lo importante es que escribas todos los días que puedas. Que mantengas la racha viva.</p>
-        <p><strong>¿Y si un día no puedes?</strong> Pues para eso están los comodines: ganas uno por cada siete días seguidos y los gastas para salvar la racha cuando faltas un día. La constancia importa, pero aquí venimos a huir de la perfección.</p>
-      </div>
-      <div className="wc-mockup">
-        <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:14}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
-            <div style={{textAlign:'center',padding:'8px 4px'}}><Icon name="flame" size={16} color="#F15A24"/><div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:20,color:'#F15A24',marginTop:4}}>7</div><div style={{font:"500 9px/1 'Source Sans 3'",color:'#a8a399',textTransform:'uppercase',letterSpacing:'.08em',marginTop:3}}>Racha</div></div>
-            <div style={{textAlign:'center',padding:'8px 4px',borderLeft:'1px solid rgba(10,27,61,.07)',borderRight:'1px solid rgba(10,27,61,.07)'}}><Icon name="shield-check" size={16} color="#0A1B3D"/><div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:20,color:'#0A1B3D',marginTop:4}}>2</div><div style={{font:"500 9px/1 'Source Sans 3'",color:'#a8a399',textTransform:'uppercase',letterSpacing:'.08em',marginTop:3}}>Comodines</div></div>
-            <div style={{textAlign:'center',padding:'8px 4px'}}><Icon name="circle-dashed" size={16} color="#0A1B3D"/><div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:20,color:'#0A1B3D',marginTop:4}}>3</div><div style={{font:"500 9px/1 'Source Sans 3'",color:'#a8a399',textTransform:'uppercase',letterSpacing:'.08em',marginTop:3}}>Pendientes</div></div>
-          </div>
-          <div style={{display:'flex',flexDirection:'column',gap:7}}>
-            <div style={{display:'flex',alignItems:'center',gap:9,padding:'8px 10px',background:'#FBF8F0',borderRadius:7}}><Icon name="check-circle" size={14} color="#F15A24"/><div style={{flex:1,height:5,background:'rgba(10,27,61,.1)',borderRadius:2}}/><span style={{font:"600 9px/1 'Source Sans 3'",color:'#F15A24',background:'rgba(241,90,36,.1)',padding:'3px 6px',borderRadius:4,whiteSpace:'nowrap'}}>Diario</span></div>
-            <div style={{display:'flex',alignItems:'center',gap:9,padding:'8px 10px',background:'#FBF8F0',borderRadius:7}}><Icon name="circle" size={14} color="rgba(10,27,61,.3)"/><div style={{flex:1,height:5,background:'rgba(10,27,61,.1)',borderRadius:2,width:'60%'}}/><span style={{font:"600 9px/1 'Source Sans 3'",color:'#5b6478',background:'rgba(10,27,61,.06)',padding:'3px 6px',borderRadius:4,whiteSpace:'nowrap'}}>Semanal</span></div>
-          </div>
-        </div>
-      </div>
-    </div>,
-    /* SLIDE 3 */
-    <div key="s3" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:180,right:'-30px',bottom:'-50px'}} aria-hidden="true">,</span>
-      <div><div className="wc-eyebrow"><span className="wc-eyebrow-ic" style={{background:'rgba(10,27,61,.08)'}}><Icon name="sliders-horizontal" size={12} color="#0A1B3D"/></span>Editores</div>
-        <div className="wc-title">Un editor normal<br/>y cuatro muy especiales.</div></div>
-      <div className="wc-body">
-        <p>El editor estándar te da control total. Pero, si quieres que las palabras fluyan de verdad, puedes elegir entre cuatro modos de escritura pensados para sacarte de tu propia cabeza:</p>
-        <p><strong>Río</strong> — No puedes editar nada. Solo hacia delante.</p>
-        <p><strong>Límite</strong> — Como Río, pero con un número máximo de correcciones por párrafo.</p>
-        <p><strong>Túnel</strong> — Los párrafos anteriores se desvanecen. Solo ves con claridad el que estás escribiendo.</p>
-        <p><strong>Presión</strong> — No pares. Si dejas de escribir, el texto desaparece. Ideal para maratones.</p>
-        <p>Los retos siempre te propondrán un modo, pero puedes cambiar cuando quieras.</p>
-      </div>
-      <div className="wc-mockup">
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>
-          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="wind" size={18} color="#1E9BF0"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#1E9BF0',marginTop:8,marginBottom:5}}>Río</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Solo hacia adelante. Sin editar.</div></div>
-          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="ruler" size={18} color="#1B5FAA"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#1B5FAA',marginTop:8,marginBottom:5}}>Límite</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Correcciones máximas por párrafo.</div></div>
-          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="circle-dashed" size={18} color="#1A6B8A"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#1A6B8A',marginTop:8,marginBottom:5}}>Túnel</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Lo anterior se desvanece.</div></div>
-          <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:12}}><Icon name="timer" size={18} color="#F15A24"/><div style={{font:"700 10px/1 'Source Sans 3'",letterSpacing:'.08em',textTransform:'uppercase',color:'#F15A24',marginTop:8,marginBottom:5}}>Presión</div><div style={{fontSize:11.5,lineHeight:1.5,color:'#8a8578'}}>Para. El texto se borra.</div></div>
-        </div>
-      </div>
-    </div>,
-    /* SLIDE 6 */
-    <div key="s6" className="wc-slide">
-      <span className="wc-slide-signo" style={{fontSize:170,top:'-15px',right:'14px'}} aria-hidden="true">?</span>
-      <div><div className="wc-eyebrow naranja"><span className="wc-eyebrow-ic" style={{background:'rgba(241,90,36,.12)'}}><Icon name="sparkle" size={12} color="#F15A24"/></span>Revisión con IA</div>
-        <div className="wc-title">Tu primer lector<br/>que nunca juzga.</div></div>
-      <div className="wc-body">
-        <p>Si conectas tu API key de Claude, podrás pedirle que revise y comente los textos que subas a tu biblioteca. No para corregirte como un profesor, sino para señalar lo que funciona y lo que podría ir más lejos.</p>
-        <p>Es opcional, completamente privado, y solo actúa cuando tú se lo pides. Piénsalo como un primer lector disponible a las tres de la mañana.</p>
-        <div className="wc-quote">«El primer borrador de todo es una mierda.» <em>— Ernest Hemingway</em></div>
-        <p>Y ahora ya no tienes excusa para no empezar. Nos vemos dentro.</p>
-      </div>
-      <div className="wc-mockup">
-        <div style={{background:'#fff',border:'1px solid rgba(10,27,61,.09)',borderRadius:10,padding:14}}>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <Icon name="key" size={16} color="#0A1B3D"/>
-            <div style={{flex:1}}><div style={{height:5,background:'rgba(10,27,61,.1)',borderRadius:2,width:'60%',marginBottom:4}}/><div style={{height:4,background:'rgba(10,27,61,.07)',borderRadius:2,width:'40%'}}/></div>
-            <span style={{font:"600 10px/1 'Source Sans 3'",color:'#1E9BF0',background:'#eaf5ff',padding:'4px 8px',borderRadius:5}}>Conectado</span>
-          </div>
-        </div>
-      </div>
-    </div>,
-  ];
-
-  return(
-    <div className="wc-overlay">
-      <div className="wc-modal">
-        <div className="wc-progress-track"><div className="wc-progress-fill" style={{width:((cur+1)/TOTAL*100)+'%'}}/></div>
-        <div className="wc-header">
-          <span className="wc-logo">Pretexto</span>
-          <div style={{display:'flex',alignItems:'center',gap:14}}>
-            <ThemeToggle theme={theme} setTheme={setTheme} small/>
-            <span className="wc-counter">{cur+1} / {TOTAL}</span>
-          </div>
-        </div>
-        <div className="wc-slides-wrap">
-          <div className="wc-slides" style={{transform:`translateX(-${cur*100}%)`}}>
-            {slides}
-          </div>
-        </div>
-        <div style={{flexShrink:0}}>
-          <div className="wc-nav">
-            <button className="wc-btn" onClick={()=>cur>0&&go(cur-1)} disabled={cur===0} style={{opacity:cur===0?0.4:1}}>← Anterior</button>
-            <div className="wc-dots">
-              {Array.from({length:TOTAL},(_,i)=>(
-                <div key={i} className={'wc-dot'+(i===cur?' active':'')} onClick={()=>go(i)}/>
-              ))}
-            </div>
-            <button className={'wc-btn '+(cur===TOTAL-1?'advance':'primary')} onClick={handleNext}>{cur===TOTAL-1?'¡Empezar! →':'Siguiente →'}</button>
-          </div>
-          <div className="wc-noshow" onClick={()=>setNoShow(v=>!v)}>
-            <div className={'wc-noshow-check'+(noShow?' checked':'')}>
-              {noShow&&<svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L4 7L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-            </div>
-            <span className="wc-noshow-label">No volver a mostrar esto</span>
-          </div>
-          <div style={{height:14}}/>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-
 /* ─── PASSWORD RESET MODAL ─────────────────────────────────── */
 const PasswordResetModal=({onClose})=>{
   const [password,setPassword]=useState('');
@@ -21792,7 +21734,6 @@ const App=()=>{
   const [cuentoChallenge,setCuentoChallenge]=useState(null);
   const [cuentoWritingMode,setCuentoWritingMode]=useState('literatura');
   const [editingEntry,setEditingEntry]=useState(null);
-  const [showWelcome,setShowWelcome]=useState(false);
   const [showPasswordReset,setShowPasswordReset]=useState(false);
   const [followers,setFollowers]=useState([]);
   const [following,setFollowing]=useState([]);
@@ -22038,7 +21979,6 @@ const App=()=>{
   },[]);
 
   const handleAuth=async(profile)=>{
-    if(localStorage.getItem('pretexto_welcome_seen')!=='true')setShowWelcome(true);
     const session=await DB.getSession();
     if(session?.user){
       setUser({...session.user,...profile});
@@ -22368,7 +22308,16 @@ const App=()=>{
   if(showPasswordReset)return<PasswordResetModal onClose={()=>setShowPasswordReset(false)}/>;
   if(loading)return<div style={{height:'var(--app-height,100dvh)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:MUTED}}>Cargando Pretexto…</div>;
 
-  if(!user)return<AuthScreen onAuth={handleAuth}/>;
+  if(!user){
+    // Primera visita a pretexto.app → el carrusel nuevo, con el registro
+    // real integrado en su última diapositiva. Cualquier otra vez (ya lo
+    // vio antes, o ya tiene cuenta y solo quiere entrar) → la pantalla de
+    // login de siempre, sin las diapositivas por delante.
+    let seenPreauth=true;
+    try{seenPreauth=localStorage.getItem('pretexto_preauth_seen')==='true';}catch(e){}
+    if(!seenPreauth)return<PreLoginOnboarding onAuth={handleAuth}/>;
+    return<AuthScreen onAuth={handleAuth}/>;
+  }
 
   if(SHOW_BETA_DISCLAIMER&&!user.beta_disclaimer_accepted_at)return<BetaDisclaimerModal user={user}
     onAccepted={()=>{Object.assign(user,{beta_disclaimer_accepted_at:new Date().toISOString()});setBetaAcceptedTick(t=>t+1);}}/>;
@@ -22436,7 +22385,6 @@ const App=()=>{
   if(view==='briefing')return<SessionBriefing user={user} energy={energy} library={library} projects={projects} saveProject={saveProject} onStart={startSession} onBack={()=>setView('dashboard')} writingMode={S.get('pretexto:writing_mode')||'literatura'}/>;
 
   return<>
-    {showWelcome&&<WelcomeCarousel onClose={()=>setShowWelcome(false)}/>}
     {showExLibrary&&<ExerciseLibrary user={user} library={library} reflections={reflections} onDelete={deleteEntry} onClose={()=>setShowExLibrary(false)} writingMode={writingMode} setReadingEntry={undefined}/>}
     <Dashboard user={user} library={library} reflections={reflections} projects={projects}
       sharedWithMe={sharedWithMe} onEntrySaved={onEntrySaved}
