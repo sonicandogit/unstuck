@@ -9992,17 +9992,25 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
     const dt=new Date(d);dt.setHours(0,0,0,0);
     const diff=Math.round((ref-dt)/(864e5));
     if(diff<=1){streak++;ref.setTime(dt.getTime());refStr=d;}
-    else if(diff===2){
-      // Hueco de exactamente 1 día: el día que falta es el anterior al último activo.
-      const missing=_shiftDay(refStr,-1);
-      if(bridged.has(missing)){
-        // Ya se pagó con un comodín en su día — se puentea gratis, no se recobra.
-        streak++;ref.setTime(dt.getTime());refStr=d;
-      }else if(wildcardCount>0){
-        streak++;wildcardCount--;wildcardUsed++;newlyBridged.push(missing);
+    else{
+      // Hueco de (diff-1) días entre el último activo y este: antes solo se
+      // podía puentear un hueco de EXACTAMENTE 1 día, así que fallar 2 días
+      // seguidos rompía la racha aunque hubiera comodines de sobra para
+      // cubrirlos uno a uno. Ahora se piden todos los días que faltan y se
+      // paga uno por cada día sin cubrir todavía — si hay suficientes, se
+      // puentea el hueco entero (por grande que sea); si no llegan, la racha
+      // se corta aquí, igual que antes.
+      const gapDays=[];
+      for(let i=1;i<diff;i++)gapDays.push(_shiftDay(refStr,-i));
+      // Los que ya se pagaron con un comodín en su día se puentean gratis,
+      // no se recobran — solo cuentan los que todavía no tienen comodín.
+      const needed=gapDays.filter(g=>!bridged.has(g));
+      if(needed.length<=wildcardCount){
+        streak++;wildcardCount-=needed.length;wildcardUsed+=needed.length;
+        newlyBridged.push(...needed);
         ref.setTime(dt.getTime());refStr=d;
       }else break;
-    }else break;
+    }
   }
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);
   const thisWeek=new Set(activeDayEntries.filter(e=>e.date&&new Date(e.date?.slice(0,10))>=weekAgo).map(e=>e.date?.slice(0,10))).size;
