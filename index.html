@@ -4889,6 +4889,14 @@ const DB = {
     const { error } = await getSB().rpc('admin_unhide_entry', { p_target_id: targetId });
     if (error) throw error;
   },
+  // Aviso "por qué se retiró/restringió" al autor (obligación del Reglamento
+  // de Servicios Digitales) — deliberadamente separado de admin_resolve_report
+  // en vez de meterlo ahí dentro: así no hace falta tocar esa función para
+  // añadir este aviso, ni arriesgarse a romper algo que ya funciona.
+  notifyContentHidden: async (targetId, reasons) => {
+    const { error } = await getSB().rpc('notify_content_hidden', { p_target_id: targetId, p_reasons: reasons || [] });
+    if (error) throw error;
+  },
   followUser: async (followerId, followingId) => {
     const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
     if (error && !error.message?.includes('duplicate')) throw error;
@@ -10533,7 +10541,15 @@ const ModerationScreen=({onClose})=>{
     setActingOn(key);
     try{
       if(action==='unhide')await DB.adminUnhideEntry(item.target_id);
-      else await DB.adminResolveReport(item.target_type,item.target_id,action);
+      else{
+        await DB.adminResolveReport(item.target_type,item.target_id,action);
+        // Solo al ocultar de verdad algo, no al descartar un reporte ni al
+        // marcarlo resuelto sin ocultar nada — y solo para textos, nunca para
+        // la ficha de un usuario reportado (no hay "contenido" que explicar ahí).
+        if(action==='hide'&&item.target_type==='entry'){
+          DB.notifyContentHidden(item.target_id,item.reasons).catch(e=>console.error('notifyContentHidden:',e));
+        }
+      }
       await load();
     }catch(e){console.error('moderation action:',e);alert('No se pudo aplicar la acción: '+e.message);}
     setActingOn(null);
@@ -21224,6 +21240,7 @@ const NOTIF_ICON={
   collective_follow_update:'scroll',
   duet_follow_invite:'eye',
   duet_follow_update:'hands-clapping',
+  content_hidden:'eye-slash',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
@@ -21236,6 +21253,7 @@ const NOTIF_COLOR={
   collective_follow_update:MUTED,
   duet_follow_invite:AZULMED,
   duet_follow_update:MUTED,
+  content_hidden:'#A82020',
 };
 
 const relNotifTime=iso=>{
@@ -21721,7 +21739,7 @@ const TermsModal=({onClose})=>(
           ['2. El servicio','Pretexto es una herramienta de escritura creativa. Proporcionamos el servicio "tal cual" y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
           ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña. Notifícanos si detectas uso no autorizado.'],
           ['4. Propiedad de tus textos','Los textos que escribes en Pretexto son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo.'],
-          ['5. Uso aceptable','No puedes usar Pretexto para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar contenido que viole estas normas.'],
+          ['5. Uso aceptable','No puedes usar Pretexto para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar o restringir el acceso a contenido que viole estas normas. Puedes denunciar contenido ilegal o que incumpla estas normas con el botón "Reportar" que acompaña a cada texto y cada perfil. Si ocultamos uno de tus textos, te avisaremos y te diremos el motivo.'],
           ['6. Privacidad de los textos','Los textos marcados como "Privado" no los ve ningún otro usuario — está reforzado en el servidor, no solo escondido en la pantalla. Como en la mayoría de apps que no ofrecen cifrado de extremo a extremo, quien administra Pretexto podría acceder técnicamente a los datos en bruto, pero no se comparten con nadie más. Los marcados como "Amigos" son accesibles por tus seguidores mutuos. Los marcados como "Abierto" son visibles para todos los usuarios registrados.'],
           ['7. API de Claude','Si usas la función de feedback de Claude, aceptas los términos de uso de Anthropic. Pretexto actúa como intermediario y no almacena el contenido procesado.'],
           ['8. Limitación de responsabilidad','Pretexto no garantiza la disponibilidad continua del servicio. No somos responsables de la pérdida de datos. Recomendamos hacer backups periódicos con la función incluida en la app.'],
