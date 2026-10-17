@@ -82,6 +82,17 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,500;1,600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<meta name="description" content="Pretexto es una app de escritura creativa diaria: retos, rachas, modos de escritura y duetos a cuatro manos, incluso con IA. Un poco cada día.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://pretexto.app/">
+<meta property="og:title" content="Pretexto — escritura creativa diaria">
+<meta property="og:description" content="Retos, rachas, modos de escritura y duetos a cuatro manos, incluso con IA. Un poco cada día.">
+<meta property="og:image" content="https://pretexto.app/pretexto-icon-192.png">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Pretexto — escritura creativa diaria">
+<meta name="twitter:description" content="Retos, rachas, modos de escritura y duetos a cuatro manos, incluso con IA. Un poco cada día.">
+<meta name="twitter:image" content="https://pretexto.app/pretexto-icon-192.png">
 <link rel="icon" type="image/png" href="pretexto-icon-192.png">
 <link rel="apple-touch-icon" href="pretexto-icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -10769,6 +10780,11 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
   const [legalOk,setLegalOk]=useState(false);
+  // Declaración de edad mínima (LOPDGDD: 14 años en España para consentir
+  // por cuenta propia) — autodeclarada, igual que legalOk: no se verifica
+  // ni se guarda en la base de datos, solo bloquea el registro si no se
+  // marca, igual que ya hacía la casilla legal.
+  const [ageOk,setAgeOk]=useState(false);
   const [showPrivacy,setShowPrivacy]=useState(false);
   const [showTerms,setShowTerms]=useState(false);
   useTheme(); // aplica el tema guardado (si vuelves y ya tenías oscuro, por ejemplo) — sin selector visible aquí, no pinta nada antes de entrar
@@ -10785,6 +10801,7 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
     if(mode==='signup'&&!name.trim()){setError('Añade tu nombre');return;}
     if(mode==='signup'&&password.length<6){setError('La contraseña debe tener al menos 6 caracteres');return;}
     if(mode==='signup'&&!legalOk){setError('Debes aceptar la política de privacidad y los términos de servicio');return;}
+    if(mode==='signup'&&!ageOk){setError('Debes confirmar que tienes 14 años o más');return;}
     setLoading(true);setError('');
     try{
       if(mode==='signup'){
@@ -10845,6 +10862,11 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
 
     {error&&<div style={{fontSize:12.5,color:DANGER,marginBottom:16,padding:'9px 12px',background:'rgba(197,34,31,0.07)',borderRadius:8,border:'1px solid rgba(197,34,31,0.2)'}}>{error}</div>}
 
+    {isSignup&&<label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',marginBottom:10}}>
+      <input type="checkbox" id="age-check" checked={ageOk} onChange={e=>setAgeOk(e.target.checked)} style={{marginTop:2,flexShrink:0,cursor:'pointer'}}/>
+      <span style={{fontSize:11.5,color:MUTED,lineHeight:1.6}}>Confirmo que tengo 14 años o más.</span>
+    </label>}
+
     {isSignup&&<label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',marginBottom:18}}>
       <input type="checkbox" id="legal-check" checked={legalOk} onChange={e=>setLegalOk(e.target.checked)} style={{marginTop:2,flexShrink:0,cursor:'pointer'}}/>
       <span style={{fontSize:11.5,color:MUTED,lineHeight:1.6}}>
@@ -10857,6 +10879,9 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
 
     {/* CTA */}
     <button onClick={()=>{
+      if(isSignup&&!document.getElementById('age-check')?.checked){
+        setError('Debes confirmar que tienes 14 años o más');return;
+      }
       if(isSignup&&!document.getElementById('legal-check')?.checked){
         setError('Debes aceptar la Política de Privacidad y los Términos de Servicio');return;
       }
@@ -11822,9 +11847,10 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
                   <span style={{width:20,textAlign:'center',display:'inline-flex',justifyContent:'center'}}><Icon name="sign-out" size={16} color={MUTED}/></span>
                   <span style={{fontSize:12,color:MUTED}}>Cerrar sesión</span>
                 </button>
-                <div style={{padding:'8px 14px',display:'flex',gap:12}}>
+                <div style={{padding:'8px 14px',display:'flex',gap:12,flexWrap:'wrap'}}>
                   <button onClick={()=>{setShowPrivacyModal(true);setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Privacidad</button>
                   <button onClick={()=>{setShowTermsModal(true);setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Términos</button>
+                  <button onClick={()=>{window.location.href='mailto:pretextoapp@gmail.com?subject='+encodeURIComponent('Ayuda con Pretexto');setShowUserMenu(false);}} style={{background:'transparent',border:'none',fontSize:10,color:FAINT,cursor:'pointer',padding:0}}>Ayuda y soporte</button>
                 </div>
 
               </div>
@@ -17880,7 +17906,7 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
                 <div style={{width:32,height:32,borderRadius:'50%',background:NAVY,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                   <Icon name="sparkle" size={16} color="#fff"/>
                 </div>
-                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT}}>Claude</div><div style={{fontSize:11,color:MUTED}}>Responde al instante, en cada turno</div></div>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:500,color:TXT,display:'flex',alignItems:'center',gap:6}}>Claude<span style={{fontSize:9.5,fontWeight:600,color:AZUL,background:'rgba(30,155,240,0.12)',borderRadius:4,padding:'1.5px 6px',letterSpacing:'.03em'}}>IA</span></div><div style={{fontSize:11,color:MUTED}}>Inteligencia artificial — responde al instante, en cada turno</div></div>
                 <button onClick={()=>setWithClaude(false)} style={{background:'transparent',border:'none',color:MUTED,cursor:'pointer',fontSize:16}}>×</button>
               </div>
             ):recipient?(
@@ -17907,7 +17933,7 @@ const SendDuetModal=({user,onClose,onCreated,presetRecipient=null})=>{
                 <button onClick={()=>setWithClaude(true)}
                   style={{display:'flex',alignItems:'center',gap:8,width:'100%',marginTop:8,background:'transparent',border:'1px dashed rgba(30,155,240,0.35)',borderRadius:9,padding:'9px 12px',cursor:'pointer',textAlign:'left'}}>
                   <Icon name="sparkle" size={15} color={AZUL}/>
-                  <span style={{fontSize:12.5,fontWeight:500,color:AZUL}}>O escribe con Claude</span>
+                  <span style={{fontSize:12.5,fontWeight:500,color:AZUL}}>O escribe con Claude <span style={{fontWeight:400,color:MUTED}}>— inteligencia artificial, no una persona</span></span>
                 </button>
               </div>
             )}
@@ -18976,7 +19002,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
           {duet.status==='finished'&&<div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:'rgba(30,155,240,0.3)',color:'#A5A0E8',flexShrink:0}}>Terminado</div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-          <span style={{fontSize:11,color:'rgba(255,255,255,0.5)',flexShrink:0}}>con {otherName} · mín. {duet.min_words} pal./turno</span>
+          <span style={{fontSize:11,color:'rgba(255,255,255,0.5)',flexShrink:0,display:'flex',alignItems:'center',gap:5}}>con {otherName}{duet.is_ai_partner&&<span style={{fontSize:9,fontWeight:600,color:'#fff',background:'rgba(30,155,240,0.35)',borderRadius:4,padding:'1px 5px',letterSpacing:'.03em'}}>IA</span>} · mín. {duet.min_words} pal./turno</span>
           <div style={{flex:1}}/>
           <FollowersIndicator entityId={duet.id} entityType="duet" color="rgba(255,255,255,0.75)" canSeeIdentities={user.id===duet.user_a||user.id===duet.user_b} user={user}/>
           <button onClick={()=>setShowInviteFollower(true)} title="Invitar a alguien a seguir"
@@ -20803,6 +20829,7 @@ const DuetReaderView=({user,duet,onClose,onUnfollowed})=>{
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
                 <div style={{width:4,height:4,borderRadius:'50%',background:AZUL}}/>
                 <span style={{fontSize:10,fontWeight:600,color:AZULMED}}>{authorName(t)}</span>
+                {t.is_ai&&<span style={{fontSize:8.5,fontWeight:600,color:AZULMED,background:'rgba(30,155,240,0.12)',borderRadius:4,padding:'1px 5px',letterSpacing:'.03em'}}>IA</span>}
                 <span style={{fontSize:9,color:FAINT}}>· Parte {t.turn_number}</span>
               </div>
               {t.passed?(
@@ -21738,7 +21765,7 @@ const TermsModal=({onClose})=>(
           ['1. Aceptación','Al crear una cuenta en Pretexto, aceptas estos términos. Si no estás de acuerdo, no uses el servicio.'],
           ['2. El servicio','Pretexto es una herramienta de escritura creativa. Proporcionamos el servicio "tal cual" y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
           ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña. Notifícanos si detectas uso no autorizado.'],
-          ['4. Propiedad de tus textos','Los textos que escribes en Pretexto son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo.'],
+          ['4. Propiedad de tus textos y de las fotos de los retos','Los textos que escribes en Pretexto son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo. Las fotografías de los retos fotográficos las selecciona Pretexto; se usan solo como punto de partida para escribir y no te otorgan ningún derecho sobre la fotografía en sí — el texto que escribas a partir de ella sigue siendo tuyo, igual que cualquier otro.'],
           ['5. Uso aceptable','No puedes usar Pretexto para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar o restringir el acceso a contenido que viole estas normas. Puedes denunciar contenido ilegal o que incumpla estas normas con el botón "Reportar" que acompaña a cada texto y cada perfil. Si ocultamos uno de tus textos, te avisaremos y te diremos el motivo.'],
           ['6. Privacidad de los textos','Los textos marcados como "Privado" no los ve ningún otro usuario — está reforzado en el servidor, no solo escondido en la pantalla. Como en la mayoría de apps que no ofrecen cifrado de extremo a extremo, quien administra Pretexto podría acceder técnicamente a los datos en bruto, pero no se comparten con nadie más. Los marcados como "Amigos" son accesibles por tus seguidores mutuos. Los marcados como "Abierto" son visibles para todos los usuarios registrados.'],
           ['7. API de Claude','Si usas la función de feedback de Claude, aceptas los términos de uso de Anthropic. Pretexto actúa como intermediario y no almacena el contenido procesado.'],
