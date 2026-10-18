@@ -19145,7 +19145,37 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         {loading?<div style={{textAlign:'center',color:MUTED,fontSize:13,padding:40}}>Cargando…</div>:(
           <>
             {/* Previous text (read-only) */}
-            {duet.full_html
+            {/* Turno a turno, con el nombre de quien lo escribió encima y una
+                línea separadora entre bloques — igual que en el relato
+                colectivo. Antes se pintaba duet.full_html entero, todo el
+                texto pegado en un solo bloque sin saber quién había escrito
+                qué. Si por lo que sea no hay turnos cargados pero sí
+                full_html (relato antiguo), se cae al bloque único de antes. */}
+            {turns.length>0
+              ?<div style={{marginBottom:20,paddingBottom:myTurn?20:0,borderBottom:myTurn?'1px dashed rgba(30,155,240,0.3)':'none'}}>
+                {turns.map((t,i)=>{
+                  const who=t.is_ai?'Claude':(!t.user_id?'Cuenta eliminada':(t.user_id===duet.user_a?(duet.name_a||'?'):(duet.name_b||'?')));
+                  return(
+                    <div key={t.id} style={{marginBottom:i<turns.length-1?24:0,paddingBottom:i<turns.length-1?24:0,borderBottom:i<turns.length-1?'1px dashed '+BDR:'none'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:10}}>
+                        <div style={{width:4,height:4,borderRadius:'50%',background:AZUL}}/>
+                        <span style={{fontSize:10,fontWeight:600,color:AZULMED}}>{who}</span>
+                        {t.is_ai&&<span style={{fontSize:8.5,fontWeight:600,color:AZULMED,background:'rgba(30,155,240,0.12)',borderRadius:4,padding:'1px 5px',letterSpacing:'.03em'}}>IA</span>}
+                        <span style={{fontSize:9,color:FAINT}}>· Parte {t.turn_number}</span>
+                      </div>
+                      {t.passed?(
+                        <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:FAINT,fontStyle:'italic'}}>
+                          <Icon name="arrow-bend-up-right" size={13} color={FAINT}/>{who} pasó su turno esta vez.
+                        </div>
+                      ):(
+                        <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:'rgba(26,25,22,0.75)'}}
+                          dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              :duet.full_html
               ?<div style={{fontSize:16,lineHeight:1.85,color:'rgba(26,25,22,0.75)',fontFamily:'"Playfair Display",Georgia,serif',marginBottom:20,paddingBottom:20,borderBottom:myTurn?'1px dashed rgba(30,155,240,0.3)':'none'}}
                 dangerouslySetInnerHTML={{__html:sanitizeHtml(duet.full_html)}}/>
               :<div style={{fontSize:13,color:FAINT,marginBottom:20,fontStyle:'italic'}}>El relato está en blanco. {myTurn?'Tú lo empiezas.':''}</div>}
@@ -20868,7 +20898,7 @@ const DuetReaderView=({user,duet,onClose,onUnfollowed})=>{
     }).catch(e=>{console.error('DuetReaderView getDuetTurns:',e);setLoading(false);});
   },[duet.id]);
 
-  const authorName=t=>t.is_ai?'Claude':(t.user_id===duet.user_a?(duet.name_a||'?'):(duet.name_b||'?'));
+  const authorName=t=>t.is_ai?'Claude':(!t.user_id?'Cuenta eliminada':(t.user_id===duet.user_a?(duet.name_a||'?'):(duet.name_b||'?')));
 
   const handleReaction=async(turnId,emoji)=>{
     try{
