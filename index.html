@@ -4227,9 +4227,18 @@ Una vez terminado, pregúntate: ¿cuál de las convenciones que usé es la que m
 const DB = {
   // Auth
   signUp: async (email, password, meta) => {
-    const { data, error } = await getSB().auth.signUp({ email, password, options: { data: meta } });
+    // emailRedirectTo: si en Supabase está activado "Confirm email", el enlace
+    // del correo de confirmación devuelve a la persona aquí, ya con la sesión
+    // iniciada (el SDK la recoge solo de la URL al cargar).
+    const emailRedirectTo = window.location.origin + window.location.pathname;
+    const { data, error } = await getSB().auth.signUp({ email, password, options: { data: meta, emailRedirectTo } });
     if (error) throw error;
     return data;
+  },
+  resendConfirmation: async (email) => {
+    const emailRedirectTo = window.location.origin + window.location.pathname;
+    const { error } = await getSB().auth.resend({ type: 'signup', email, options: { emailRedirectTo } });
+    if (error) throw error;
   },
   signIn: async (email, password) => {
     const { data, error } = await getSB().auth.signInWithPassword({ email, password });
@@ -10781,6 +10790,13 @@ const BetaDisclaimerModal=({user,onAccepted})=>{
 const AuthForm=({onAuth,defaultMode='login'})=>{
   const [mode,setMode]=useState(defaultMode);
   const [recoverSent,setRecoverSent]=useState(false); // 'login' | 'signup' | 'recover'
+  // Verificación de email: si en Supabase está activado "Confirm email", signUp
+  // devuelve el usuario pero SIN sesión — hasta que pulse el enlace del correo.
+  // confirmEmail guarda a qué dirección se envió, para mostrar el aviso y poder
+  // reenviarlo. Si "Confirm email" está desactivado, esto nunca se activa y el
+  // registro entra directo como siempre.
+  const [confirmEmail,setConfirmEmail]=useState(null);
+  const [resendMsg,setResendMsg]=useState('');
   const [name,setName]=useState('');
   const [email,setEmail]=useState('');
   const [password,setPassword]=useState('');
@@ -10815,8 +10831,11 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
       if(mode==='signup'){
         const c=USER_COLORS[ci];
         const meta={name:name.trim(),color_idx:ci,accent:c.accent,bg:c.bg,text_col:c.txt,initials:initials(name)};
-        const {user}=await DB.signUp(email.trim(),password,meta);
-        if(user){
+        const {user,session}=await DB.signUp(email.trim(),password,meta);
+        if(user&&!session){
+          // Falta confirmar el correo — no hay sesión todavía, no se entra.
+          setConfirmEmail(email.trim());setResendMsg('');
+        }else if(user){
           await new Promise(r=>setTimeout(r,800));
           const profile=await DB.getProfile(user.id);
           onAuth(profile||{id:user.id,...meta});
@@ -10829,11 +10848,34 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
         }
       }
     }catch(e){
-      setError(e.message==='Invalid login credentials'?'Email o contraseña incorrectos':e.message);
+      if(e.message==='Email not confirmed'){
+        // Intentó entrar sin haber pulsado el enlace del correo: misma pantalla de aviso, con opción de reenviar.
+        setConfirmEmail(email.trim());setResendMsg('');setError('');
+      }else{
+        setError(e.message==='Invalid login credentials'?'Email o contraseña incorrectos':e.message);
+      }
     }finally{setLoading(false)}
   };
 
+  const resendConfirm=async()=>{
+    setResendMsg('');
+    try{await DB.resendConfirmation(confirmEmail);setResendMsg('✓ Enlace reenviado. Revisa también el spam.');}
+    catch(e){setResendMsg('No pudimos reenviarlo ahora mismo. Espera un minuto e inténtalo de nuevo.');}
+  };
+
   const isLogin=mode==='login',isSignup=mode==='signup',isRecover=mode==='recover';
+
+  if(confirmEmail)return(
+    <div style={{textAlign:'center',padding:'8px 0'}}>
+      <div style={{fontSize:17,fontWeight:700,color:TXT,marginBottom:10,fontFamily:'"Playfair Display",serif'}}>Confirma tu correo</div>
+      <div style={{fontSize:13.5,color:MUTED,lineHeight:1.65,marginBottom:16}}>
+        Te hemos enviado un enlace a <b style={{color:TXT}}>{confirmEmail}</b>. Púlsalo para activar tu cuenta y entrarás directamente. Revisa también el spam.
+      </div>
+      {resendMsg&&<div style={{fontSize:12.5,color:resendMsg.startsWith('✓')?AZUL:'#C5221F',marginBottom:12}}>{resendMsg}</div>}
+      <button onClick={resendConfirm} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'9px 16px',fontSize:13,color:TXT,cursor:'pointer',marginBottom:14}}>Reenviar el enlace</button>
+      <div><button onClick={()=>{setConfirmEmail(null);setMode('login');setError('');}} style={{background:'transparent',border:'none',color:AZULMED,cursor:'pointer',fontSize:13.5,fontWeight:600}}>← Volver al inicio de sesión</button></div>
+    </div>
+  );
 
   return(
     <>
