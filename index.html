@@ -4908,6 +4908,14 @@ const DB = {
     const { error } = await getSB().rpc('notify_content_hidden', { p_target_id: targetId, p_reasons: reasons || [] });
     if (error) throw error;
   },
+  // Borrado de cuenta en self-service (RGPD, derecho de supresión). La función
+  // SQL (delete_my_account, ver ELIMINAR_CUENTA.sql) solo puede borrar la
+  // cuenta de quien la llama — usa auth.uid() internamente, no recibe ningún
+  // id por parámetro, así que no hay forma de que un usuario borre a otro.
+  deleteMyAccount: async () => {
+    const { error } = await getSB().rpc('delete_my_account');
+    if (error) throw error;
+  },
   followUser: async (followerId, followingId) => {
     const { error } = await getSB().from('follows').insert({ follower_id: followerId, following_id: followingId });
     if (error && !error.message?.includes('duplicate')) throw error;
@@ -11614,7 +11622,7 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
           </div>
         </div>
       )}
-      {showProfileSettings&&<ProfileSettings user={user} onClose={()=>setShowProfileSettings(false)} onSave={updated=>{Object.assign(user,updated);setShowProfileSettings(false);}}/>}
+      {showProfileSettings&&<ProfileSettings user={user} onClose={()=>setShowProfileSettings(false)} onSave={updated=>{Object.assign(user,updated);setShowProfileSettings(false);}} onAccountDeleted={()=>{setShowProfileSettings(false);onLogout();}}/>}
       {showPrivacyModal&&<PrivacyModal onClose={()=>setShowPrivacyModal(false)}/>}
       {showTermsModal&&<TermsModal onClose={()=>setShowTermsModal(false)}/>}
       {showAmigos&&<AmigosScreen user={user} onClose={()=>setShowAmigos(false)}/>}
@@ -16268,7 +16276,7 @@ const UserAvatar=({user,size=36,onClick})=>{
 };
 
 /* ─── PROFILE SETTINGS ───────────────────────────── */
-const ProfileSettings=({user,onClose,onSave})=>{
+const ProfileSettings=({user,onClose,onSave,onAccountDeleted})=>{
   const [avatar,setAvatar]=useState(user.avatar||null);
   const [name,setName]=useState(user.name||'');
   const [username,setUsername]=useState(user.username||'');
@@ -16277,6 +16285,19 @@ const ProfileSettings=({user,onClose,onSave})=>{
   const [usernameMsg,setUsernameMsg]=useState('');
   const [saving,setSaving]=useState(false);
   const [err,setErr]=useState('');
+  const [showDeleteConfirm,setShowDeleteConfirm]=useState(false);
+  const [deleteTyped,setDeleteTyped]=useState('');
+  const [deleting,setDeleting]=useState(false);
+  const [deleteErr,setDeleteErr]=useState('');
+
+  const confirmDeleteAccount=async()=>{
+    if(deleteTyped.trim().toLowerCase()!=='eliminar')return;
+    setDeleting(true);setDeleteErr('');
+    try{
+      await DB.deleteMyAccount();
+      onAccountDeleted&&onAccountDeleted();
+    }catch(e){setDeleteErr(e.message||'No se pudo eliminar la cuenta. Inténtalo de nuevo o escríbenos a pretextoapp@gmail.com.');setDeleting(false);}
+  };
 
   const pickAvatar=e=>{
     const file=e.target.files[0];if(!file)return;
@@ -16370,8 +16391,41 @@ const ProfileSettings=({user,onClose,onSave})=>{
             <Btn onClick={onClose} variant="ghost" full>Cancelar</Btn>
             <Btn onClick={save} variant="primary" disabled={saving||!name.trim()} full>{saving?'Guardando…':'Guardar cambios'}</Btn>
           </div>
+
+          {/* Zona de peligro */}
+          <div style={{marginTop:8,paddingTop:16,borderTop:'1px solid '+BDR}}>
+            <div style={{fontSize:11,fontWeight:600,color:'#A82020',marginBottom:8,letterSpacing:0.3,textTransform:'uppercase'}}>Zona de peligro</div>
+            <button onClick={()=>{setShowDeleteConfirm(true);setDeleteTyped('');setDeleteErr('');}} style={{background:'transparent',border:'1px solid rgba(168,32,32,0.35)',borderRadius:9,padding:'9px 14px',fontSize:12.5,color:'#A82020',cursor:'pointer',width:'100%'}}>
+              Eliminar mi cuenta
+            </button>
+          </div>
         </div>
       </div>
+
+      {showDeleteConfirm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.6)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget&&!deleting)setShowDeleteConfirm(false);}}>
+          <div className="fi" style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:420,padding:24,boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
+            <div style={{fontSize:16,fontWeight:700,color:'#A82020',marginBottom:10,fontFamily:'"Playfair Display",serif'}}>Esto no se puede deshacer</div>
+            <div style={{fontSize:12.5,color:TXT,lineHeight:1.75,marginBottom:12}}>
+              Se eliminará tu cuenta y todo lo asociado a ella: tus textos, reflexiones, proyectos, comentarios, valoraciones, seguidores y a quien sigues.
+            </div>
+            <div style={{fontSize:12.5,color:TXT,lineHeight:1.75,marginBottom:14}}>
+              Si has escrito dentro de un dueto, un colectivo o una cadena junto a otra persona, tu parte del texto se borra igual — en su lugar queda solo un aviso de que ese fragmento lo escribió alguien que eliminó su cuenta, para que el resto de la pieza se pueda seguir leyendo.
+            </div>
+            <div style={{fontSize:11.5,color:MUTED,marginBottom:16}}>
+              Escribe <b>eliminar</b> para confirmar.
+            </div>
+            <input type="text" value={deleteTyped} onChange={e=>setDeleteTyped(e.target.value)} placeholder="eliminar" disabled={deleting} style={{width:'100%',marginBottom:14}}/>
+            {deleteErr&&<div style={{fontSize:12,color:'#C5221F',padding:'8px 11px',background:'rgba(197,34,31,0.06)',borderRadius:7,marginBottom:14}}>{deleteErr}</div>}
+            <div style={{display:'flex',gap:8}}>
+              <Btn onClick={()=>setShowDeleteConfirm(false)} variant="ghost" full disabled={deleting}>Cancelar</Btn>
+              <button onClick={confirmDeleteAccount} disabled={deleting||deleteTyped.trim().toLowerCase()!=='eliminar'} style={{flex:1,background:deleteTyped.trim().toLowerCase()==='eliminar'?'#A82020':'rgba(168,32,32,0.3)',color:'#fff',border:'none',borderRadius:9,padding:'10px 14px',fontSize:13,fontWeight:600,cursor:deleteTyped.trim().toLowerCase()==='eliminar'?'pointer':'default'}}>
+                {deleting?'Eliminando…':'Eliminar mi cuenta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
