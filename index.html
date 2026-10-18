@@ -4917,6 +4917,11 @@ const DB = {
     const { error } = await getSB().rpc('notify_content_hidden', { p_target_id: targetId, p_reasons: reasons || [] });
     if (error) throw error;
   },
+  // Aviso al autor cuando un admin deshace la ocultación de su texto.
+  notifyContentRestored: async (targetId) => {
+    const { error } = await getSB().rpc('notify_content_restored', { p_target_id: targetId });
+    if (error) throw error;
+  },
   // Borrado de cuenta en self-service (RGPD, derecho de supresión). La función
   // SQL (delete_my_account, ver ELIMINAR_CUENTA.sql) solo puede borrar la
   // cuenta de quien la llama — usa auth.uid() internamente, no recibe ningún
@@ -10568,8 +10573,10 @@ const ModerationScreen=({onClose})=>{
     const key=item.target_type+':'+item.target_id;
     setActingOn(key);
     try{
-      if(action==='unhide')await DB.adminUnhideEntry(item.target_id);
-      else{
+      if(action==='unhide'){
+        await DB.adminUnhideEntry(item.target_id);
+        DB.notifyContentRestored(item.target_id).catch(e=>console.error('notifyContentRestored:',e));
+      }else{
         await DB.adminResolveReport(item.target_type,item.target_id,action);
         // Solo al ocultar de verdad algo, no al descartar un reporte ni al
         // marcarlo resuelto sin ocultar nada — y solo para textos, nunca para
@@ -21394,6 +21401,7 @@ const NOTIF_ICON={
   duet_follow_invite:'eye',
   duet_follow_update:'hands-clapping',
   content_hidden:'eye-slash',
+  content_restored:'eye',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
@@ -21407,6 +21415,7 @@ const NOTIF_COLOR={
   duet_follow_invite:AZULMED,
   duet_follow_update:MUTED,
   content_hidden:'#A82020',
+  content_restored:AZUL,
 };
 
 const relNotifTime=iso=>{
@@ -21477,6 +21486,15 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     return()=>clearInterval(t);
   },[user.id]);
 
+  // Avisos de moderación (texto ocultado / restaurado): no llevan a ninguna
+  // pantalla, así que se abren en una ventana propia con el mensaje entero y,
+  // si se ocultó, la posibilidad de reclamar.
+  const [notice,setNotice]=useState(null);
+  const [noticeTitle,setNoticeTitle]=useState('');
+  const openNotice=(n)=>{
+    setNotice(n);setNoticeTitle('');
+    if(n.entity_id){DB.getEntryById(n.entity_id).then(e=>{if(e&&e.title)setNoticeTitle(e.title);}).catch(()=>{});}
+  };
   const handleClick=async(n)=>{
     setOpen(false);
     if(!n.read){
@@ -21484,6 +21502,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
       setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
       setUnread(prev=>Math.max(0,prev-1));
     }
+    if(n.type==='content_hidden'||n.type==='content_restored'){openNotice(n);return;}
     onNavigate&&onNavigate(n);
   };
 
@@ -21575,6 +21594,43 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
           ))}
         </div>
       </>}
+      {notice&&(()=>{
+        const hidden=notice.type==='content_hidden';
+        const reasonsMatch=hidden&&notice.body?String(notice.body).match(/Lo reportaron por: ([^.]*)\./):null;
+        const reasonsTxt=reasonsMatch?reasonsMatch[1]:'';
+        const quoted=noticeTitle?('«'+noticeTitle+'»'):'';
+        const subject='Reclamación: texto ocultado'+(quoted?(' — '+quoted):'');
+        const mailBody='Hola,\n\nQuiero reclamar la decisión de ocultar mi texto'+(quoted?(' '+quoted):'')+' (identificador: '+(notice.entity_id||'')+').\n\nMis motivos:\n\n\n\nGracias.';
+        const pStyle={fontSize:13,color:TXT,lineHeight:1.6,margin:'0 0 10px'};
+        return(
+          <div onClick={()=>setNotice(null)} style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:450,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:400,maxHeight:'85vh',overflowY:'auto',padding:'24px 22px',fontFamily:"'Source Sans 3',sans-serif"}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                <div style={{width:34,height:34,borderRadius:'50%',background:(NOTIF_COLOR[notice.type]||AZUL)+'18',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                  <Icon name={NOTIF_ICON[notice.type]||'bell'} size={16} color={NOTIF_COLOR[notice.type]||AZUL}/>
+                </div>
+                <div style={{fontFamily:'"Playfair Display",serif',fontWeight:700,fontSize:16,color:TXT,lineHeight:1.3}}>{notice.title}</div>
+              </div>
+              {quoted&&<div style={{fontSize:13,color:MUTED,fontStyle:'italic',marginBottom:12}}>{quoted}</div>}
+              {hidden?(<>
+                <p style={pStyle}>Otras personas reportaron este texto y, tras revisarlo, lo hemos ocultado para el resto de usuarios.</p>
+                {reasonsTxt&&<p style={pStyle}><b>Motivo del reporte:</b> {reasonsTxt}.</p>}
+                <p style={pStyle}>No hemos borrado nada: el texto sigue en tu Biblioteca y puedes leerlo, editarlo y exportarlo.</p>
+                <p style={pStyle}>Si crees que ha sido un error, puedes reclamar. Revisaremos tu caso y te responderemos por correo.</p>
+              </>):(
+                <p style={pStyle}>{notice.body}</p>
+              )}
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:16}}>
+                {hidden&&<button onClick={()=>{window.location.href='mailto:pretextoapp@gmail.com?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(mailBody);}}
+                  style={{background:AZUL,border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Reclamar</button>}
+                <button onClick={()=>setNotice(null)}
+                  style={{background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'9px 18px',fontSize:13,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Cerrar</button>
+              </div>
+              {hidden&&<div style={{fontSize:11,color:FAINT,marginTop:12,lineHeight:1.5}}>Se abrirá tu correo con el mensaje ya preparado, dirigido a pretextoapp@gmail.com.</div>}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
