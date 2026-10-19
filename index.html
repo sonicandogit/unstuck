@@ -389,18 +389,22 @@ input[type=text]:focus,input[type=number]:focus,textarea:focus{border-color:#1E9
   .hamburger-btn{display:none !important;}
 }
 </style>
-<!-- Google Analytics (consent mode — only fires after user accepts) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-40469E0V68"></script>
+<!-- Google Analytics: el script de Google NO se descarga hasta que la persona acepta las cookies
+     de analítica (ver Root). Antes de eso, gtag es solo una función que acumula en dataLayer. -->
 <script>
   window.dataLayer=window.dataLayer||[];
   function gtag(){dataLayer.push(arguments);}
-  gtag('js',new Date());
-  gtag('config','G-40469E0V68',{
-    anonymize_ip:true,
-    client_storage:'none',
-    analytics_storage:'denied',
-    ad_storage:'denied',
-  });
+  gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});
+  window.__loadGA=function(){
+    if(window.__gaLoaded)return;
+    window.__gaLoaded=true;
+    gtag('js',new Date());
+    gtag('config','G-40469E0V68',{anonymize_ip:true,client_storage:'none'});
+    var s=document.createElement('script');
+    s.async=true;
+    s.src='https://www.googletagmanager.com/gtag/js?id=G-40469E0V68';
+    document.head.appendChild(s);
+  };
 </script>
 </head>
 <body>
@@ -1988,7 +1992,7 @@ const getSB = () => {
 // resultante (p.ej. "España"); la IP en sí nunca se almacena ni se envía a
 // nadie más que al propio servicio de geolocalización, y esa llamada no
 // pasa por nuestro servidor — la hace directamente el navegador. Ver la
-// Política de Privacidad, sección "¿Qué datos recogemos?". Si falla (sin
+// Política de privacidad, sección "¿Qué datos recogemos?". Si falla (sin
 // red, servicio caído, bloqueado por el navegador), se ignora en silencio
 // y se reintentará en la próxima sesión.
 const captureCountryIfMissing = async (uid, alreadyHasCountry) => {
@@ -10390,7 +10394,7 @@ const CheckModeIntroModal=({modeId,onClose})=>{
         </div>
         <div style={{fontSize:14,color:MUTED,lineHeight:1.55,marginBottom:14}}>{m.full}</div>
         <div style={{fontSize:12,color:MUTED,lineHeight:1.5,marginBottom:22,background:'rgba(0,0,0,0.03)',border:'0.5px solid '+BDR,borderRadius:9,padding:'9px 11px'}}>
-          <strong style={{color:TXT,fontWeight:600}}>¿No te apetece hoy?</strong> Puedes cambiarlo cuando quieras, en el panel "Modo" — a la derecha del editor en el ordenador, o en la barra justo debajo del texto en el móvil.
+          <strong style={{color:TXT,fontWeight:600}}>¿No te apetece hoy?</strong> Puedes cambiarlo cuando quieras, en el panel «Modo» — a la derecha del editor en el ordenador, o en la barra justo debajo del texto en el móvil.
         </div>
         <button onClick={onClose} style={{width:'100%',height:46,background:NAVY,color:'#fff',border:'none',borderRadius:11,fontSize:14.5,fontWeight:600,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Entendido</button>
       </div>
@@ -10936,9 +10940,9 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
       <input type="checkbox" id="legal-check" checked={legalOk} onChange={e=>setLegalOk(e.target.checked)} style={{marginTop:2,flexShrink:0,cursor:'pointer'}}/>
       <span style={{fontSize:11.5,color:MUTED,lineHeight:1.6}}>
         He leído y acepto la{' '}
-        <button type="button" onClick={e=>{e.preventDefault();setShowPrivacy(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Política de Privacidad</button>
+        <button type="button" onClick={e=>{e.preventDefault();setShowPrivacy(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Política de privacidad</button>
         {' '}y los{' '}
-        <button type="button" onClick={e=>{e.preventDefault();setShowTerms(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Términos de Servicio</button>
+        <button type="button" onClick={e=>{e.preventDefault();setShowTerms(true);}} style={{background:'none',border:'none',color:AZULMED,cursor:'pointer',fontSize:11.5,padding:0,textDecoration:'underline'}}>Términos de servicio</button>
       </span>
     </label>}
 
@@ -10948,7 +10952,7 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
         setError('Debes confirmar que tienes 14 años o más');return;
       }
       if(isSignup&&!document.getElementById('legal-check')?.checked){
-        setError('Debes aceptar la Política de Privacidad y los Términos de Servicio');return;
+        setError('Debes aceptar la Política de privacidad y los Términos de servicio');return;
       }
       submit();
     }} disabled={loading} style={{
@@ -14291,7 +14295,7 @@ const CuentoContrareloj=({user,onFinish,onBack,saveEntry,challenge,writingMode='
         </Btn>}
       </div>
       {challenge&&<div style={{fontSize:11,color:FAINT,marginTop:14,maxWidth:300}}>
-        "Devolver relato" avisa a @{challenge.from_username||challenge.from_name} de que ya puede leer tu {writingMode==='guion'?'escena':'cuento'}.
+        «Devolver relato» avisa a @{challenge.from_username||challenge.from_name} de que ya puede leer tu {writingMode==='guion'?'escena':'cuento'}.
       </div>}
     </div>
   );
@@ -15305,7 +15309,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange,onDelete}
 
           {teamEntries.length===0&&<div style={{textAlign:'center',padding:'28px 20px',color:MUTED,fontSize:13,background:CARD_BG,borderRadius:12,border:'1px solid '+BDR}}>
             Ningún miembro ha compartido textos todavía.<br/>
-            <span style={{fontSize:12,color:FAINT}}>Pulsa "+ Compartir un texto" para añadir el tuyo.</span>
+            <span style={{fontSize:12,color:FAINT}}>Pulsa «+ Compartir un texto» para añadir el tuyo.</span>
           </div>}
 
           <div style={{display:'flex',flexDirection:'column',gap:10}}>
@@ -16142,7 +16146,7 @@ const PublicProfile=({user,onClose,isFollowing=false,onFollow,onUnfollow,library
           )}
           <button onClick={()=>{navigator.clipboard?.writeText(profileUrl).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1800);});}}
             style={{display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,background:'transparent',border:'none',borderRadius:9,padding:'6px',fontSize:12.5,fontWeight:500,color:FAINT,cursor:'pointer'}}>
-            <Icon name={copied?'check':'link-simple'} size={13} color={FAINT}/>{copied?'¡Enlace copiado!':'Copiar link'}
+            <Icon name={copied?'check':'link-simple'} size={13} color={FAINT}/>{copied?'¡Enlace copiado!':'Copiar enlace'}
           </button>
           <button onClick={onClose} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'9px',fontSize:13,color:MUTED,cursor:'pointer'}}>Cerrar</button>
           {viewer&&!isOwnProfile&&(
@@ -16573,7 +16577,7 @@ const UserSearchPanel=({user,following,onFollow,teams,onAddToTeam})=>{
       {query.length===0&&following.length===0&&<div style={{textAlign:'center',padding:'24px 16px'}}>
         <div style={{fontSize:28,marginBottom:10}}>🔍</div>
         <div style={{fontSize:13,fontWeight:500,color:TXT,marginBottom:6}}>Busca escritores</div>
-        <div style={{fontSize:12,color:MUTED,lineHeight:1.65}}>Escribe un nombre o @usuario para encontrar a alguien. Puedes seguirles para ver sus textos "Amigos" o invitarles a un equipo.</div>
+        <div style={{fontSize:12,color:MUTED,lineHeight:1.65}}>Escribe un nombre o @usuario para encontrar a alguien. Puedes seguir a esa persona para ver sus textos «Amigos» o invitarla a un equipo.</div>
       </div>}
     </div>
   );
@@ -17375,7 +17379,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
           {!loading&&publicEntries.length===0&&<div style={{textAlign:'center',padding:40}}>
             <div style={{marginBottom:12}}><Icon name="book-open" size={32} color={FAINT}/></div>
             <div style={{fontSize:14,fontWeight:500,color:TXT,marginBottom:6}}>La biblioteca está vacía</div>
-            <div style={{fontSize:13,color:MUTED,lineHeight:1.65}}>Nadie ha publicado textos todavía.<br/>Sé el primero — ve a "Mis textos" y cambia la visibilidad de alguno a "Abierto".</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.65}}>Nadie ha publicado textos todavía.<br/>Sé el primero — ve a «Mis textos» y cambia la visibilidad de alguno a «Abierto».</div>
           </div>}
           {(()=>{
             // Sort: recent activity first, then entry date
@@ -17421,7 +17425,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         {/* AMIGOS */}
         {tab==='amigos'&&<>
           {following.length===0&&<div style={{background:'rgba(27,95,170,0.06)',border:'1px solid rgba(27,95,170,0.22)',borderRadius:12,padding:'16px 20px',marginBottom:12,fontSize:13,color:AZULMED,lineHeight:1.65}}>
-            Sigue a otros escritores desde la pestaña "Explorar" para ver aquí sus textos compartidos con amigos.
+            Sigue a otros escritores desde la pestaña «Explorar» para ver aquí sus textos compartidos con amigos.
           </div>}
           {followedStories.length>0&&(
             <div style={{padding:'0 0 20px',maxWidth:520}}>
@@ -19659,7 +19663,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
 
   const confirmPublish=async()=>{
     if(!openNomination&&nominees.length===0){
-      alert('Elige al menos un nominado, o marca "Nominación abierta".');return;
+      alert('Elige al menos un nominado, o marca «Nominación abierta».');return;
     }
     setSaving(true);
     try{
@@ -20341,7 +20345,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
   };
 
   if(turnDone)return<SessionCompleteModal summary={turnDone} variant="turn"
-    note={'Tu parte ya forma parte del relato. Avisaremos a quien le toca continuar.'}
+    note={'Tu parte ya es parte del relato. Avisaremos a quien le toca continuar.'}
     onClose={()=>{setTurnDone(null);onClose&&onClose();}}/>;
 
   return(
@@ -21911,7 +21915,7 @@ const PrivacyModal=({onClose})=>(
   <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="fi" style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:600,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
       <div style={{padding:'16px 24px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-        <div style={{fontSize:16,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Política de Privacidad</div>
+        <div style={{fontSize:16,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Política de privacidad</div>
         <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
       </div>
       <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
@@ -21919,13 +21923,13 @@ const PrivacyModal=({onClose})=>(
 
         {[
           ['¿Quién es el responsable?','Pretexto es un servicio de escritura creativa. Para cualquier consulta sobre privacidad, puedes escribirnos a pretextoapp@gmail.com.'],
-          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Los que marcas como privados no los ve ningún otro usuario — nunca se comparten con nadie más, y solo se usan para darte soporte si tú lo pides. Como en la mayoría de apps que no ofrecen cifrado de extremo a extremo, quien administra Pretexto podría acceder técnicamente a los datos en bruto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.\n— País aproximado: al iniciar sesión, calculamos tu país a partir de tu dirección IP mediante un servicio externo de geolocalización. Guardamos únicamente el país resultante (por ejemplo, "España"); la dirección IP no se almacena en ningún momento. Lo usamos solo para entender de forma agregada desde dónde escribe la comunidad, nunca para identificarte individualmente ante terceros.'],
+          ['¿Qué datos recogemos?','— Datos de cuenta: email y nombre que proporcionas al registrarte.\n— Contenido creativo: los textos que escribes y guardas en la app. Los que marcas como privados no los ve ningún otro usuario — nunca se comparten con nadie más, y solo se usan para darte soporte si tú lo pides. Como en la mayoría de apps que no ofrecen cifrado de extremo a extremo, quien administra Pretexto podría acceder técnicamente a los datos en bruto.\n— Datos de uso: Google Analytics recoge información anónima sobre cómo se usa la app (páginas visitadas, tiempo de sesión). No recoge datos personales identificables.\n— Datos técnicos: dirección IP anonimizada, tipo de dispositivo y navegador.\n— País aproximado: al iniciar sesión, calculamos tu país a partir de tu dirección IP mediante un servicio externo de geolocalización. Guardamos únicamente el país resultante (por ejemplo, «España»); la dirección IP no se almacena en ningún momento. Lo usamos solo para entender de forma agregada desde dónde escribe la comunidad, nunca para identificarte individualmente ante terceros.'],
           ['¿Para qué usamos tus datos?','— Para proporcionarte el servicio de escritura y guardar tus textos.\n— Para mejorar la app mediante análisis de uso agregado y anónimo.\n— Nunca vendemos tus datos a terceros.\n— Nunca usamos tus textos para entrenar modelos de IA.'],
           ['¿Dónde se almacenan?','Tus datos se almacenan en Supabase (infraestructura AWS en Europa). Google Analytics almacena datos de uso en servidores de Google. Puedes consultar la política de Google en google.com/policies/privacy/partners.'],
           ['Cookies','Solo usamos cookies analíticas de Google Analytics, y únicamente si has dado tu consentimiento. Puedes rechazarlas sin que ello afecte al funcionamiento de la app.'],
-          ['Tus derechos (GDPR)','Tienes derecho a: acceder a tus datos, rectificarlos, eliminarlos ("derecho al olvido"), portabilidad de datos, y oponerte al tratamiento. Para ejercer cualquiera de estos derechos, escríbenos a pretextoapp@gmail.com. Para eliminar tu cuenta y todos tus datos, puedes solicitarlo por email y lo haremos en un plazo máximo de 30 días.'],
+          ['Tus derechos (RGPD)','Tienes derecho a: acceder a tus datos, rectificarlos, eliminarlos («derecho al olvido»), portabilidad de datos, y oponerte al tratamiento. Para ejercer cualquiera de estos derechos, escríbenos a pretextoapp@gmail.com. Para eliminar tu cuenta y todos tus datos, puedes solicitarlo por email y lo haremos en un plazo máximo de 30 días.'],
           ['API de Claude (Anthropic)','Si introduces una API key de Claude, tus textos se envían a la API de Anthropic para generar feedback. Anthropic tiene su propia política de privacidad. Pretexto no almacena tu API key en el servidor — se guarda solo en tu dispositivo.'],
-          ['Menores de edad','Pretexto no está dirigido a menores de 16 años. Si eres menor, necesitas el consentimiento de tus padres o tutores.'],
+          ['Menores de edad','Pretexto no está dirigido a menores de 14 años. Para usar la aplicación debes tener al menos 14 años; si tienes menos, no puedes crear una cuenta.'],
           ['Cambios en esta política','Notificaremos cambios relevantes por email. El uso continuado del servicio tras los cambios implica la aceptación de la nueva política.'],
         ].map(([title,text])=>(
           <div key={title} style={{marginBottom:20}}>
@@ -21946,14 +21950,14 @@ const TermsModal=({onClose})=>(
   <div style={{position:'fixed',inset:0,background:'rgba(10,27,61,0.5)',zIndex:400,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
     <div className="fi" style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:600,maxHeight:'88vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
       <div style={{padding:'16px 24px',borderBottom:'0.5px solid '+BDR,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-        <div style={{fontSize:16,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Términos de Servicio</div>
+        <div style={{fontSize:16,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif'}}>Términos de servicio</div>
         <button onClick={onClose} style={{background:'transparent',border:'none',fontSize:20,color:MUTED,cursor:'pointer'}}>×</button>
       </div>
       <div style={{flex:1,overflowY:'auto',padding:'20px 24px',fontSize:13,color:TXT,lineHeight:1.8}}>
         <p style={{color:MUTED,marginBottom:16}}>Última actualización: {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</p>
         {[
           ['1. Aceptación','Al crear una cuenta en Pretexto, aceptas estos términos. Si no estás de acuerdo, no uses el servicio.'],
-          ['2. El servicio','Pretexto es una herramienta de escritura creativa. Proporcionamos el servicio "tal cual" y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
+          ['2. El servicio','Pretexto es una herramienta de escritura creativa. Proporcionamos el servicio «tal cual» y nos reservamos el derecho de modificarlo o interrumpirlo con aviso previo.'],
           ['3. Tu cuenta','Eres responsable de mantener la confidencialidad de tu contraseña. Notifícanos si detectas uso no autorizado.'],
           ['4. Propiedad de tus textos y de las fotos de los retos','Los textos que escribes en Pretexto son tuyos. No reclamamos ningún derecho sobre tu contenido creativo. Al publicar un texto en la Biblioteca pública, autorizas que otros usuarios de la plataforma puedan leerlo. Las fotografías de los retos fotográficos las selecciona Pretexto; se usan solo como punto de partida para escribir y no te otorgan ningún derecho sobre la fotografía en sí — el texto que escribas a partir de ella sigue siendo tuyo, igual que cualquier otro.'],
           ['5. Uso aceptable','No puedes usar Pretexto para: publicar contenido ilegal, dañino, amenazante o que infrinja derechos de terceros. Nos reservamos el derecho de eliminar o restringir el acceso a contenido que viole estas normas. Puedes denunciar contenido ilegal o que incumpla estas normas con el botón "Reportar" que acompaña a cada texto y cada perfil. Si ocultamos uno de tus textos, te avisaremos y te diremos el motivo.'],
@@ -22737,16 +22741,18 @@ const Root=()=>{
     }
   },[]);
   useEffect(()=>{
-    // gtag siempre arranca denegado por defecto (más seguro); si ya
-    // habías aceptado antes, hay que volver a concederlo en cada carga.
+    // gtag arranca denegado y SIN cargar el script de Google; si ya habías
+    // aceptado antes, hay que concederlo y cargarlo en cada carga.
     if(consent==='granted'&&window.gtag){
       window.gtag('consent','update',{analytics_storage:'granted'});
+      if(window.__loadGA)window.__loadGA();
     }
   },[]);
   const accept=()=>{
     S.set('pretexto:cookie_consent','granted');
     setConsent('granted');
     if(window.gtag)window.gtag('consent','update',{analytics_storage:'granted'});
+    if(window.__loadGA)window.__loadGA();
   };
   const decline=()=>{
     S.set('pretexto:cookie_consent','denied');
