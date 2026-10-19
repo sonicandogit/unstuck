@@ -1,5 +1,12 @@
-// Pretexto Service Worker v7
+// Pretexto Service Worker v8
 // Strategy: network-first for HTML (always fresh app), cache-first for CDN assets
+//
+// v8 (19 oct 2026): las fuentes (Playfair Display, Source Sans 3, Lora) pasan
+// a servirse desde el propio dominio (/fonts/), así que se quitan
+// fonts.googleapis.com y fonts.gstatic.com de CDN_HOSTS y se sube la versión
+// de la caché para borrar las copias antiguas de Google Fonts. Los archivos
+// de /fonts/ son del mismo origen y los gestiona la última rama del fetch
+// (stale-while-revalidate): no hace falta precachearlos.
 //
 // v7 (12 ago 2026): se quita self.clients.claim() del evento "activate".
 // Motivo: al desplegar la v6, alguien que tenía Pretexto abierta justo en
@@ -34,13 +41,11 @@
 // de extensiones del navegador, no de la app, y la Cache API no las admite
 // y lanzaba un error sin capturar).
 
-const CACHE = 'pretexto-v7';
+const CACHE = 'pretexto-v8';
 const CDN_HOSTS = [
   'unpkg.com',
   'cdn.jsdelivr.net',
   'cdnjs.cloudflare.com',
-  'fonts.googleapis.com',
-  'fonts.gstatic.com',
 ];
 
 self.addEventListener('install', (e) => {
