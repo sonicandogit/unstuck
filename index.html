@@ -77,7 +77,7 @@
   Si algo deja de funcionar tras subir esto, la forma más rápida de
   descartarlo como causa es borrar esta única etiqueta <meta> entera.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.googletagmanager.com https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://nzvzjyoavpqtjwkwgzch.supabase.co https://api.anthropic.com https://ipapi.co https://www.google-analytics.com https://www.googletagmanager.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.googletagmanager.com https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://nzvzjyoavpqtjwkwgzch.supabase.co https://api.anthropic.com https://ipapi.co https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,500;1,600&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -5661,6 +5661,14 @@ const DB = {
 <script>
 const trackEvent=(name,p={})=>{if(typeof gtag!=='undefined')gtag('event',name,p);};
 
+// Requisitos de contraseña. Deben coincidir con los de Supabase (Authentication → Sign In / Providers → Email:
+// longitud mínima 8 y "Letters and digits"); así el mensaje sale en español antes de llegar al servidor.
+const passwordProblem=(pw)=>{
+  if(pw.length<8)return 'La contraseña debe tener al menos 8 caracteres';
+  if(!/[A-Za-z]/.test(pw)||!/[0-9]/.test(pw))return 'La contraseña debe incluir letras y números';
+  return null;
+};
+
 const exportZip=async(user,library,reflections,projects)=>{
   if(typeof JSZip==='undefined'){alert('JSZip no disponible');return;}
   const zip=new JSZip();
@@ -10830,7 +10838,7 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
     }
     if(!email.trim()||!password.trim())return;
     if(mode==='signup'&&!name.trim()){setError('Añade tu nombre');return;}
-    if(mode==='signup'&&password.length<6){setError('La contraseña debe tener al menos 6 caracteres');return;}
+    if(mode==='signup'){const pp=passwordProblem(password);if(pp){setError(pp);return;}}
     if(mode==='signup'&&!legalOk){setError('Debes aceptar la política de privacidad y los términos de servicio');return;}
     if(mode==='signup'&&!ageOk){setError('Debes confirmar que tienes 14 años o más');return;}
     setLoading(true);setError('');
@@ -10911,7 +10919,7 @@ const AuthForm=({onAuth,defaultMode='login'})=>{
 
     {!isRecover&&<div style={{marginBottom:22}}>
       <div style={{display:'flex',justifyContent:'space-between',marginBottom:7}}>
-        <label style={{font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT}}>Contraseña{isSignup&&' (mín. 6)'}</label>
+        <label style={{font:"600 11px/1 'Source Sans 3'",letterSpacing:'.1em',textTransform:'uppercase',color:FAINT}}>Contraseña{isSignup&&' (mín. 8, con letras y números)'}</label>
         {isLogin&&<button onClick={()=>{setMode('recover');setError('');setRecoverSent(false);}} style={{font:"500 12px/1 'Source Sans 3'",color:AZULMED,background:'transparent',border:'none',cursor:'pointer',padding:0}}>¿La olvidaste?</button>}
       </div>
       <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')submit()}} placeholder="••••••••" style={{width:'100%',padding:'12px 14px',fontSize:15,color:TXT,background:CARD_BG,border:'1px solid '+BDR,borderRadius:10,outline:'none'}}/>
@@ -21827,7 +21835,7 @@ const PasswordResetModal=({onClose})=>{
   const [error,setError]=useState('');
 
   const handleSubmit=async()=>{
-    if(password.length<6){setError('La contraseña debe tener al menos 6 caracteres');return;}
+    {const pp=passwordProblem(password);if(pp){setError(pp);return;}}
     if(password!==confirm){setError('Las contraseñas no coinciden');return;}
     setLoading(true);setError('');
     try{
@@ -21860,7 +21868,7 @@ const PasswordResetModal=({onClose})=>{
             <div style={{marginBottom:14}}>
               <label style={{fontSize:11,fontWeight:600,color:FAINT,textTransform:'uppercase',letterSpacing:'.1em',display:'block',marginBottom:7}}>Nueva contraseña</label>
               <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 8 caracteres, con letras y números"
                 style={{width:'100%',border:'1px solid '+BDR,borderRadius:10,padding:'11px 13px',fontSize:14,outline:'none',fontFamily:'inherit',color:TXT,background:CARD_BG}}/>
             </div>
             <div style={{marginBottom:20}}>
