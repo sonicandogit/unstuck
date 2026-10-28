@@ -5154,6 +5154,14 @@ const DB = {
     const { error } = await getSB().from('duets').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
   },
+  // Cambiar el título (solo quien lo creó). Lo hace el servidor
+  // (CAMBIAR_TITULO.sql), que además lo lleva a las entradas de los dos y a
+  // las notificaciones ya enviadas. Devuelve el título tal como quedó.
+  renameDuet: async (id, title) => {
+    const { data, error } = await getSB().rpc('rename_duet', { p_duet_id: id, p_title: title });
+    if (error) throw error;
+    return data;
+  },
   // Seguir un dueto ahora SIEMPRE pasa por acceptFollowInvite — el insert
   // directo se cerró en el servidor al construir la invitación manual.
   unfollowDuet: async (duetId, uid) => {
@@ -5586,6 +5594,12 @@ const DB = {
   // 'position' de la ronda (1-based). Desplaza el turn_order de los que van
   // en esa posición o después, para hacerle hueco.
   // El coordinador puede ajustar rondas y mínimo de palabras del relato en curso.
+  // Igual que renameDuet (solo quien lo creó; ver CAMBIAR_TITULO.sql).
+  renameCollective: async(collectiveId,title)=>{
+    const{data,error}=await getSB().rpc('rename_collective',{p_collective_id:collectiveId,p_title:title});
+    if(error)throw error;
+    return data;
+  },
   updateCollectiveSettings: async(collectiveId,patch)=>{
     const{error}=await getSB().from('collectives')
       .update({...patch,updated_at:new Date().toISOString()}).eq('id',collectiveId);
@@ -18794,6 +18808,65 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true,user}
   </>);
 };
 
+/* ─── CAMBIAR TÍTULO (duetos y colectivos) ─────────────────────── */
+const TITLE_MAX=80;
+// Aviso global tras cambiar un título: la App actualiza la biblioteca y los
+// hubs recargan su lista, sin depender de qué pantalla abrió el editor.
+const emitTitleRenamed=(kind,id,oldTitle,newTitle)=>{
+  try{window.dispatchEvent(new CustomEvent('pretexto:title-renamed',{detail:{kind,id,oldTitle,newTitle}}));}catch(e){}
+};
+// Mensaje legible a partir del error del servidor (los de rename_* ya vienen en español).
+const renameErrorText=e=>{
+  const m=(e&&e.message)||'';
+  if(/Solo quien cre|vac[ií]o|80 caracteres|iniciar sesi/.test(m))return m;
+  if(/fetch|network|Failed/i.test(m))return 'No hay conexión. Comprueba tu red e inténtalo de nuevo.';
+  return 'No se ha podido cambiar el título. Inténtalo de nuevo en un momento.';
+};
+const RenameTitleModal=({currentTitle,onClose,onSave})=>{
+  const [val,setVal]=useState(currentTitle||'');
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState('');
+  const inputRef=useRef(null);
+  useEffect(()=>{const el=inputRef.current;if(el){el.focus();el.select();}},[]);
+  const clean=val.replace(/\s+/g,' ').trim();
+  const unchanged=clean===(currentTitle||'').trim();
+  const canSave=!saving&&clean.length>0&&clean.length<=TITLE_MAX&&!unchanged;
+  const save=async()=>{
+    if(!canSave)return;
+    setSaving(true);setErr('');
+    try{await onSave(clean);}
+    catch(e){console.error('rename:',e);setErr(renameErrorText(e));setSaving(false);}
+  };
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e=>{if(e.target===e.currentTarget&&!saving)onClose();}}>
+      <div style={{background:CARD_BG,borderRadius:14,padding:'22px 22px 18px',maxWidth:380,width:'100%'}}>
+        <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:6}}>Cambiar título</div>
+        <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:14}}>El título nuevo lo verán todas las personas que participan o siguen esta historia.</div>
+        <input ref={inputRef} value={val} maxLength={TITLE_MAX} disabled={saving}
+          onChange={e=>{setVal(e.target.value);if(err)setErr('');}}
+          onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();save();}else if(e.key==='Escape'&&!saving){onClose();}}}
+          aria-label="Título"
+          style={{width:'100%',boxSizing:'border-box',padding:'10px 12px',border:'1px solid '+(err?'#C5221F':BDR),borderRadius:9,fontSize:15,color:TXT,background:'transparent',fontFamily:"'Source Sans 3',sans-serif",outline:'none'}}/>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginTop:6,minHeight:18}}>
+          <div style={{fontSize:12,color:'#C5221F',lineHeight:1.4}}>{err}</div>
+          <div style={{fontSize:11,color:val.length>=TITLE_MAX?'#C5221F':FAINT,flexShrink:0}}>{val.length}/{TITLE_MAX}</div>
+        </div>
+        <div style={{display:'flex',gap:8,marginTop:14}}>
+          <button onClick={onClose} disabled={saving}
+            style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:saving?'default':'pointer'}}>
+            Cancelar
+          </button>
+          <button onClick={save} disabled={!canSave}
+            style={{flex:1,background:canSave?AZUL:BDR,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:canSave?'pointer':'default'}}>
+            {saving?'Guardando…':'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const [showIntro,dismissIntro]=useFirstTime('cuatromanos',user?.id,true);
   const isA=duet.user_a===user.id;
@@ -18803,6 +18876,20 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const myTurn=duet.current_turn===myLetter&&duet.status==='active';
   const finishProposedByMe=duet.finish_proposed_by===user.id;
   const finishProposedByOther=duet.status==='finish_proposed'&&!finishProposedByMe;
+  // Título local: tras cambiarlo, el editor lo muestra y lo usa en las
+  // entradas nuevas al momento, aunque quien lo abrió no refresque el dueto.
+  const [duetTitle,setDuetTitle]=useState(duet.title);
+  useEffect(()=>{setDuetTitle(duet.title);},[duet.title]);
+  const [showRename,setShowRename]=useState(false);
+  const canRename=duet.user_a===user.id;
+  const saveRename=async t=>{
+    const saved=await DB.renameDuet(duet.id,t);
+    const newTitle=saved||t;
+    const oldTitle=duetTitle;
+    setDuetTitle(newTitle);setShowRename(false);
+    emitTitleRenamed('duet',duet.id,oldTitle,newTitle);
+    onUpdate&&onUpdate({...duet,title:newTitle});
+  };
 
   const [turns,setTurns]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -18912,7 +18999,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
       const entryData={
         id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
         user_id:user.id,sk:'dueto',
-        title:duet.title+' (turno '+(duet.turn_count+1)+')',
+        title:duetTitle+' (turno '+(duet.turn_count+1)+')',
         session_label:'A cuatro manos con '+(isA?duet.name_b:duet.name_a),
         html,plain:plainTxt,word_count:wc,words_added:wc,
         elapsed:secs,font_idx:0,editor_size:17,align_dir:'left',
@@ -19063,7 +19150,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         try{await DB.upsertEntry({
           id:'duet_'+duet.id+'_t'+(duet.turn_count+1)+'_'+user.id.slice(-4),
           user_id:user.id,sk:'dueto',
-          title:duet.title+' (turno final)',
+          title:duetTitle+' (turno final)',
           session_label:'A cuatro manos con '+(isA?duet.name_b:duet.name_a),
           html,plain:plainTxt,word_count:wc,words_added:wc,
           elapsed:turnSecs(),font_idx:0,editor_size:17,align_dir:'left',
@@ -19102,7 +19189,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         const entryId='duet_'+duet.id.slice(0,8);
         await DB.upsertEntry({
           id:entryId,user_id:user.id,sk:'cuento',
-          title:duet.title+' — con '+otherName,
+          title:duetTitle+' — con '+otherName,
           session_label:'Relato a cuatro manos · '+(duet.name_a||'?')+' & '+(duet.name_b||'?'),
           html:duet.full_html,plain:duet.full_plain,
           word_count:duet.full_plain.trim().split(/\s+/).filter(Boolean).length,
@@ -19136,7 +19223,13 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         <div style={{display:'flex',alignItems:'center',gap:12}}>
           <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.5)',fontSize:12,cursor:'pointer',flexShrink:0}}>← Salir</button>
           <div style={{flex:1,minWidth:0,fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6}}>
-            <Icon name="hands-clapping" size={13}/>{duet.title}
+            <Icon name="hands-clapping" size={13}/><span style={{minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{duetTitle}</span>
+            {canRename&&(
+              <button onClick={()=>setShowRename(true)} title="Cambiar título" aria-label="Cambiar título"
+                style={{background:'transparent',border:'none',cursor:'pointer',padding:2,display:'flex',flexShrink:0}}>
+                <Icon name="pencil-simple" size={13} color="rgba(255,255,255,0.45)"/>
+              </button>
+            )}
           </div>
           {duet.status==='active'&&(
             <div style={{fontSize:11,padding:'4px 12px',borderRadius:20,background:myTurn?'rgba(30,155,240,0.3)':'rgba(255,255,255,0.1)',color:myTurn?'#4CAF82':'rgba(255,255,255,0.5)',flexShrink:0}}>
@@ -19349,12 +19442,13 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
           </div>
         </div>
       )}
+      {showRename&&<RenameTitleModal currentTitle={duetTitle} onClose={()=>setShowRename(false)} onSave={saveRename}/>}
       {confirmDelete&&(
         <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
           onClick={e=>{if(e.target===e.currentTarget&&!deleting)setConfirmDelete(false);}}>
           <div style={{background:CARD_BG,borderRadius:14,padding:'22px 24px',maxWidth:320,width:'100%',textAlign:'center'}}>
             <div style={{fontSize:14,color:TXT,lineHeight:1.5,marginBottom:20}}>
-              ¿Eliminar «<strong>{duet.title}</strong>»? Se borra el relato entero, sin poder deshacerlo.
+              ¿Eliminar «<strong>{duetTitle}</strong>»? Se borra el relato entero, sin poder deshacerlo.
             </div>
             <div style={{display:'flex',gap:8}}>
               <button onClick={()=>setConfirmDelete(false)} disabled={deleting}
@@ -19401,6 +19495,11 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount,onEntrySaved})=>{
     setLoaded(true);
   };
   useEffect(()=>{load();},[user.id,refreshKey]);
+  useEffect(()=>{
+    const h=e=>{if(e.detail?.kind==='duet')load();};
+    window.addEventListener('pretexto:title-renamed',h);
+    return()=>window.removeEventListener('pretexto:title-renamed',h);
+  },[user.id]);
 
   const isA=d=>d.user_a===user.id;
   const invitations=duets.filter(d=>d.status==='pending'&&!isA(d));
@@ -20174,6 +20273,17 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
   const nextOrder=(myOrder%members.length)+1;
   const nextMember=members.find(m=>m.turn_order===nextOrder);
   const myVote=myMember?.voted_finish||false;
+  const [showRename,setShowRename]=useState(false);
+  const canRename=col.created_by===user.id;
+  const saveRename=async t=>{
+    const saved=await DB.renameCollective(col.id,t);
+    const newTitle=saved||t;
+    const oldTitle=col.title;
+    const updated={...col,title:newTitle};
+    setCol(updated);setShowRename(false);
+    emitTitleRenamed('collective',col.id,oldTitle,newTitle);
+    onUpdate&&onUpdate(updated);
+  };
 
   // Preferencia de "avisar a mi círculo" — igual que en DuetEditor, pero
   // por fila de collective_members en vez de por columna 'a'/'b'. Solo
@@ -20520,13 +20630,22 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
           </div>
         </div>
       )}
+      {showRename&&<RenameTitleModal currentTitle={col.title} onClose={()=>setShowRename(false)} onSave={saveRename}/>}
       {/* Header */}
       <div style={{display:'flex',flexDirection:'column',gap:6,padding:'8px 16px',background:HEADER_NAVY_BG,flexShrink:0}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={onClose} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
             <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>Menú
           </button>
-          <div style={{flex:1,minWidth:0,textAlign:'center',fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{col.title}</div>
+          <div style={{flex:1,minWidth:0,display:'flex',alignItems:'center',justifyContent:'center',gap:4}}>
+            <span style={{minWidth:0,fontSize:13,fontWeight:600,color:'rgba(255,255,255,0.9)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{col.title}</span>
+            {canRename&&(
+              <button onClick={()=>setShowRename(true)} title="Cambiar título" aria-label="Cambiar título"
+                style={{background:'transparent',border:'none',cursor:'pointer',padding:2,display:'flex',flexShrink:0}}>
+                <Icon name="pencil-simple" size={12} color="rgba(255,255,255,0.45)"/>
+              </button>
+            )}
+          </div>
           <span style={{fontSize:9,color:'rgba(255,255,255,0.4)',flexShrink:0}}>{(()=>{
             if(col.target_rounds&&members.length){
               const round=Math.floor((col.turn_count)/members.length)+1;
@@ -20705,6 +20824,11 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0,mode='dashboard',onCount})
   useEffect(()=>{
     DB.getMyCollectives(user.id).then(setItems).catch(()=>{}).finally(()=>setLoading(false));
   },[user.id,refreshKey]);
+  useEffect(()=>{
+    const h=e=>{if(e.detail?.kind==='collective')DB.getMyCollectives(user.id).then(setItems).catch(()=>{});};
+    window.addEventListener('pretexto:title-renamed',h);
+    return()=>window.removeEventListener('pretexto:title-renamed',h);
+  },[user.id]);
 
   // items empieza en [] antes de cargar, así que estos cálculos son
   // seguros incluso mientras loading es true — nunca deben depender de
@@ -22031,6 +22155,35 @@ const App=()=>{
   const onEntrySaved=entry=>{
     setLibrary(prev=>[entry,...prev.filter(e=>e.id!==entry.id)]);
   };
+  // Tras cambiar el título de un dueto o colectivo, el servidor ya ha
+  // actualizado las entradas; aquí se refleja en la biblioteca cargada en
+  // memoria con la misma regla (CAMBIAR_TITULO.sql), sin recargar.
+  useEffect(()=>{
+    const h=e=>{
+      const d=e.detail||{};
+      if(!d.id||!d.newTitle)return;
+      const isDuet=d.kind==='duet';
+      const oldT=isDuet?(d.oldTitle||''):(d.oldTitle||'Relato colectivo');
+      if(!oldT)return;
+      const pre=isDuet?'duet_'+d.id+'_t':'collective_'+d.id+'_t';
+      const pub=isDuet?'duet_'+String(d.id).slice(0,8):null;
+      const oldLabel='Relato colectivo · '+(d.oldTitle||'');
+      setLibrary(prev=>prev.map(en=>{
+        if(!en||typeof en.id!=='string')return en;
+        if(!(en.id.startsWith(pre)||(pub&&en.id===pub)))return en;
+        let changed=false;const out={...en};
+        if(typeof en.title==='string'&&en.title.startsWith(oldT)){out.title=d.newTitle+en.title.slice(oldT.length);changed=true;}
+        if(!isDuet){
+          for(const k of ['session_label','sessionLabel']){
+            if(en[k]===oldLabel){out[k]='Relato colectivo · '+d.newTitle;changed=true;}
+          }
+        }
+        return changed?out:en;
+      }));
+    };
+    window.addEventListener('pretexto:title-renamed',h);
+    return()=>window.removeEventListener('pretexto:title-renamed',h);
+  },[]);
   const [reflections,setReflections]=useState([]);
   const [projects,setProjects]=useState([]);
   const [sessionConfig,setSessionConfig]=useState(null);
