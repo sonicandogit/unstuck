@@ -19218,6 +19218,8 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const [wc,setWc]=useState(0);
   const [saving,setSaving]=useState(false);
   const [confirmSkip,setConfirmSkip]=useState(false);
+  // Dueto con Claude: terminar es decisión tuya (no hay nadie que acepte una propuesta).
+  const [confirmEndAI,setConfirmEndAI]=useState(false);
   const [aiThinking,setAiThinking]=useState(false); // Claude generando su turno, tras pasar el tuyo
   const [aiError,setAiError]=useState(''); // 'no_key' | 'invalid_key' | 'error' | ''
   const [aiErrorDetail,setAiErrorDetail]=useState(''); // motivo real cuando aiError==='error' — antes se perdía, solo quedaba en console.error
@@ -19464,8 +19466,9 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const confirmFinish=async()=>{
     setSaving(true);
     try{
-      // Save my last fragment too if I wrote something
-      if(plainTxt.trim()&&wc>=duet.min_words){
+      // Save my last fragment too if I wrote something. Con Claude terminas tú
+      // cuando quieras: lo que hayas escrito se guarda aunque no llegue al mínimo.
+      if(plainTxt.trim()&&(duet.is_ai_partner?wc>0:wc>=duet.min_words)){
         const html=edRef.current?.innerHTML||'';
         await DB.addDuetTurn({duet_id:duet.id,user_id:user.id,html,plain:plainTxt,word_count:wc,turn_number:duet.turn_count+1});
         try{await DB.upsertEntry({
@@ -19580,6 +19583,15 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         Premisa: {duet.premise}
       </div>}
 
+      {/* Dueto con Claude que quedó en «propuesta de fin»: Claude no puede
+          aceptar, así que decides tú. */}
+      {duet.is_ai_partner&&duet.status==='finish_proposed'&&(
+        <div style={{padding:'12px 18px',background:'rgba(27,95,170,0.08)',borderBottom:'0.5px solid rgba(27,95,170,0.2)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',flexShrink:0}}>
+          <span style={{fontSize:13,color:'#1B5FAA',flex:1,minWidth:180}}>Propusiste terminar el relato. Con Claude decides tú.</span>
+          <button onClick={confirmFinish} disabled={saving} style={{background:'#1B5FAA',border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>{saving?'Terminando…':'Terminar'}</button>
+          <button onClick={keepWriting} disabled={saving} style={{background:'transparent',border:'0.5px solid rgba(27,95,170,0.3)',borderRadius:7,padding:'6px 14px',fontSize:12,color:'#1B5FAA',cursor:'pointer'}}>Seguir escribiendo</button>
+        </div>
+      )}
       {/* Finish proposed banner */}
       {finishProposedByOther&&(
         <div style={{padding:'12px 18px',background:'rgba(27,95,170,0.08)',borderBottom:'0.5px solid rgba(27,95,170,0.2)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
@@ -19716,10 +19728,16 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
             {!canPass&&<span style={{color:'rgba(255,255,255,0.5)',marginLeft:8}}>Faltan {duet.min_words-wc} para poder pasar el turno</span>}
             {canPass&&<span style={{marginLeft:8}}>✓ ¡Mínimo alcanzado!</span>}
           </div>
-          <button onClick={()=>passTurn(true)} disabled={!canPass||saving}
-            style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.3)',borderRadius:8,padding:'9px 14px',fontSize:12,color:canPass?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
-            Proponer fin
-          </button>
+          {duet.is_ai_partner
+            ?<button onClick={()=>setConfirmEndAI(true)} disabled={saving||aiThinking}
+              title="Termina el relato aquí. Claude no escribirá más."
+              style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.45)',borderRadius:8,padding:'9px 14px',fontSize:12,color:'rgba(255,255,255,0.9)',cursor:'pointer'}}>
+              Terminar relato
+            </button>
+            :<button onClick={()=>passTurn(true)} disabled={!canPass||saving}
+              style={{background:'transparent',border:'0.5px solid rgba(255,255,255,0.3)',borderRadius:8,padding:'9px 14px',fontSize:12,color:canPass?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
+              Proponer fin
+            </button>}
           <button onClick={()=>setConfirmSkip(true)} disabled={saving}
             title="Pasa tu turno sin escribir, para que la historia no se quede esperando"
             style={{background:'transparent',border:'none',padding:'9px 6px',fontSize:11.5,color:'rgba(255,255,255,0.55)',textDecoration:'underline',cursor:'pointer'}}>
@@ -19729,6 +19747,23 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
             style={{background:canPass?'#fff':'rgba(255,255,255,0.15)',border:'none',borderRadius:8,padding:'9px 18px',fontSize:13,fontWeight:600,color:canPass?'#1E9BF0':'rgba(255,255,255,0.3)',cursor:canPass?'pointer':'default'}}>
             {aiThinking?'Claude está escribiendo…':saving?'Guardando…':'Pasar el turno →'}
           </button>
+        </div>
+      )}
+      {confirmEndAI&&(
+        <div onClick={e=>{if(e.target===e.currentTarget&&!saving)setConfirmEndAI(false);}}
+          style={{position:'fixed',inset:0,zIndex:600,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+          <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:340,padding:'24px 22px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
+            <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT,marginBottom:8}}>¿Terminar el relato aquí?</div>
+            <div style={{fontSize:13,color:MUTED,lineHeight:1.55,marginBottom:20}}>
+              {wc>0?'Lo que acabas de escribir se guardará como parte final. ':''}Claude no escribirá más. Después podrás archivarlo, editar tus partes y descargarlo.
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setConfirmEndAI(false)} disabled={saving}
+                style={{flex:1,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:'pointer'}}>Cancelar</button>
+              <button onClick={confirmFinish} disabled={saving}
+                style={{flex:1,background:AZUL,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer'}}>{saving?'Terminando…':'Terminar'}</button>
+            </div>
+          </div>
         </div>
       )}
       {confirmSkip&&(
