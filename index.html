@@ -5600,6 +5600,27 @@ const DB = {
     if(error)throw error;
     return data;
   },
+  // ── Archivar duetos/colectivos terminados (ARCHIVAR.sql) ──
+  // Crea (o renueva) tu copia archivada y devuelve su id de entrada.
+  archiveStory: async(kind,storyId,place)=>{
+    const{data,error}=await getSB().rpc('archive_story',{p_kind:kind,p_story_id:storyId,p_place:place});
+    if(error)throw error;
+    return data;
+  },
+  unarchiveStory: async(kind,storyId)=>{
+    const{error}=await getSB().rpc('unarchive_story',{p_kind:kind,p_story_id:storyId});
+    if(error)throw error;
+  },
+  getMyArchives: async(uid)=>{
+    const{data,error}=await getSB().from('story_archives').select('kind,story_id,entry_id').eq('user_id',uid);
+    if(error)throw error;
+    return data||[];
+  },
+  // Corrige UNA parte propia de un relato terminado (en el relato compartido).
+  editMyTurn: async(kind,turnId,html,plain)=>{
+    const{error}=await getSB().rpc('edit_my_turn',{p_kind:kind,p_turn_id:turnId,p_html:html,p_plain:plain});
+    if(error)throw error;
+  },
   updateCollectiveSettings: async(collectiveId,patch)=>{
     const{error}=await getSB().from('collectives')
       .update({...patch,updated_at:new Date().toISOString()}).eq('id',collectiveId);
@@ -10041,6 +10062,8 @@ const _shiftDay=(str,n)=>{const d=new Date(str+'T12:00:00Z');d.setUTCDate(d.getU
 // volvía a cobrar un comodín en CADA arranque de la app (3 → 2 → 1 → 0), en vez
 // de una sola vez. Un hueco ya pagado se puentea gratis; solo cuestan los nuevos.
 const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridgedDays=[])=>{
+  // Las copias archivadas repiten palabras ya contadas al escribir cada parte.
+  library=(library||[]).filter(e=>e&&e.sk!=='archivo');
   // totalWords = sum of words_added across all entries
   // words_added stores the INCREMENT per session (new words only)
   // For old entries without words_added, fall back to word_count
@@ -15399,6 +15422,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange,onDelete}
 
 /* ─── STATS CHART ────────────────────────────────── */
 const StatsChart=({library})=>{
+  library=(library||[]).filter(e=>e&&e.sk!=='archivo');
   const getMonday=d=>{
     const dt=new Date(d+'T12:00:00');
     const diff=(dt.getDay()+6)%7;
@@ -15501,6 +15525,8 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
 
   // Can the user interact? (not their own text, and user is logged in)
   const isOwn=entry.user_id===user?.id;
+  // Copia archivada de un dueto/colectivo: acciones propias (ver ArchiveEntryActions).
+  const isArchive=entry.sk==='archivo'&&isOwn;
   // Colaboradores aceptados en un texto compartido también pueden editarlo y
   // cambiar su visibilidad, aunque no sean el dueño original (isOwn=false).
   const editAllowed=canEdit!==undefined?canEdit:isOwn;
@@ -15675,8 +15701,9 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
                 <span style={{fontSize:11,color:FAINT}}>{entry.word_count||entry.wordCount||0} palabras</span>
               </div>
 
+              {isArchive&&<ArchiveEntryActions entry={entry} user={user} onClose={onClose} onMoveFolder={onMoveFolder}/>}
               {/* FILA 1 — Acciones principales: Editar + Publicar/Visibilidad */}
-              {editAllowed&&(
+              {!isArchive&&editAllowed&&(
               <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',rowGap:8}}>
                 {onEdit&&(
                   <button onClick={()=>{onClose();onEdit(entry);}} title="Editar este texto"
@@ -15702,7 +15729,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
               )}
 
               {/* FILA 2 — Gestión: acciones secundarias, más tenues */}
-              <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',rowGap:7}}>
+              <div style={{display:isArchive?'none':'flex',alignItems:'center',gap:7,flexWrap:'wrap',rowGap:7}}>
                 {onMoveFolder&&editAllowed&&(
                   <button onClick={()=>{onClose();onMoveFolder(entry);}} title="Mover a carpeta"
                     style={{display:'flex',alignItems:'center',gap:5,border:'1px solid '+BDR,borderRadius:13,padding:'4px 11px',background:'transparent',color:MUTED,cursor:'pointer',fontSize:11,fontWeight:500,fontFamily:"'Source Sans 3',sans-serif",whiteSpace:'nowrap'}}>
@@ -17123,7 +17150,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14}}>
           {filtered.map(e=>{
             const vis=e.visibility||'privado';
-            const meta=visMeta(vis);
+            const meta=e.sk==='archivo'?{...visMeta('privado'),label:'Archivado'}:visMeta(vis);
             const isUpdating=updating===e.id;
             const excerpt=(e.plain||'').slice(0,100);
             const isPublic=vis!=='privado';
@@ -17145,6 +17172,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
                     <span onClick={e2=>{
                         e2.stopPropagation();
                         if(isUpdating)return;
+                        if(e.sk==='archivo')return; // privado siempre (fase B: con aprobación de todos)
                         setVisMenuEntry(e);
                       }}
                       title="Cambiar visibilidad"
@@ -17864,6 +17892,7 @@ const AmigosScreen=({user,onClose})=>{
 };
 
 const EstadísticasScreen=({library,reflections,onClose,stats})=>{
+  library=(library||[]).filter(e=>e&&e.sk!=='archivo');
   const {totalWords,totalSessions,totalElapsed,weekWords,weekSessions}=stats;
 
   // Words per week (last 12 weeks) — same as StatsChart
@@ -18867,6 +18896,297 @@ const RenameTitleModal=({currentTitle,onClose,onSave})=>{
   );
 };
 
+/* ─── ARCHIVAR (duetos y colectivos terminados) ───────────────────
+   Archivar es personal: crea una copia tuya (entrada sk='archivo') en el
+   Escritorio o en la Biblioteca (siempre privada) y oculta el relato de tu
+   lista. Desde la copia puedes editar TUS partes (en el relato compartido)
+   y descargarlo en .docx. Ver ARCHIVAR.sql. */
+const emitAppEvent=(name,detail)=>{try{window.dispatchEvent(new CustomEvent(name,{detail}));}catch(e){}};
+const parseArchiveId=id=>{
+  const m=/^archivo_(duet|collective)_([0-9a-f-]{36})_/.exec(id||'');
+  return m?{kind:m[1],storyId:m[2]}:null;
+};
+const archiveErrorText=e=>{
+  const m=(e&&e.message)||'';
+  if(/Solo |vac[ií]a|demasiado largo|Elige d[oó]nde|iniciar sesi|se salt/.test(m))return m;
+  if(/story_archives|archive_story|edit_my_turn|unarchive_story|function .* does not exist|Could not find/i.test(m))return 'Esta función aún no está activada en el servidor.';
+  if(/fetch|network|Failed/i.test(m))return 'No hay conexión. Comprueba tu red e inténtalo de nuevo.';
+  return 'No se ha podido completar. Inténtalo de nuevo en un momento.';
+};
+// Conjunto 'kind:id' de lo que YO he archivado (null mientras carga).
+const useMyArchives=uid=>{
+  const [set,setSet]=useState(null);
+  useEffect(()=>{
+    if(!uid)return;
+    let alive=true;
+    const load=()=>DB.getMyArchives(uid)
+      .then(rows=>{if(alive)setSet(new Set(rows.map(r=>r.kind+':'+r.story_id)));})
+      .catch(e=>{console.error('getMyArchives:',e);if(alive)setSet(new Set());});
+    load();
+    window.addEventListener('pretexto:archives-changed',load);
+    return()=>{alive=false;window.removeEventListener('pretexto:archives-changed',load);};
+  },[uid]);
+  return set;
+};
+// Tras archivar/editar: trae la copia fresca y la mete en la biblioteca en memoria.
+const refreshArchiveEntry=async entryId=>{
+  try{const fresh=await DB.getEntryById(entryId);if(fresh)emitAppEvent('pretexto:entry-upsert',{entry:fresh});}
+  catch(e){console.error('refreshArchiveEntry:',e);}
+};
+
+const ArchiveStoryModal=({kind,storyId,title,onClose,onArchived})=>{
+  const [busy,setBusy]=useState('');
+  const [err,setErr]=useState('');
+  const go=async place=>{
+    if(busy)return;
+    setBusy(place);setErr('');
+    try{
+      const entryId=await DB.archiveStory(kind,storyId,place);
+      await refreshArchiveEntry(entryId);
+      emitAppEvent('pretexto:archives-changed',{kind,storyId});
+      onArchived&&onArchived(place);
+    }catch(e){console.error('archiveStory:',e);setErr(archiveErrorText(e));setBusy('');}
+  };
+  const opt=(place,icon,label,hint)=>(
+    <button onClick={()=>go(place)} disabled={!!busy}
+      style={{display:'flex',alignItems:'center',gap:12,width:'100%',textAlign:'left',background:'transparent',border:'1px solid '+BDR,borderRadius:11,padding:'12px 14px',cursor:busy?'default':'pointer',opacity:busy&&busy!==place?0.5:1}}>
+      <Icon name={icon} size={20} color={AZUL}/>
+      <span style={{flex:1}}>
+        <div style={{fontSize:14,fontWeight:600,color:TXT}}>{busy===place?'Archivando…':label}</div>
+        <div style={{fontSize:11.5,color:MUTED,lineHeight:1.45,marginTop:2}}>{hint}</div>
+      </span>
+    </button>
+  );
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:400,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e=>{if(e.target===e.currentTarget&&!busy)onClose();}}>
+      <div style={{background:CARD_BG,borderRadius:14,padding:'22px 22px 18px',maxWidth:380,width:'100%'}}>
+        <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:6}}>Archivar «{title||'Sin título'}»</div>
+        <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:14}}>Se guarda una copia con el relato entero y desaparece de tu lista de relatos. A los demás no les cambia nada. Podrás editar tus partes y descargarlo.</div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {opt('escritorio','desktop','En tu Escritorio','Junto a tus textos de trabajo.')}
+          {opt('biblioteca','book-open','En tu Biblioteca','Como texto privado: solo lo ves tú.')}
+        </div>
+        {err&&<div style={{fontSize:12,color:'#C5221F',lineHeight:1.4,marginTop:10}}>{err}</div>}
+        <button onClick={onClose} disabled={!!busy}
+          style={{width:'100%',marginTop:12,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:busy?'default':'pointer'}}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Franja para un relato TERMINADO: «Archivar» o «Archivado».
+const ArchiveBar=({kind,storyId,title,archived,compact})=>{
+  const [show,setShow]=useState(false);
+  const [done,setDone]=useState('');
+  if(archived===null)return null; // aún cargando
+  const isArchived=archived||!!done;
+  return(
+    <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',justifyContent:compact?'center':'flex-start',padding:compact?'12px 0 0':'10px 18px',background:compact?'transparent':'rgba(30,155,240,0.04)',borderBottom:compact?'none':'0.5px solid rgba(30,155,240,0.15)',flexShrink:0}}>
+      {isArchived
+        ?<span style={{fontSize:12.5,color:MUTED,display:'flex',alignItems:'center',gap:6}}>
+          <Icon name="archive" size={14} color={AZUL}/>
+          {done==='biblioteca'?'Archivado en tu Biblioteca':done==='escritorio'?'Archivado en tu Escritorio':'Archivado'} · ábrelo allí para editar tus partes o descargarlo
+        </span>
+        :<>
+          {!compact&&<span style={{fontSize:12.5,color:MUTED,flex:1,minWidth:160}}>¿Ha tenido un buen final? Guárdalo en tu Escritorio o tu Biblioteca.</span>}
+          <button onClick={()=>setShow(true)}
+            style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'1px solid rgba(30,155,240,0.35)',borderRadius:8,padding:'6px 14px',fontSize:12.5,fontWeight:600,color:AZUL,cursor:'pointer'}}>
+            <Icon name="archive" size={14} color={AZUL}/>Archivar
+          </button>
+        </>}
+      {show&&<ArchiveStoryModal kind={kind} storyId={storyId} title={title} onClose={()=>setShow(false)} onArchived={place=>{setShow(false);setDone(place);}}/>}
+    </div>
+  );
+};
+
+// Pantalla «Editar mis partes»: el relato entero; solo tus partes se pueden tocar.
+const countWords=t=>(t||'').trim().split(/\s+/).filter(Boolean).length;
+const ArchivedStoryEditor=({user,kind,storyId,onClose})=>{
+  const [story,setStory]=useState(null);
+  const [turns,setTurns]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [loadErr,setLoadErr]=useState('');
+  const [editingId,setEditingId]=useState(null);
+  const [wc,setWc]=useState(0);
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState('');
+  const [changed,setChanged]=useState(false);
+  const edRef=useRef(null);
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        if(kind==='duet'){
+          const [d,t]=await Promise.all([DB.getDuet(storyId),DB.getDuetTurns(storyId)]);
+          if(alive){setStory(d);setTurns(t||[]);}
+        }else{
+          const c=await DB.getCollectiveDetail(storyId);
+          if(alive){setStory(c);setTurns(c?.turns||[]);}
+        }
+      }catch(e){console.error('ArchivedStoryEditor:',e);if(alive)setLoadErr('No se ha podido cargar el relato.');}
+      if(alive)setLoading(false);
+    })();
+    return()=>{alive=false;};
+  },[kind,storyId]);
+  const authorOf=t=>{
+    if(kind==='duet'){
+      if(t.is_ai)return 'Claude';
+      if(!t.user_id)return 'Cuenta eliminada';
+      return t.user_id===story?.user_a?(story?.name_a||'?'):(story?.name_b||'?');
+    }
+    return t.author_name||'Cuenta eliminada';
+  };
+  const isMine=t=>t.user_id===user.id&&!t.is_ai&&!t.passed;
+  const visible=turns.filter(t=>!t.passed&&(t.plain||'').trim());
+  const startEdit=t=>{
+    setErr('');setEditingId(t.id);setWc(countWords(t.plain));
+    setTimeout(()=>{const el=edRef.current;if(el){el.innerHTML=sanitizeHtml(t.html||'');el.focus();try{const r=document.createRange();r.selectNodeContents(el);r.collapse(false);const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);}catch(e){}}},0);
+  };
+  const save=async t=>{
+    const el=edRef.current;if(!el||saving)return;
+    const html=el.innerHTML;const plain=(el.innerText||'').trim();
+    if(!plain){setErr('Tu parte no puede quedar vacía.');return;}
+    setSaving(true);setErr('');
+    try{
+      await DB.editMyTurn(kind,t.id,html,plain);
+      setTurns(prev=>prev.map(x=>x.id===t.id?{...x,html,plain,word_count:countWords(plain)}:x));
+      setEditingId(null);setChanged(true);
+    }catch(e){console.error('editMyTurn:',e);setErr(archiveErrorText(e));}
+    setSaving(false);
+  };
+  const close=()=>{if(saving)return;onClose&&onClose(changed);};
+  const finished=story?.status==='finished';
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:450,background:PAGE_BG,display:'flex',flexDirection:'column'}}>
+      <div style={{background:'#0A1B3D',color:'#fff',padding:'12px 18px',flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
+        <button onClick={close} style={{background:'transparent',border:'none',color:'rgba(255,255,255,0.55)',fontSize:12,cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',gap:4}}>
+          <Icon name="arrow-left" size={13} color="rgba(255,255,255,0.55)"/>Volver
+        </button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:600,fontFamily:'"Playfair Display",Georgia,serif',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{story?.title||'Relato'}</div>
+          <div style={{fontSize:11,color:'rgba(255,255,255,0.5)'}}>Editar mis partes</div>
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'20px 20px 80px',maxWidth:680,width:'100%',margin:'0 auto',boxSizing:'border-box'}}>
+        {loading?<div style={{textAlign:'center',color:MUTED,fontSize:13,padding:40}}>Cargando…</div>
+        :loadErr?<div style={{textAlign:'center',color:'#C5221F',fontSize:13,padding:40}}>{loadErr}</div>
+        :<>
+          <div style={{fontSize:12.5,color:MUTED,lineHeight:1.55,marginBottom:20,background:'rgba(30,155,240,0.05)',border:'1px solid rgba(30,155,240,0.15)',borderRadius:10,padding:'10px 14px'}}>
+            {finished
+              ?'Puedes corregir las partes que escribiste tú. Los cambios se guardan en el relato compartido: los verán todas las personas que participan o lo siguen.'
+              :'Este relato ya no está terminado, así que no se puede editar.'}
+          </div>
+          {kind==='collective'&&story?.premise&&(
+            <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontSize:14,color:TXT,lineHeight:1.6,marginBottom:22}}>&ldquo;{story.premise}&rdquo;</div>
+          )}
+          {visible.map((t,i)=>{
+            const mine=isMine(t);const editing=editingId===t.id;
+            return(
+              <div key={t.id} style={{marginBottom:22,paddingBottom:22,borderBottom:i<visible.length-1?'1px dashed '+BDR:'none'}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                  <span style={{fontSize:11,fontWeight:700,color:mine?AZUL:MUTED,textTransform:'uppercase',letterSpacing:'.06em'}}>{mine?'Tú':authorOf(t)}</span>
+                  <div style={{flex:1}}/>
+                  {mine&&finished&&!editing&&(
+                    <button onClick={()=>startEdit(t)} disabled={!!editingId}
+                      style={{display:'flex',alignItems:'center',gap:5,background:'transparent',border:'1px solid '+BDR,borderRadius:13,padding:'4px 11px',fontSize:11.5,fontWeight:600,color:editingId?FAINT:AZUL,cursor:editingId?'default':'pointer'}}>
+                      <Icon name="pencil-simple" size={12}/>Editar
+                    </button>
+                  )}
+                </div>
+                {editing
+                  ?<div>
+                    <div ref={edRef} contentEditable suppressContentEditableWarning
+                      onInput={e=>{setWc(countWords(e.currentTarget.innerText));if(err)setErr('');}}
+                      onPaste={e=>{e.preventDefault();const tx=e.clipboardData.getData('text/plain');document.execCommand('insertText',false,tx);}}
+                      style={{minHeight:120,fontSize:16,lineHeight:1.75,color:TXT,fontFamily:FONTS[0].value,outline:'none',border:'1px solid rgba(30,155,240,0.45)',borderRadius:10,padding:'12px 14px',background:CARD_BG}}/>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginTop:8,flexWrap:'wrap'}}>
+                      <span style={{fontSize:11,color:FAINT}}>{wc} palabras</span>
+                      {err&&<span style={{fontSize:12,color:'#C5221F'}}>{err}</span>}
+                      <div style={{flex:1}}/>
+                      <button onClick={()=>{setEditingId(null);setErr('');}} disabled={saving}
+                        style={{background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'8px 14px',fontSize:12.5,color:MUTED,cursor:'pointer'}}>Cancelar</button>
+                      <button onClick={()=>save(t)} disabled={saving||wc===0}
+                        style={{background:wc?AZUL:BDR,border:'none',borderRadius:9,padding:'8px 16px',fontSize:12.5,fontWeight:600,color:'#fff',cursor:wc?'pointer':'default'}}>{saving?'Guardando…':'Guardar'}</button>
+                    </div>
+                  </div>
+                  :<div style={{fontSize:15,lineHeight:1.75,color:mine?TXT:MUTED,fontFamily:FONTS[0].value}}
+                    dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html||(t.plain||'').replace(/\n/g,'<br>'))}}/>}
+              </div>
+            );
+          })}
+        </>}
+      </div>
+    </div>
+  );
+};
+
+// Acciones de una copia archivada dentro de la ventana de lectura.
+const ArchiveEntryActions=({entry,user,onClose,onMoveFolder})=>{
+  const info=parseArchiveId(entry.id);
+  const [editing,setEditing]=useState(false);
+  const [busy,setBusy]=useState('');
+  const [err,setErr]=useState('');
+  const [confirmUn,setConfirmUn]=useState(false);
+  const run=async(key,fn)=>{
+    if(busy)return;setBusy(key);setErr('');
+    try{await fn();}catch(e){console.error('archive action:',e);setErr(archiveErrorText(e));}
+    setBusy('');
+  };
+  const download=()=>run('docx',async()=>{
+    const fresh=(await DB.getEntryById(entry.id))||entry;
+    await exportDocx({...fresh,alignDir:'left',sessionLabel:fresh.session_label||'',wordCount:fresh.word_count||0},'Georgia',12);
+  });
+  const toggleLibrary=()=>run('lib',async()=>{
+    if(entry.in_library)await DB.unpublishFromLibrary(entry.id);
+    else await DB.publishToLibrary(entry.id,'privado');
+    emitAppEvent('pretexto:entry-upsert',{entry:{...entry,in_library:!entry.in_library}});
+    onClose();
+  });
+  const unarchive=()=>run('un',async()=>{
+    await DB.unarchiveStory(info.kind,info.storyId);
+    emitAppEvent('pretexto:entry-remove',{id:entry.id});
+    emitAppEvent('pretexto:archives-changed',info);
+    onClose();
+  });
+  const pill=(key,icon,label,onClick,strong)=>(
+    <button onClick={onClick} disabled={!!busy}
+      style={{display:'flex',alignItems:'center',gap:6,border:strong?'none':'1px solid '+BDR,borderRadius:14,padding:strong?'6px 16px':'5px 12px',background:strong?ADVANCE_BG:'transparent',color:strong?ADVANCE_TXT:MUTED,cursor:busy?'default':'pointer',fontSize:strong?12:11.5,fontWeight:600,fontFamily:"'Source Sans 3',sans-serif",opacity:busy&&busy!==key?0.5:1}}>
+      <Icon name={icon} size={13}/>{busy===key?'…':label}
+    </button>
+  );
+  if(!info)return null;
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      <div style={{fontSize:11.5,color:MUTED,display:'flex',alignItems:'center',gap:6}}>
+        <Icon name="archive" size={13} color={AZUL}/>
+        Relato archivado · {entry.in_library?'en tu Biblioteca (privado)':'en tu Escritorio'}
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',rowGap:8}}>
+        {pill('edit','pencil-simple','Editar mis partes',()=>setEditing(true),true)}
+        {pill('docx','download-simple','Descargar .docx',download)}
+        {pill('lib',entry.in_library?'book-bookmark':'book-open',entry.in_library?'Quitar de la Biblioteca':'Añadir a la Biblioteca',toggleLibrary)}
+        {onMoveFolder&&pill('folder','folder-simple','Carpeta',()=>{onClose();onMoveFolder(entry);})}
+        {pill('un','arrow-counter-clockwise','Desarchivar',()=>setConfirmUn(true))}
+      </div>
+      {confirmUn&&(
+        <div style={{fontSize:12.5,color:TXT,lineHeight:1.5,background:'rgba(0,0,0,0.03)',border:'1px solid '+BDR,borderRadius:10,padding:'10px 12px'}}>
+          Se quita esta copia y el relato vuelve a tu lista de colectivos y duetos. El relato no se borra y tus correcciones se mantienen.
+          <div style={{display:'flex',gap:8,marginTop:8}}>
+            <button onClick={()=>setConfirmUn(false)} disabled={!!busy} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'6px 12px',fontSize:12,color:MUTED,cursor:'pointer'}}>Cancelar</button>
+            <button onClick={unarchive} disabled={!!busy} style={{background:AZUL,border:'none',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>{busy==='un'?'Desarchivando…':'Desarchivar'}</button>
+          </div>
+        </div>
+      )}
+      {err&&<div style={{fontSize:12,color:'#C5221F'}}>{err}</div>}
+      {editing&&<ArchivedStoryEditor user={user} kind={info.kind} storyId={info.storyId}
+        onClose={async changed=>{setEditing(false);if(changed){await refreshArchiveEntry(entry.id);onClose();}}}/>}
+    </div>
+  );
+};
+
 const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const [showIntro,dismissIntro]=useFirstTime('cuatromanos',user?.id,true);
   const isA=duet.user_a===user.id;
@@ -18882,6 +19202,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   useEffect(()=>{setDuetTitle(duet.title);},[duet.title]);
   const [showRename,setShowRename]=useState(false);
   const canRename=duet.user_a===user.id;
+  const myArchives=useMyArchives(user.id);
   const saveRename=async t=>{
     const saved=await DB.renameDuet(duet.id,t);
     const newTitle=saved||t;
@@ -19268,6 +19589,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         </div>
       )}
 
+      {duet.status==='finished'&&<ArchiveBar kind="duet" storyId={duet.id} title={duetTitle} archived={myArchives?myArchives.has('duet:'+duet.id):null}/>}
       {/* Publish approval banner (finished) */}
       {duet.status==='finished'&&!duet.published&&(
         <div style={{padding:'12px 18px',background:'rgba(30,155,240,0.06)',borderBottom:'0.5px solid rgba(30,155,240,0.2)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
@@ -19486,6 +19808,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
 
 /* ─── DUETS HUB (dashboard widget) ──────────────────────────── */
 const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount,onEntrySaved})=>{
+  const myArchives=useMyArchives(user.id);
   const [duets,setDuets]=useState([]);
   const [openDuet,setOpenDuet]=useState(null);
   const [loaded,setLoaded]=useState(false);
@@ -19505,7 +19828,7 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount,onEntrySaved})=>{
   const invitations=duets.filter(d=>d.status==='pending'&&!isA(d));
   const pendingSent=duets.filter(d=>d.status==='pending'&&isA(d));
   const active=duets.filter(d=>['active','finish_proposed'].includes(d.status));
-  const finished=duets.filter(d=>d.status==='finished'&&!d.published);
+  const finished=duets.filter(d=>d.status==='finished'&&!d.published&&!(myArchives&&myArchives.has('duet:'+d.id)));
   const myTurnDuets=active.filter(d=>(d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d)));
 
   const accept=async(d)=>{
@@ -20275,6 +20598,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
   const myVote=myMember?.voted_finish||false;
   const [showRename,setShowRename]=useState(false);
   const canRename=col.created_by===user.id;
+  const myArchives=useMyArchives(user.id);
   const saveRename=async t=>{
     const saved=await DB.renameCollective(col.id,t);
     const newTitle=saved||t;
@@ -20791,6 +21115,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
               <Icon name="book-open" size={22} color={AZUL}/>
               <div style={{marginTop:8,fontSize:13,fontWeight:600,color:TXT}}>Relato completado</div>
               <div style={{fontSize:11,color:MUTED,marginTop:4}}>{turns.length} partes · {members.length} autores</div>
+              <ArchiveBar kind="collective" storyId={col.id} title={col.title} archived={myArchives?myArchives.has('collective:'+col.id):null} compact/>
             </div>
           )}
         </div>
@@ -20818,6 +21143,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
 
 /* ── 3. CollectivesHub ────────────────────────────────────────── */
 const CollectivesHub=({user,onOpen,onNew,refreshKey=0,mode='dashboard',onCount})=>{
+  const myArchives=useMyArchives(user.id);
   const [items,setItems]=useState([]);
   const [loading,setLoading]=useState(true);
 
@@ -20836,7 +21162,7 @@ const CollectivesHub=({user,onOpen,onNew,refreshKey=0,mode='dashboard',onCount})
   // entre renders (como pasó aquí antes del arreglo).
   const myTurn=items.filter(c=>c.current_turn_user_id===user.id&&c.status==='active');
   const following=items.filter(c=>c.current_turn_user_id!==user.id&&c.status==='active');
-  const finished=items.filter(c=>c.status==='finished').slice(0,3);
+  const finished=items.filter(c=>c.status==='finished'&&!(myArchives&&myArchives.has('collective:'+c.id))).slice(0,3);
   useEffect(()=>{if(!loading&&mode==='biblioteca')onCount&&onCount(myTurn.length+following.length);},[loading,mode,myTurn.length,following.length]);
 
   if(loading)return null;
@@ -22183,6 +22509,21 @@ const App=()=>{
     };
     window.addEventListener('pretexto:title-renamed',h);
     return()=>window.removeEventListener('pretexto:title-renamed',h);
+  },[]);
+  // Archivar / editar / mover una copia archivada: actualiza la biblioteca en
+  // memoria sin recargar (ver ArchiveStoryModal y ArchiveEntryActions).
+  useEffect(()=>{
+    const up=e=>{
+      const en=e.detail&&e.detail.entry;if(!en||!en.id)return;
+      setLibrary(prev=>prev.some(x=>x.id===en.id)?prev.map(x=>x.id===en.id?{...x,...en}:x):[en,...prev]);
+    };
+    const rm=e=>{
+      const id=e.detail&&e.detail.id;if(!id)return;
+      setLibrary(prev=>prev.filter(x=>x.id!==id));
+    };
+    window.addEventListener('pretexto:entry-upsert',up);
+    window.addEventListener('pretexto:entry-remove',rm);
+    return()=>{window.removeEventListener('pretexto:entry-upsert',up);window.removeEventListener('pretexto:entry-remove',rm);};
   },[]);
   const [reflections,setReflections]=useState([]);
   const [projects,setProjects]=useState([]);
