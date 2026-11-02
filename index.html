@@ -5700,6 +5700,12 @@ const DB = {
     const{error}=await getSB().rpc('decline_duet_finish',{p_duet_id:duetId});
     if(error)throw error;
   },
+  // Dueto cuyo compañero eliminó su cuenta: quien queda lo da por terminado
+  // (DUETO_HUERFANO.sql) para poder archivarlo, descargarlo o compartirlo.
+  finishOrphanDuet: async(duetId)=>{
+    const{error}=await getSB().rpc('finish_orphan_duet',{p_duet_id:duetId});
+    if(error)throw error;
+  },
   withdrawDuetFinish: async(duetId)=>{
     const{error}=await getSB().rpc('withdraw_duet_finish',{p_duet_id:duetId});
     if(error)throw error;
@@ -19482,6 +19488,8 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
   const myTurn=duet.current_turn===myLetter&&duet.status==='active';
   const finishProposedByMe=duet.finish_proposed_by===user.id;
   const finishProposedByOther=duet.status==='finish_proposed'&&!finishProposedByMe;
+  // ¿El otro eliminó su cuenta? (delete_my_account deja su lado vacío)
+  const partnerGone=!duet.is_ai_partner&&(isA?!duet.user_b:!duet.user_a);
   // Título local: tras cambiarlo, el editor lo muestra y lo usa en las
   // entradas nuevas al momento, aunque quien lo abrió no refresque el dueto.
   const [duetTitle,setDuetTitle]=useState(duet.title);
@@ -19885,6 +19893,25 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
           <button onClick={keepWriting} disabled={saving} style={{background:'transparent',border:'0.5px solid rgba(27,95,170,0.3)',borderRadius:7,padding:'6px 14px',fontSize:12,color:'#1B5FAA',cursor:'pointer'}}>Seguir escribiendo</button>
         </div>
       )}
+      {/* Compañero con la cuenta eliminada: decides tú */}
+      {partnerGone&&['active','finish_proposed','pending'].includes(duet.status)&&(
+        <div style={{padding:'12px 18px',background:'rgba(27,95,170,0.08)',borderBottom:'0.5px solid rgba(27,95,170,0.2)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',flexShrink:0}}>
+          <span style={{fontSize:13,color:'#1B5FAA',flex:1,minWidth:180,lineHeight:1.45}}>Tu compañero eliminó su cuenta. Lo que escribió se ha retirado; tus partes siguen aquí.</span>
+          <button disabled={saving} onClick={async()=>{
+              if(!(await askConfirm({title:'¿Terminar el relato?',message:'Quedará como terminado. Después podrás archivarlo, editar tus partes, descargarlo o compartirlo.',confirmLabel:'Terminar',cancelLabel:'Ahora no'})))return;
+              setSaving(true);
+              try{
+                await DB.finishOrphanDuet(duet.id);
+                try{const fresh=await DB.getDuet(duet.id);onUpdate&&onUpdate(fresh);}catch(e){onUpdate&&onUpdate();}
+                onClose();
+                appNotice('Relato terminado','Ábrelo de nuevo para archivarlo, editar tus partes, descargarlo o compartirlo.');
+              }catch(e){setSaving(false);showError('No se ha podido terminar el relato',e);}
+            }}
+            style={{background:'#1B5FAA',border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>
+            {saving?'…':'Terminar el relato'}
+          </button>
+        </div>
+      )}
       {/* Mi propuesta de final, a la espera del otro (dueto entre personas) */}
       {!duet.is_ai_partner&&duet.status==='finish_proposed'&&finishProposedByMe&&(
         <div style={{padding:'12px 18px',background:'rgba(27,95,170,0.08)',borderBottom:'0.5px solid rgba(27,95,170,0.2)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',flexShrink:0}}>
@@ -19972,7 +19999,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
                 </div>
               ):(
                 <div style={{textAlign:'center',padding:'20px',background:'rgba(0,0,0,0.025)',borderRadius:12,fontSize:13,color:MUTED}}>
-                  ⏳ Es el turno de {otherName}. Te avisaremos cuando te toque.
+                  {partnerGone?'Este relato ya no puede continuar: usa «Terminar el relato» arriba.':<>⏳ Es el turno de {otherName}. Te avisaremos cuando te toque.</>}
                 </div>
               )
             )}
