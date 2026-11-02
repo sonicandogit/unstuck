@@ -5756,7 +5756,7 @@ const passwordProblem=(pw)=>{
 };
 
 const exportZip=async(user,library,reflections,projects)=>{
-  if(typeof JSZip==='undefined'){alert('JSZip no disponible');return;}
+  if(typeof JSZip==='undefined'){appNotice('No se ha podido preparar la copia','Falta una pieza de la app. Recarga la página e inténtalo de nuevo.');return;}
   const zip=new JSZip();
   const dateStr=new Date().toISOString().slice(0,10);
   zip.file('backup_completo_'+dateStr+'.json',JSON.stringify({
@@ -10325,11 +10325,11 @@ const generateAIDuetTurn=async(fullPlainSoFar,minWords,humanWc,uid)=>{
 };
 const doPush=async(customExercise,customReto,currentProject,plainTxt,uid)=>{
   const btn=document.getElementById('push-btn');
-  if(!plainTxt?.trim()){alert('Escribe algo primero.');return}
+  if(!plainTxt?.trim()){appNotice('Escribe algo primero','Claude necesita algo de texto para proponerte cómo seguir.');return}
   if(btn){btn.textContent='Pensando…';btn.disabled=true}
   const ctx=(customExercise?'Ejercicio: "'+customExercise.title+'"\n'+customExercise.desc+'\n\n':customReto?'Reto: "'+customReto.title+'"\n\n':'Proyecto: '+(currentProject?.title||'libre')+'\n\n');
-  try{const r=await callClaude(PUSH_SYSTEM,ctx+'Lo que lleva escrito:\n\n'+plainTxt,600,uid);alert(r);}
-  catch(e){if(e.message==='no_key')alert('Añade tu API key en ⚙ del Dashboard.');else alert('Error: '+e.message);}
+  try{const r=await callClaude(PUSH_SYSTEM,ctx+'Lo que lleva escrito:\n\n'+plainTxt,600,uid);appNotice('Una idea para seguir',r,'Gracias');}
+  catch(e){if(e.message==='no_key')appNotice('Falta tu clave de Claude','Añádela en ⚙ del escritorio para pedir ayuda a Claude.');else showError('No se ha podido completar',e);}
   if(btn){btn.textContent='✦ Pedir impulso a Claude';btn.disabled=false}
 };
 
@@ -10411,7 +10411,7 @@ const driveUpload=async(name,content,fid,tok)=>{
 /* ─── DOCX ───────────────────────────────────────── */
 const waitDocx=()=>new Promise(r=>{if(window.__docx){r(window.__docx);return}window.addEventListener('docxReady',()=>r(window.__docx),{once:true});setTimeout(()=>r(window.__docx||null),8000)});
 const exportDocx=async(entry,fDocx,fSize,feedbackTxt)=>{
-  const lib=await waitDocx();if(!lib){alert('No se pudo cargar la librería .docx');return}
+  const lib=await waitDocx();if(!lib){appNotice('No se ha podido crear el .docx','Comprueba tu conexión y vuelve a intentarlo.');return}
   const {Document,Packer,Paragraph,TextRun,AlignmentType}=lib;
   const aMap={left:AlignmentType.LEFT,center:AlignmentType.CENTER,right:AlignmentType.RIGHT};
   const pA=aMap[entry.alignDir||'left']||AlignmentType.LEFT;
@@ -10688,7 +10688,7 @@ const ModerationScreen=({onClose})=>{
         }
       }
       await load();
-    }catch(e){console.error('moderation action:',e);alert('No se pudo aplicar la acción: '+e.message);}
+    }catch(e){console.error('moderation action:',e);showError('No se ha podido aplicar la acción',e);}
     setActingOn(null);
   };
 
@@ -10844,7 +10844,7 @@ const BetaDisclaimerModal=({user,onAccepted})=>{
       await DB.acceptBetaDisclaimer(user.id);
       onAccepted();
     }catch(e){
-      alert('No se pudo guardar tu confirmación — comprueba tu conexión e inténtalo de nuevo.');
+      appNotice('No se ha podido guardar tu confirmación','Comprueba tu conexión e inténtalo de nuevo.');
       setSaving(false);
     }
   };
@@ -12539,7 +12539,7 @@ const CalendarScreen=({user,onClose,onStart,projects,library,saveProject})=>{
       setShowNew(false);
       setNewRecurring(false);
       load();
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     setSaving(false);
   };
 
@@ -13690,7 +13690,7 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         lastSaved.current=txt;
         acknowledgeReload(fresh.ts);
       }
-    }catch(e){alert('No se pudo recargar: '+e.message);}
+    }catch(e){showError('No se ha podido recargar',e);}
   };
   const tRef=useRef(),iRef=useRef(),eRef=useRef(),asRef=useRef(),toastRef=useRef();
   const tunnelWrapRef=useRef();
@@ -14617,7 +14617,7 @@ const EditChallengeModal=({user,challenge,onClose,onSaved})=>{
       };
       await DB.updateChallenge(challenge.id,fields);
       onSaved({...challenge,...fields});
-    }catch(e){alert('No se pudo guardar: '+e.message);}
+    }catch(e){showError('No se ha podido guardar',e);}
     finally{setSaving(false);}
   };
 
@@ -14948,7 +14948,7 @@ const CollabInviteBanner=({user,onAccepted,refreshKey=0})=>{
         const entries=await DB.getEntriesByIds([inv.entry_id]).catch(()=>[]);
         if(entries[0])onAccepted&&onAccepted(entries[0]);
       }
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     setResponding(null);
   };
 
@@ -15055,16 +15055,16 @@ const TeamsScreen=({user,onClose,onEdit,onVisibilityChange,onDelete})=>{
   const handleJoin=async(code)=>{
     try{
       const inv=await DB.getInvitationByCode(code);
-      if(!inv){alert('Invitación no válida o ya usada.');return;}
+      if(!inv){appNotice('Invitación no válida','Puede que ya se haya usado o que el enlace esté incompleto.');return;}
       const already=teams.find(t=>t.id===inv.group_id);
       if(already){setSelected(already);setView('detail');return;}
       if(await askConfirm({title:'¿Unirte al equipo «'+inv.groups.name+'»?',confirmLabel:'Unirme',cancelLabel:'Ahora no'})){
         await DB.joinGroup(inv.groups.code,user.id);
         await DB.useInvitation(code);
         await loadTeams();
-        alert('¡Bienvenido al equipo!');
+        appNotice('¡Ya estás en el equipo!');
       }
-    }catch(e){alert('Error al unirse: '+e.message);}
+    }catch(e){showError('No te has podido unir al equipo',e);}
   };
 
   if(view==='create')return<CreateTeam user={user} onBack={()=>setView('list')} onCreated={async t=>{await loadTeams();setSelected(t);setView('detail');}}/>;
@@ -15321,7 +15321,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange,onDelete}
       await DB.activateChallenge(ch.id,team.id);
       setChallenges(prev=>[{...ch,active:true,profiles:{name:user.name}},...prev.map(c=>({...c,active:false}))]);
       setShowPropose(false);setProposalTitle('');setProposalDesc('');
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
   };
 
   const shareEntry=async(entry)=>{
@@ -15330,7 +15330,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange,onDelete}
       setTeamEntries(prev=>[{...entry,shared_group_id:team.id,profiles:{name:user.name,initials:user.initials,accent:user.accent,bg:user.bg}},...prev]);
       setMyEntries(prev=>prev.filter(e=>e.id!==entry.id));
       setSharing(null);
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
   };
 
   return(
@@ -15642,7 +15642,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
       onVisibilityChange&&onVisibilityChange(entry.id,next);
       setShowVisMenu(false);
     }catch(e){
-      alert('No se pudo cambiar la visibilidad: '+e.message); // antes este error era silencioso
+      showError('No se ha podido cambiar quién lo ve',e); // antes este error era silencioso
     }
     setVisSaving(false);
   };
@@ -15677,7 +15677,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
               <button onClick={async()=>{
                   setDeleting(true);
                   try{await onDelete(entry.id);setConfirmDelete(false);onClose();}
-                  catch(e){alert('Error al eliminar: '+e.message);}
+                  catch(e){showError('No se ha podido eliminar',e);}
                   setDeleting(false);
                 }} disabled={deleting}
                 style={{flex:1,background:DANGER,border:'none',borderRadius:9,padding:'10px',fontSize:13,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif",opacity:deleting?0.6:1}}>
@@ -15958,7 +15958,7 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge,onEn
   const declineChallenge=async id=>{
     setResponding('ch_'+id);
     try{await onDeclineChallenge(id);setReceived(prev=>prev.filter(c=>c.id!==id));}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
     setResponding(null);
   };
   const saveNomForLater=async id=>{
@@ -15969,7 +15969,7 @@ const ChallengesHistory=({user,onClose,onAcceptChallenge,onDeclineChallenge,onEn
   const declineNom=async id=>{
     setResponding('nom_'+id);
     try{await DB.declineNomination(id);setReceivedNoms(prev=>prev.filter(n=>n.id!==id));}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
     setResponding(null);
   };
 
@@ -16669,8 +16669,8 @@ const UserSearchPanel=({user,following,onFollow,teams,onAddToTeam})=>{
                           const inv=await DB.createInvitation(t.id,null,user.id);
                           const link=window.location.origin+window.location.pathname+'?team='+inv.code;
                           navigator.clipboard?.writeText(link);
-                          alert('Enlace copiado para '+u.name+'\nCompártelo con él/ella');
-                        }catch(e){alert('Error: '+e.message);}
+                          appNotice('Enlace copiado','Compártelo con '+u.name+' para que se una al equipo.');
+                        }catch(e){showError('No se ha podido completar',e);}
                         setAddingToTeam(null);
                       }} style={{display:'flex',alignItems:'center',gap:8,width:'100%',background:'transparent',border:'none',padding:'9px 12px',cursor:'pointer',fontSize:12,color:TXT,borderBottom:'1px solid '+BDR}}>
                         <TeamAvatar team={t} size={20}/>
@@ -16768,7 +16768,7 @@ const InviteCollaboratorsModal=({user,entry,onClose,onInvited})=>{
       await DB.inviteCollaborators(entry.id,user.id,selected.map(s=>s.id));
       onInvited&&onInvited(selected);
       onClose();
-    }catch(e){alert('Error al invitar: '+e.message);}
+    }catch(e){showError('No se ha podido enviar la invitación',e);}
     setSaving(false);
   };
 
@@ -16837,7 +16837,7 @@ const PublishModal=({entry,onClose,onPublished})=>{
       await DB.publishToLibrary(entry.id,vis);
       onPublished&&onPublished(entry.id,vis);
       onClose&&onClose();
-    }catch(e){alert('No se pudo publicar: '+e.message);}
+    }catch(e){showError('No se ha podido publicar',e);}
     finally{setSaving(false);}
   };
   return(
@@ -16951,7 +16951,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
         const entries=await DB.getEntriesByIds([invite.entry_id]).catch(()=>[]);
         if(entries[0])onCollabAccepted&&onCollabAccepted(entries[0]);
       }
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     setRespondingInvite(null);
   };
 
@@ -17025,14 +17025,14 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
   const changeVis=async(entry,vis)=>{
     setUpdating(entry.id);
     try{await DB.updateVisibility(entry.id,vis);onVisibilityChange(entry.id,vis);}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
     finally{setUpdating(null);}
   };
 
   const moveToFolder=async(entry,folderId)=>{
     setMovingEntry(null);
     try{await DB.updateFolder(entry.id,folderId);onFolderChange&&onFolderChange(entry.id,folderId);}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
   };
 
   const createFolder=async()=>{
@@ -17043,7 +17043,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
       setCustomFolders(prev=>[...prev,f]);
       setNewFolderName('');setCreatingFolder(false);
       setFolder(f.id);
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
   };
 
   // relTime/VIS_META/visMeta ahora viven a nivel global, para que Amigos
@@ -17423,7 +17423,7 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
         await DB.follow(user.id,targetId);
         setFollowing(prev=>[...prev,targetId]);
       }
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
   };
 
   const tabs=isEscritorio?[
@@ -18435,7 +18435,7 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
         lastSaved.current=fresh.plain||'';
         acknowledgeReload(fresh.ts);
       }
-    }catch(e){alert('No se pudo recargar: '+e.message);}
+    }catch(e){showError('No se ha podido recargar',e);}
   };
 
   useEffect(()=>{
@@ -18829,7 +18829,7 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true,user}
       setPending(prev=>prev.filter(p=>p.id!==targetUserId));
       setFollowers(prev=>prev?prev.filter(f=>f.id!==targetUserId):prev);
       setCount(prev=>(followers||[]).some(f=>f.id===targetUserId)?Math.max(0,(prev||0)-1):prev);
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     setBusyId(null);
   };
 
@@ -18902,13 +18902,13 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true,user}
      if(!(await askConfirm({title,message,confirmLabel,danger})))return;
    Devuelve una promesa: true = confirmar, false = cancelar. Se monta en su
    propio contenedor, así que funciona desde cualquier sitio. */
-const ConfirmDialog=({title,message,confirmLabel,cancelLabel,danger,dismissible,onAnswer})=>{
+const ConfirmDialog=({title,message,detail,confirmLabel,cancelLabel,danger,dismissible,onAnswer})=>{
   const okRef=useRef(null);
   const cancelRef=useRef(null);
   useEffect(()=>{
     // En acciones que borran o pisan algo, el foco va a «Cancelar»: un Intro
     // sin querer no debe descartar nada.
-    try{((danger&&cancelLabel)?cancelRef:okRef).current?.focus();}catch(e){}
+    try{((danger&&cancelLabel)?cancelRef:okRef).current?.focus({preventScroll:true});}catch(e){}
     const k=e=>{if(e.key==='Escape'&&dismissible){e.preventDefault();onAnswer(false);}};
     window.addEventListener('keydown',k);
     return()=>window.removeEventListener('keydown',k);
@@ -18917,9 +18917,10 @@ const ConfirmDialog=({title,message,confirmLabel,cancelLabel,danger,dismissible,
     <div role="dialog" aria-modal="true" aria-label={title}
       onClick={e=>{if(e.target===e.currentTarget&&dismissible)onAnswer(false);}}
       style={{position:'fixed',inset:0,zIndex:10000,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20,fontFamily:"'Source Sans 3',sans-serif"}}>
-      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:360,padding:'24px 22px 20px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:message&&message.length>400?480:360,maxHeight:'calc(100vh - 40px)',overflowY:'auto',boxSizing:'border-box',padding:'24px 22px 20px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
         <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT,lineHeight:1.3,marginBottom:message?8:20}}>{title}</div>
-        {message&&<div style={{fontSize:13.5,color:MUTED,lineHeight:1.55,marginBottom:20,whiteSpace:'pre-line'}}>{message}</div>}
+        {message&&<div style={{fontSize:13.5,color:MUTED,lineHeight:1.55,marginBottom:detail?10:20,whiteSpace:'pre-line',maxHeight:'55vh',overflowY:'auto'}}>{message}</div>}
+        {detail&&<div style={{fontSize:10.5,color:FAINT,lineHeight:1.4,marginBottom:18,fontFamily:"'Courier New',monospace",wordBreak:'break-word'}}>Detalle técnico: {detail}</div>}
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
           {cancelLabel&&<button ref={cancelRef} onClick={()=>onAnswer(false)}
             style={{flex:'1 1 120px',background:'transparent',border:'1px solid '+BDR,borderRadius:10,padding:'11px 12px',fontSize:13.5,fontWeight:500,color:MUTED,cursor:'pointer'}}>
@@ -18934,7 +18935,7 @@ const ConfirmDialog=({title,message,confirmLabel,cancelLabel,danger,dismissible,
     </div>
   );
 };
-const askConfirm=({title,message='',confirmLabel='Aceptar',cancelLabel='Cancelar',danger=false,dismissible=true}={})=>new Promise(resolve=>{
+const askConfirm=({title,message='',detail='',confirmLabel='Aceptar',cancelLabel='Cancelar',danger=false,dismissible=true}={})=>new Promise(resolve=>{
   let host=null,root=null,answered=false;
   const answer=v=>{
     if(answered)return;answered=true;
@@ -18945,7 +18946,7 @@ const askConfirm=({title,message='',confirmLabel='Aceptar',cancelLabel='Cancelar
   try{
     host=document.createElement('div');document.body.appendChild(host);
     root=ReactDOM.createRoot(host);
-    root.render(<ConfirmDialog title={title} message={message} confirmLabel={confirmLabel} cancelLabel={cancelLabel} danger={danger} dismissible={dismissible} onAnswer={answer}/>);
+    root.render(<ConfirmDialog title={title} message={message} detail={detail} confirmLabel={confirmLabel} cancelLabel={cancelLabel} danger={danger} dismissible={dismissible} onAnswer={answer}/>);
   }catch(e){
     // Si algo falla al pintar, mejor la confirmación del navegador que ninguna.
     console.error('askConfirm:',e);answered=true;try{host&&host.remove();}catch(_){}
@@ -18954,7 +18955,24 @@ const askConfirm=({title,message='',confirmLabel='Aceptar',cancelLabel='Cancelar
 });
 
 // Aviso informativo con un solo botón (sustituto de alert() con la estética de la app).
-const appNotice=(title,message='',okLabel='Entendido')=>askConfirm({title,message,confirmLabel:okLabel,cancelLabel:null});
+const appNotice=(title,message='',okLabel='Entendido',detail='')=>askConfirm({title,message,detail,confirmLabel:okLabel,cancelLabel:null});
+// Traduce un error a algo que se entienda. Los mensajes del servidor ya
+// escritos en español (raise exception de nuestras funciones) se muestran tal
+// cual; el resto, con una frase clara y el detalle técnico en pequeño.
+const friendlyError=e=>{
+  const m=String((e&&(e.message||e.error_description||e.details))||(typeof e==='string'?e:'')||'').trim();
+  if(/Failed to fetch|NetworkError|Network request failed|Load failed|network/i.test(m))return{text:'No hay conexión. Comprueba tu red e inténtalo de nuevo.'};
+  if(/JWT|not authenticated|Auth session missing|refresh token|token (is )?expired/i.test(m))return{text:'Tu sesión ha caducado. Vuelve a entrar e inténtalo otra vez.'};
+  if(/row-level security|permission denied|42501/i.test(m))return{text:'No tienes permiso para hacer esto.',detail:m};
+  if(/duplicate key|23505/i.test(m))return{text:'Esto ya estaba guardado.',detail:m};
+  if(/^[¿¡A-ZÁÉÍÓÚÑ][^\n]{3,240}[.!?»]$/.test(m)&&/[áéíóúñ¿¡]|\b(el|la|los|las|de|que|no|se|tu|tus|este|esta|puede|para)\b/i.test(m)&&!/\b(the|not|failed|error|invalid|cannot|unable)\b/i.test(m))return{text:m};
+  return{text:'Algo ha fallado. Inténtalo de nuevo en un momento.',detail:m};
+};
+const showError=(title,e)=>{
+  console.error((title||'Error')+':',e);
+  const f=friendlyError(e);
+  return appNotice(title||'No se ha podido completar',f.text,'Entendido',f.detail||'');
+};
 
 /* ─── CAMBIAR TÍTULO (duetos y colectivos) ─────────────────────── */
 const TITLE_MAX=80;
@@ -19544,7 +19562,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
       }
       onUpdate&&onUpdate();
       onClose();
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     finally{setSaving(false);setConfirmSkip(false);}
   };
 
@@ -19661,7 +19679,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         setPlainTxt('');setWc(0);startedAtRef.current=null;
         setSaving(false);
       }
-    }catch(e){alert('Error: '+e.message);setSaving(false);}
+    }catch(e){showError('No se ha podido completar',e);setSaving(false);}
   };
 
   // Reintentar SOLO el turno de Claude, sin pedirte que escribas nada nuevo
@@ -19716,7 +19734,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
       await DB.deleteDuet(duet.id);
       onUpdate&&onUpdate(); // que quien mantenga una lista la refresque; el propio dueto ya no existe
       onClose();
-    }catch(e){alert('Error: '+e.message);setDeleting(false);}
+    }catch(e){showError('No se ha podido completar',e);setDeleting(false);}
   };
 
   const confirmFinish=async()=>{
@@ -19747,7 +19765,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         await DB.updateDuet(duet.id,{status:'finished'});
       }
       onUpdate();onClose();
-    }catch(e){alert('Error: '+e.message);setSaving(false);}
+    }catch(e){showError('No se ha podido completar',e);setSaving(false);}
   };
 
   // «Seguir escribiendo»: si la propuesta es mía (o el dueto es con Claude)
@@ -19787,7 +19805,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
         await DB.updateDuet(duet.id,{published:true});
       }
       onUpdate();onClose();
-    }catch(e){alert('Error: '+e.message);setSaving(false);}
+    }catch(e){showError('No se ha podido completar',e);setSaving(false);}
   };
 
   if(turnDone)return<SessionCompleteModal summary={turnDone} variant="turn"
@@ -20135,11 +20153,11 @@ const DuetsHub=({user,refreshKey=0,mode='dashboard',onCount,onEntrySaved})=>{
       // dos a la vez. Cada uno decide por su cuenta al abrir el dueto.
       load();
     }
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
   };
   const decline=async(d)=>{
     try{await DB.updateDuet(d.id,{status:'declined'});load();}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
   };
 
   const waitingDuets=active.filter(d=>!((d.current_turn==='a'&&isA(d))||(d.current_turn==='b'&&!isA(d))));
@@ -20411,7 +20429,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
 
   const confirmPublish=async()=>{
     if(!openNomination&&nominees.length===0){
-      alert('Elige al menos un nominado, o marca «Nominación abierta».');return;
+      appNotice('Falta elegir a quién nominas','Elige al menos una persona, o marca «Nominación abierta».');return;
     }
     setSaving(true);
     try{
@@ -20478,10 +20496,10 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
       onUpdate&&onUpdate();
     }catch(e){
       if(e.message?.includes('duplicate')||e.code==='23505'){
-        alert('Alguien se ha adelantado y ya ha escrito este capítulo. Vuelve a intentarlo con otra cadena.');
+        appNotice('Alguien se ha adelantado','Ya han escrito este capítulo. Prueba con otra cadena.');
         onClose();
       }else{
-        alert('Error: '+e.message);
+        showError('No se ha podido completar',e);
       }
     }
     setSaving(false);
@@ -20699,7 +20717,7 @@ const StartCollectiveModal=({user,onClose,onCreated})=>{
       // acaba de crearlo) decide por su cuenta la primera vez que abre el
       // colectivo (ver el nuevo prompt en CollectiveEditor).
       onCreated(col,allMembers);
-    }catch(e){alert('Error al crear: '+e.message);}
+    }catch(e){showError('No se ha podido crear',e);}
     setSaving(false);
   };
 
@@ -20938,7 +20956,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       const fresh=await DB.getCollectiveDetail(col.id);
       setCol(fresh);onUpdate&&onUpdate(fresh);
       setShowSettings(false);
-    }catch(e){alert('No se pudo guardar: '+e.message);}
+    }catch(e){showError('No se ha podido guardar',e);}
     finally{setSavingSettings(false);}
   };
   const removeMember=async(m)=>{
@@ -20950,7 +20968,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       await DB.removeCollectiveMember(col.id,m.user_id);
       const fresh=await DB.getCollectiveDetail(col.id);
       setCol(fresh);onUpdate&&onUpdate(fresh);
-    }catch(e){alert('No se pudo quitar: '+e.message);}
+    }catch(e){showError('No se ha podido quitar a esa persona',e);}
   };
   const [showAddMember,setShowAddMember]=useState(false);
   const [addQuery,setAddQuery]=useState('');
@@ -20981,7 +20999,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       setCol(fresh);
       if(onUpdate)onUpdate(fresh);
       setShowAddMember(false);setAddQuery('');setAddResults([]);setAddPicked(null);
-    }catch(e){alert('No se pudo añadir: '+e.message);}
+    }catch(e){showError('No se ha podido añadir a esa persona',e);}
     finally{setAddSaving(false);}
   };
 
@@ -21002,12 +21020,12 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       const fresh=await DB.getCollectiveDetail(col.id);
       if(fresh.status!=='active'){
         setCol(fresh);onUpdate&&onUpdate(fresh);
-        alert('Este relato ya se ha cerrado.');setSubmitting(false);return;
+        appNotice('Este relato ya se ha cerrado','Ya no se pueden añadir partes.');setSubmitting(false);return;
       }
       if(fresh.current_turn_user_id!==user.id){
         // Alguien se adelantó o el turno ya no es mío: refresco y aviso.
         setCol(fresh);onUpdate&&onUpdate(fresh);
-        alert('El turno ha cambiado. Se ha actualizado el relato; revisa antes de escribir.');
+        appNotice('El turno ha cambiado','Hemos actualizado el relato. Revísalo antes de seguir escribiendo.');
         setSubmitting(false);return;
       }
       // Calcular siguiente turno con los datos FRESCOS
@@ -21059,7 +21077,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       if(el)el.innerHTML='';setWc(0);
       startedAtRef.current=null;
       setTurnDone({wordsAdded:wc,elapsed:secs});
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     setSubmitting(false);
   };
 
@@ -21092,7 +21110,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
       await DB.submitCollectiveTurn(col.id,turn,reachesEnd?null:(nextMemberFresh?.user_id||null),nextTurnNumber,reachesEnd,newBonusTurns);
       const updated=await DB.getCollectiveDetail(col.id);
       setCol(updated);onUpdate&&onUpdate(updated);
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     finally{setSubmitting(false);setConfirmSkip(false);}
   };
 
@@ -21621,7 +21639,7 @@ const CollectiveReaderView=({user,collective,onClose,onUnfollowed})=>{
       await DB.unfollowCollective(col.id,user.id);
       onUnfollowed&&onUnfollowed(col.id);
       onClose();
-    }catch(e){alert('No se pudo dejar de seguir: '+e.message);}
+    }catch(e){showError('No se ha podido dejar de seguir',e);}
     finally{setUnfollowing(false);}
   };
 
@@ -21732,7 +21750,7 @@ const DuetReaderView=({user,duet,onClose,onUnfollowed})=>{
       await DB.unfollowDuet(duet.id,user.id);
       onUnfollowed&&onUnfollowed(duet.id);
       onClose();
-    }catch(e){alert('No se pudo dejar de seguir: '+e.message);}
+    }catch(e){showError('No se ha podido dejar de seguir',e);}
     finally{setUnfollowing(false);}
   };
 
@@ -21829,13 +21847,13 @@ const ChainsHub=({user,refreshKey=0})=>{
   const saveForLater=async id=>{
     setResponding(id);
     try{await DB.saveNominationForLater(id);setMyNoms(prev=>prev.filter(n=>n.id!==id));}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
     setResponding(null);
   };
   const decline=async id=>{
     setResponding(id);
     try{await DB.declineNomination(id);setMyNoms(prev=>prev.filter(n=>n.id!==id));}
-    catch(e){alert('Error: '+e.message);}
+    catch(e){showError('No se ha podido completar',e);}
     setResponding(null);
   };
 
@@ -21941,7 +21959,7 @@ const VoiceButton=({onTranscript,dark=false,size=16,user})=>{
       }),1000);
     }catch(e){
       console.error('getUserMedia:',e);
-      alert('No se pudo acceder al micrófono. Comprueba los permisos del navegador.');
+      appNotice('No se puede usar el micrófono','Comprueba que el navegador tiene permiso para usarlo.');
     }
   };
 
@@ -22067,8 +22085,8 @@ const EncadenarModal=({user,entry,onClose})=>{
   };
 
   const confirm=async()=>{
-    if(target==='user'&&nominees.length===0){alert('Elige al menos una persona.');return;}
-    if(target==='group'&&!selectedGroup){alert('Elige un equipo.');return;}
+    if(target==='user'&&nominees.length===0){appNotice('Elige al menos una persona');return;}
+    if(target==='group'&&!selectedGroup){appNotice('Elige un equipo');return;}
     setSaving(true);
     try{
       const lastSentence=extractLastSentence(entry.plain);
@@ -22093,7 +22111,7 @@ const EncadenarModal=({user,entry,onClose})=>{
         }
       }
       setStep('done');
-    }catch(e){alert('Error: '+e.message);}
+    }catch(e){showError('No se ha podido completar',e);}
     setSaving(false);
   };
 
@@ -22344,7 +22362,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     }catch(e){
       console.error('respondFollowInvite:',e);
       setFollowRespondedIds(prev=>{const c={...prev};delete c[n.id];return c;}); // revertir si falló
-      alert('No se pudo guardar tu respuesta, inténtalo de nuevo.');
+      appNotice('No se ha podido guardar tu respuesta','Comprueba tu conexión e inténtalo de nuevo.');
     }
   };
 
@@ -22360,7 +22378,7 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     }catch(e){
       console.error('respondShare:',e);
       if(/ya no est[aá] pendiente/.test(e?.message||''))setShareRespondedIds(prev=>({...prev,[n.id]:'gone'}));
-      else{setShareRespondedIds(prev=>{const c={...prev};delete c[n.id];return c;});alert('No se pudo guardar tu respuesta, inténtalo de nuevo.');return;}
+      else{setShareRespondedIds(prev=>{const c={...prev};delete c[n.id];return c;});appNotice('No se ha podido guardar tu respuesta','Comprueba tu conexión e inténtalo de nuevo.');return;}
     }
     if(!n.read){
       try{await DB.markNotificationRead(n.id);}catch(e){}
@@ -23588,7 +23606,7 @@ const App=()=>{
           // no el modo actual de quien lo acepta) y se lanza como un check
           // normal, marcando el reto pendiente para cerrarlo al terminar.
           const exercise=findExerciseById(ch.exercise_id,ch.exercise_mode||'literatura');
-          if(!exercise){alert('No se encontró el ejercicio de este reto.');return;}
+          if(!exercise){appNotice('No encontramos el ejercicio de este reto','Puede que ya no esté disponible.');return;}
           setPendingCheckChallenge(ch);
           startSession({type:'check',writingMode:ch.exercise_mode||'literatura',
             exercise:{id:exercise.id,title:exercise.title,family:exercise.family,mode:exercise.mode,min:exercise.minLargo||exercise.min,teoria:exercise.teoria},
