@@ -15750,6 +15750,12 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
               </div>
 
               {isArchive&&<ArchiveEntryActions entry={entry} user={user} onClose={onClose} onMoveFolder={onMoveFolder}/>}
+              {/* Copia compartida de OTRA persona: si participas en el relato, aquí
+                  puedes retirar tu permiso. Si no participas, el servidor no te
+                  deja ver el estado y ShareBar no muestra nada. */}
+              {entry.sk==='compartido'&&!isOwn&&user?.id&&parseArchiveId(entry.id)&&(
+                <ShareBar user={user} kind={parseArchiveId(entry.id).kind} storyId={parseArchiveId(entry.id).storyId} title={entry.title} compact onWithdrawn={onClose}/>
+              )}
               {/* FILA 1 — Acciones principales: Editar + Publicar/Visibilidad */}
               {!isArchive&&editAllowed&&(
               <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',rowGap:8}}>
@@ -17339,6 +17345,12 @@ const BibliotecaScreen=({user,library,projects=[],sharedWithMe=[],onCollabAccept
   const [tab,setTab]=useState(mode==='escritorio'?'mis_textos':'explorar'); // 'explorar'|'amigos'|'mis_textos'
   const [publicEntries,setPublicEntries]=useState([]);
   const [friendsEntries,setFriendsEntries]=useState([]);
+  useEffect(()=>{
+    const rm=e=>{const id=e.detail&&e.detail.id;if(!id)return;
+      setFriendsEntries(prev=>prev.filter(x=>x.id!==id));setPublicEntries(prev=>prev.filter(x=>x.id!==id));};
+    window.addEventListener('pretexto:entry-remove',rm);
+    return()=>window.removeEventListener('pretexto:entry-remove',rm);
+  },[]);
   const [followedStories,setFollowedStories]=useState([]); // TODAS las que sigues, con o sin novedades — el sitio permanente
   const [openFollowedCollective,setOpenFollowedCollective]=useState(null);
   const [openFollowedDuet,setOpenFollowedDuet]=useState(null);
@@ -19001,7 +19013,7 @@ const ShareProposeModal=({solo,title,onClose,onPick,busy,err})=>{
   );
 };
 
-const ShareBar=({user,kind,storyId,title,solo,compact})=>{
+const ShareBar=({user,kind,storyId,title,solo,compact,onWithdrawn})=>{
   const [state,setState]=useState(undefined); // undefined = cargando; null = sin propuesta
   const [hidden,setHidden]=useState(false);    // p. ej. si el servidor aún no tiene COMPARTIR.sql
   const [busy,setBusy]=useState('');
@@ -19037,6 +19049,7 @@ const ShareBar=({user,kind,storyId,title,solo,compact})=>{
     await DB.withdrawStoryShare(kind,storyId);
     if(wasShared)emitAppEvent('pretexto:entry-remove',{id:'compartido_'+kind+'_'+storyId});
     setState(null);setConfirmWithdraw(false);
+    onWithdrawn&&onWithdrawn();
   });
   const parts=(state&&state.participants)||[];
   const me=parts.find(x=>x.id===user.id);
