@@ -5662,35 +5662,16 @@ const DB = {
   },
   // Quitar a un participante del relato y recompactar el orden de la ronda para
   // que no queden huecos en turn_order.
+  // Quitar a un participante (solo quien coordina). Lo hace el servidor
+  // (MIEMBROS_COLECTIVO.sql): antes se borraba y reordenaba desde aquí filas
+  // ajenas, y la base de datos lo ignoraba en silencio.
   removeCollectiveMember: async(collectiveId,userId)=>{
-    const{data:members}=await getSB().from('collective_members')
-      .select('*').eq('collective_id',collectiveId).order('turn_order');
-    const list=members||[];
-    const target=list.find(m=>m.user_id===userId);
-    if(!target)return;
-    // Borrar al miembro
-    await getSB().from('collective_members').delete()
-      .eq('collective_id',collectiveId).eq('user_id',userId);
-    // Recompactar turn_order de los que iban después (restar 1)
-    for(const m of list.filter(m=>m.turn_order>target.turn_order)){
-      await getSB().from('collective_members')
-        .update({turn_order:m.turn_order-1}).eq('id',m.id);
-    }
+    const{error}=await getSB().rpc('remove_collective_member',{p_collective_id:collectiveId,p_user_id:userId});
+    if(error)throw error;
   },
+  // Añadir en una posición de la ronda (1-based), desplazando al resto.
   addCollectiveMemberAt: async(collectiveId,newMember,position)=>{
-    // 1. Traer los miembros actuales ordenados
-    const{data:members}=await getSB().from('collective_members').select('*').eq('collective_id',collectiveId).order('turn_order');
-    const list=members||[];
-    // 2. Empujar +1 el turn_order de todos los que están en 'position' o después
-    const toShift=list.filter(m=>m.turn_order>=position);
-    for(const m of toShift){
-      await getSB().from('collective_members').update({turn_order:m.turn_order+1}).eq('id',m.id);
-    }
-    // 3. Insertar el nuevo miembro en la posición liberada
-    const{error}=await getSB().from('collective_members').insert({
-      collective_id:collectiveId,user_id:newMember.id,name:newMember.name,
-      username:newMember.username,turn_order:position,voted_finish:false,
-    });
+    const{error}=await getSB().rpc('add_collective_member_at',{p_collective_id:collectiveId,p_user_id:newMember.id,p_position:position});
     if(error)throw error;
   },
   submitCollectiveTurn: async(collectiveId,turn,nextUserId,nextTurnCount,finish=false,bonusTurns=null)=>{
@@ -5706,19 +5687,22 @@ const DB = {
     const{error:ce}=await getSB().from('collectives').update(patch).eq('id',collectiveId);
     if(ce)throw ce;
   },
-  voteToFinishCollective: async(collectiveId,uid,totalMembers)=>{
-    // Mark this member's vote
-    await getSB().from('collective_members').update({voted_finish:true}).eq('collective_id',collectiveId).eq('user_id',uid);
-    // Count votes
-    const{count}=await getSB().from('collective_members').select('id',{count:'exact',head:true}).eq('collective_id',collectiveId).eq('voted_finish',true);
-    const majority=Math.ceil(totalMembers/2);
-    if((count||0)>=majority){
-      // Close the collective
-      await getSB().from('collectives').update({status:'finished',updated_at:new Date().toISOString()}).eq('id',collectiveId);
-      return'finished';
-    }
-    await getSB().from('collectives').update({finish_proposed_by:uid,finish_votes:count||0}).eq('id',collectiveId);
-    return'voted';
+  // Votar (vote=true) o retirar el voto (false) para terminar un colectivo.
+  // El recuento y el cierre los hace el servidor (PROPONER_FINAL.sql).
+  // Devuelve {status:'active'|'finished', votes, members, needed, i_voted}.
+  voteCollectiveFinish: async(collectiveId,vote)=>{
+    const{data,error}=await getSB().rpc('vote_collective_finish',{p_collective_id:collectiveId,p_vote:vote});
+    if(error)throw error;
+    return data;
+  },
+  // Dueto: el otro rechaza la propuesta de final / quien la hizo la retira.
+  declineDuetFinish: async(duetId)=>{
+    const{error}=await getSB().rpc('decline_duet_finish',{p_duet_id:duetId});
+    if(error)throw error;
+  },
+  withdrawDuetFinish: async(duetId)=>{
+    const{error}=await getSB().rpc('withdraw_duet_finish',{p_duet_id:duetId});
+    if(error)throw error;
   },
   // ── Notificaciones ──
   getNotifications: async (uid, limit=20) => {
@@ -18924,7 +18908,7 @@ const ConfirmDialog=({title,message,confirmLabel,cancelLabel,danger,dismissible,
   useEffect(()=>{
     // En acciones que borran o pisan algo, el foco va a «Cancelar»: un Intro
     // sin querer no debe descartar nada.
-    try{(danger?cancelRef:okRef).current?.focus();}catch(e){}
+    try{((danger&&cancelLabel)?cancelRef:okRef).current?.focus();}catch(e){}
     const k=e=>{if(e.key==='Escape'&&dismissible){e.preventDefault();onAnswer(false);}};
     window.addEventListener('keydown',k);
     return()=>window.removeEventListener('keydown',k);
@@ -18937,10 +18921,10 @@ const ConfirmDialog=({title,message,confirmLabel,cancelLabel,danger,dismissible,
         <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT,lineHeight:1.3,marginBottom:message?8:20}}>{title}</div>
         {message&&<div style={{fontSize:13.5,color:MUTED,lineHeight:1.55,marginBottom:20,whiteSpace:'pre-line'}}>{message}</div>}
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          <button ref={cancelRef} onClick={()=>onAnswer(false)}
+          {cancelLabel&&<button ref={cancelRef} onClick={()=>onAnswer(false)}
             style={{flex:'1 1 120px',background:'transparent',border:'1px solid '+BDR,borderRadius:10,padding:'11px 12px',fontSize:13.5,fontWeight:500,color:MUTED,cursor:'pointer'}}>
             {cancelLabel}
-          </button>
+          </button>}
           <button ref={okRef} onClick={()=>onAnswer(true)}
             style={{flex:'1 1 120px',background:danger?'#C5221F':AZUL,border:'none',borderRadius:10,padding:'11px 12px',fontSize:13.5,fontWeight:600,color:'#fff',cursor:'pointer'}}>
             {confirmLabel}
@@ -18968,6 +18952,9 @@ const askConfirm=({title,message='',confirmLabel='Aceptar',cancelLabel='Cancelar
     resolve(window.confirm(title+(message?'\n\n'+message:'')));
   }
 });
+
+// Aviso informativo con un solo botón (sustituto de alert() con la estética de la app).
+const appNotice=(title,message='',okLabel='Entendido')=>askConfirm({title,message,confirmLabel:okLabel,cancelLabel:null});
 
 /* ─── CAMBIAR TÍTULO (duetos y colectivos) ─────────────────────── */
 const TITLE_MAX=80;
@@ -19763,12 +19750,19 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
     }catch(e){alert('Error: '+e.message);setSaving(false);}
   };
 
+  // «Seguir escribiendo»: si la propuesta es mía (o el dueto es con Claude)
+  // la retiro; si es del otro, la rechazo y el servidor le avisa.
   const keepWriting=async()=>{
     setSaving(true);
     try{
-      await DB.updateDuet(duet.id,{status:'active',finish_proposed_by:null});
-      onUpdate();onClose();
-    }catch(e){alert('Error: '+e.message);setSaving(false);}
+      if(duet.is_ai_partner||finishProposedByMe)await DB.withdrawDuetFinish(duet.id);
+      else await DB.declineDuetFinish(duet.id);
+      onUpdate&&onUpdate();onClose();
+    }catch(e){
+      console.error('keepWriting:',e);setSaving(false);
+      const m=e?.message||'';
+      appNotice('No se ha podido guardar',/Solo |propuesta|No tienes/.test(m)?m:'Comprueba tu conexión e inténtalo de nuevo.');
+    }
   };
 
   const approvePublish=async()=>{
@@ -19859,6 +19853,13 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
           <span style={{fontSize:13,color:'#1B5FAA',flex:1,minWidth:180}}>Propusiste terminar el relato. Con Claude decides tú.</span>
           <button onClick={confirmFinish} disabled={saving} style={{background:'#1B5FAA',border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>{saving?'Terminando…':'Terminar'}</button>
           <button onClick={keepWriting} disabled={saving} style={{background:'transparent',border:'0.5px solid rgba(27,95,170,0.3)',borderRadius:7,padding:'6px 14px',fontSize:12,color:'#1B5FAA',cursor:'pointer'}}>Seguir escribiendo</button>
+        </div>
+      )}
+      {/* Mi propuesta de final, a la espera del otro (dueto entre personas) */}
+      {!duet.is_ai_partner&&duet.status==='finish_proposed'&&finishProposedByMe&&(
+        <div style={{padding:'12px 18px',background:'rgba(27,95,170,0.08)',borderBottom:'0.5px solid rgba(27,95,170,0.2)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',flexShrink:0}}>
+          <span style={{fontSize:13,color:'#1B5FAA',flex:1,minWidth:180}}>Has propuesto terminar el relato · esperando a {otherName}.</span>
+          <button onClick={keepWriting} disabled={saving} style={{background:'transparent',border:'0.5px solid rgba(27,95,170,0.3)',borderRadius:7,padding:'6px 14px',fontSize:12,color:'#1B5FAA',cursor:'pointer'}}>{saving?'…':'Retirar propuesta'}</button>
         </div>
       )}
       {/* Finish proposed banner */}
@@ -21095,16 +21096,24 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
     finally{setSubmitting(false);setConfirmSkip(false);}
   };
 
-  const voteFinish=async()=>{
+  const voteFinish=async(vote=true)=>{
+    if(votingFinish)return;
     setVotingFinish(true);
     try{
-      const result=await DB.voteToFinishCollective(col.id,user.id,members.length);
+      const result=await DB.voteCollectiveFinish(col.id,vote);
       const updated=await DB.getCollectiveDetail(col.id);
       setCol(updated);onUpdate&&onUpdate(updated);
-      if(result==='finished')alert('El relato ha cerrado por mayoría de votos.');
-    }catch(e){}
+      if(result&&result.status==='finished')
+        appNotice('El relato ha terminado','La mitad de quienes participáis habéis votado cerrarlo. Ya podéis archivarlo o proponer compartirlo.');
+    }catch(e){
+      console.error('voteCollectiveFinish:',e);
+      const m=e?.message||'';
+      appNotice('No se ha podido guardar tu voto',/Solo |ya no est[aá] en marcha/.test(m)?m:'Comprueba tu conexión e inténtalo de nuevo.');
+    }
     setVotingFinish(false);
   };
+  const finishVotes=members.filter(m=>m.voted_finish).length;
+  const finishNeeded=Math.max(1,Math.ceil(members.length/2));
 
   if(turnDone)return<SessionCompleteModal summary={turnDone} variant="turn"
     note={'Tu parte ya es parte del relato. Avisaremos a quien le toca continuar.'}
@@ -21363,10 +21372,11 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
                   {wc}/{col.min_words} pal. {wc>=col.min_words&&<Icon name="check-circle" size={12} color={AZUL}/>}
                 </span>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  {col.status==='active'&&!myVote&&(
-                    <button onClick={voteFinish} disabled={votingFinish}
+                  {col.status==='active'&&(
+                    <button onClick={()=>voteFinish(!myVote)} disabled={votingFinish}
+                      title={myVote?'Retira tu voto para terminar el relato':(finishVotes?'Vota para terminar el relato':'Propón terminar el relato')}
                       style={{background:'transparent',border:'0.5px solid rgba(27,95,170,0.35)',borderRadius:8,padding:'8px 14px',fontSize:13,fontWeight:500,color:'#1B5FAA',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-                      {votingFinish?'…':'Proponer fin'}
+                      {votingFinish?'…':myVote?'Retirar mi voto':finishVotes?'Votar fin ('+finishVotes+'/'+finishNeeded+')':'Proponer fin'}
                     </button>
                   )}
                   <button onClick={()=>setConfirmSkip(true)} disabled={submitting}
@@ -21400,12 +21410,20 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
               <Icon name="hourglass" size={22} color={FAINT}/><br/>
               <span style={{marginTop:8,display:'block'}}>Turno de <strong>{members.find(m=>m.user_id===col.current_turn_user_id)?.name||'…'}</strong></span>
               {!myVote&&(
-                <button onClick={voteFinish} disabled={votingFinish}
+                <button onClick={()=>voteFinish(true)} disabled={votingFinish}
                   style={{marginTop:16,background:'transparent',border:'0.5px solid rgba(27,95,170,0.35)',borderRadius:8,padding:'8px 16px',fontSize:12.5,fontWeight:500,color:'#1B5FAA',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
-                  {votingFinish?'…':col.finish_proposed_by?'Votar por terminar el relato':'Proponer terminar el relato'}
+                  {votingFinish?'…':finishVotes?'Votar por terminar ('+finishVotes+' de '+finishNeeded+')':'Proponer terminar el relato'}
                 </button>
               )}
-              {myVote&&<div style={{marginTop:14,fontSize:11,color:FAINT}}>Ya has votado por terminar · {members.filter(m=>m.voted_finish).length}/{members.length}</div>}
+              {myVote&&(
+                <div style={{marginTop:14,fontSize:11.5,color:FAINT,display:'flex',alignItems:'center',justifyContent:'center',gap:10,flexWrap:'wrap'}}>
+                  <span>Has votado por terminar · {finishVotes} de {finishNeeded} votos necesarios</span>
+                  <button onClick={()=>voteFinish(false)} disabled={votingFinish}
+                    style={{background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'5px 12px',fontSize:11.5,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>
+                    {votingFinish?'…':'Retirar mi voto'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
