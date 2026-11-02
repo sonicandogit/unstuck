@@ -13158,8 +13158,11 @@ const PostSession=({sessionData,onComplete,onBack,user,alreadyInLibrary=false})=
 
   // feedback is manual — no auto-trigger
 
-  const save=()=>{
-    if(!isCollabContribution&&saveMode==='discard'&&!window.confirm('¿Descartar este texto? No se guardará en ningún sitio — ni borrador ni biblioteca.\n\nEsto no se puede deshacer.'))return;
+  const save=async()=>{
+    if(!isCollabContribution&&saveMode==='discard'&&!(await askConfirm({
+      title:'¿Descartar este texto?',
+      message:'No se guardará en ningún sitio: ni en borradores ni en la Biblioteca. No se puede deshacer.',
+      confirmLabel:'Descartar',cancelLabel:'Seguir editando',danger:true})))return;
     const r={id:uid(),ts:Date.now(),date:today(),rating:null,notes:'',sk:sessionData.sk,session_title:sessionData.title,sessionTitle:sessionData.title,word_count:sessionData.wordCount,wordCount:sessionData.wordCount,wordsAdded:sessionData.wordsAdded??sessionData.wordCount??0,elapsed:sessionData.elapsed,mode:sessionData.mode,feedback:fbState==='done'&&saveFeedback?feedback:'',entryAlreadyInLibrary:alreadyInLibrary,
       discard:!isCollabContribution&&saveMode==='discard',
       saveToLibrary:isCollabContribution?false:saveMode==='publish',visibility:isCollabContribution?null:(saveMode==='publish'?pubVis:'ejercicio'),chainStart:!isCollabContribution&&saveMode==='publish'&&chainStart,
@@ -13687,7 +13690,10 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
     sessionConfig.type==='edit'?sessionConfig.entryId:null,user.id,hasCollaborators,originalEntryRef.current?.ts);
   const reloadFromServer=async()=>{
     if(plainTxt.trim()&&plainTxt!==lastSaved.current){
-      if(!window.confirm('Tienes cambios sin guardar en este texto. Si recargas la versión del otro, se perderán.\n\n¿Recargar de todas formas?'))return;
+      if(!(await askConfirm({
+        title:'¿Cargar la versión de la otra persona?',
+        message:'Tienes cambios sin guardar en este texto. Si cargas la otra versión, se perderán.',
+        confirmLabel:'Cargar su versión',cancelLabel:'Mantener la mía',danger:true})))return;
     }
     try{
       const fresh=await DB.getEntryById(entryIdRef.current);
@@ -13971,7 +13977,10 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
         try{
           const freshTs=await DB.getEntryTs(entryIdRef.current);
           if(freshTs&&freshTs!==originalEntryRef.current.ts){
-            const overwrite=window.confirm('Alguien más ha guardado cambios en este texto compartido mientras lo tenías abierto.\n\nAceptar = sobrescribir con tu versión (se perderá lo que haya guardado la otra persona).\nCancelar = guardar tu versión aparte, como copia, sin tocar la suya.');
+            const overwrite=await askConfirm({
+              title:'Alguien más ha guardado cambios',
+              message:'Mientras tenías abierto este texto compartido, otra persona guardó su versión.\n\n«Sobrescribir con la mía» borra lo que guardó. «Guardarla aparte» deja la suya intacta y guarda la tuya como copia.',
+              confirmLabel:'Sobrescribir con la mía',cancelLabel:'Guardarla aparte, como copia',danger:true,dismissible:false});
             if(!overwrite){
               await saveVersion();
               onFinishDay(finishPayload);
@@ -13993,10 +14002,10 @@ const Editor=({user,library,saveEntry,saveProject,onFinishDay,onBack,driveData,s
 
       {/* TOPBAR */}
       <div style={{display:'flex',alignItems:'center',padding:'0 10px',height:46,background:'var(--topbar-bg,#fff)',borderBottom:'1px solid '+BDR,gap:4,flexShrink:0,zIndex:10}}>
-        <button onClick={()=>{if(started&&plainTxt.trim()){if(!window.confirm('¿Volver al menú?'))return;}if(started)saveNow(false);onBack();}} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:12,display:'flex',alignItems:'center',gap:3,padding:'3px 6px',borderRadius:5,flexShrink:0}}>← Menú</button>
+        <button onClick={async()=>{if(started&&plainTxt.trim()){if(!(await askConfirm({title:'¿Volver al menú?',message:'Tu texto se guardará tal como está.',confirmLabel:'Volver al menú',cancelLabel:'Seguir escribiendo'})))return;}if(started)saveNow(false);onBack();}} style={{background:'transparent',border:'none',cursor:'pointer',color:MUTED,fontSize:12,display:'flex',alignItems:'center',gap:3,padding:'3px 6px',borderRadius:5,flexShrink:0}}>← Menú</button>
         <div style={{fontFamily:'"Playfair Display",serif',fontStyle:'italic',fontWeight:500,fontSize:15,letterSpacing:'-0.01em',color:TXT,marginRight:6}}>Pretexto</div>
         <div style={{display:'flex',gap:2,flex:1}}>
-          {['check','reto','proyecto'].map(id=><button key={id} onClick={()=>{if(id!==sk){if(started&&plainTxt.trim()){if(!window.confirm('¿Cambiar de sección? El texto se guardará.'))return;saveNow(false);}onBack();}}} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:id!==sk?'pointer':'default',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
+          {['check','reto','proyecto'].map(id=><button key={id} onClick={async()=>{if(id!==sk){if(started&&plainTxt.trim()){if(!(await askConfirm({title:'¿Cambiar de sección?',message:'Tu texto se guardará tal como está.',confirmLabel:'Cambiar',cancelLabel:'Seguir escribiendo'})))return;saveNow(false);}onBack();}}} style={{background:sk===id?'rgba(0,0,0,0.06)':'transparent',border:'none',cursor:id!==sk?'pointer':'default',borderRadius:6,padding:'3px 7px',fontSize:11,fontWeight:sk===id?500:400,color:sk===id?TXT:MUTED,display:'flex',alignItems:'center',gap:3}}>{sk===id&&<span style={{width:4,height:4,borderRadius:'50%',background:headerAccent}}/>}{id.charAt(0).toUpperCase()+id.slice(1)}</button>)}
         </div>
         <button onClick={()=>setShowLib(true)} className="desk-only" style={{background:'transparent',border:'0.5px solid '+BDR,borderRadius:6,padding:'3px 7px',fontSize:11,color:MUTED,cursor:'pointer',flexShrink:0}}>◎</button>
         {FEATURE_DRIVE_ENABLED&&<button onClick={()=>setShowDrive(true)} className="desk-only" style={{background:connected?'rgba(30,155,240,0.07)':'transparent',border:'0.5px solid '+(connected?'rgba(30,155,240,0.25)':BDR),borderRadius:6,padding:'3px 7px',fontSize:11,color:connected?'#1E9BF0':MUTED,cursor:'pointer',flexShrink:0}}>⇅</button>}
@@ -15065,7 +15074,7 @@ const TeamsScreen=({user,onClose,onEdit,onVisibilityChange,onDelete})=>{
       if(!inv){alert('Invitación no válida o ya usada.');return;}
       const already=teams.find(t=>t.id===inv.group_id);
       if(already){setSelected(already);setView('detail');return;}
-      if(window.confirm('¿Unirte al equipo "'+inv.groups.name+'"?')){
+      if(await askConfirm({title:'¿Unirte al equipo «'+inv.groups.name+'»?',confirmLabel:'Unirme',cancelLabel:'Ahora no'})){
         await DB.joinGroup(inv.groups.code,user.id);
         await DB.useInvitation(code);
         await loadTeams();
@@ -18429,7 +18438,10 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
   const reloadFromServer=async()=>{
     const currentPlain=blocksToPlain(blocks);
     if(currentPlain.trim()&&currentPlain!==lastSaved.current){
-      if(!window.confirm('Tienes cambios sin guardar en este guión. Si recargas la versión del otro, se perderán.\n\n¿Recargar de todas formas?'))return;
+      if(!(await askConfirm({
+        title:'¿Cargar la versión de la otra persona?',
+        message:'Tienes cambios sin guardar en este guion. Si cargas la otra versión, se perderán.',
+        confirmLabel:'Cargar su versión',cancelLabel:'Mantener la mía',danger:true})))return;
     }
     try{
       const fresh=await DB.getEntryById(entryId.current);
@@ -18609,7 +18621,10 @@ const ScriptEditor=({user,project,sessionConfig,saveEntry,onFinishDay,onBack})=>
       try{
         const freshTs=await DB.getEntryTs(entryId.current);
         if(freshTs&&freshTs!==sessionConfig.existingTs){
-          const overwrite=window.confirm('Alguien más ha guardado cambios en este texto compartido mientras lo tenías abierto.\n\nAceptar = sobrescribir con tu versión (se perderá lo que haya guardado la otra persona).\nCancelar = guardar tu versión aparte, como copia, sin tocar la suya.');
+          const overwrite=await askConfirm({
+              title:'Alguien más ha guardado cambios',
+              message:'Mientras tenías abierto este texto compartido, otra persona guardó su versión.\n\n«Sobrescribir con la mía» borra lo que guardó. «Guardarla aparte» deja la suya intacta y guarda la tuya como copia.',
+              confirmLabel:'Sobrescribir con la mía',cancelLabel:'Guardarla aparte, como copia',danger:true,dismissible:false});
           if(!overwrite){
             finishEntryId=await saveAsVersion();
             onFinishDay({wordCount,elapsed,wordsAdded,title:headings[0]?.text||project?.title||sessionConfig?.exercise?.title||'Guión',sk:sessionConfig?.type||'proyecto',mode:'normal',entryId:finishEntryId});
@@ -18896,6 +18911,63 @@ const FollowersIndicator=({entityId,entityType,color,canSeeIdentities=true,user}
     )}
   </>);
 };
+
+/* ─── CONFIRMACIONES CON LA ESTÉTICA DE LA APP ────────────────────
+   Sustituye a window.confirm(), que el navegador pinta a su manera (arriba,
+   con «pretexto.app dice») y parece un error del teléfono. Uso:
+     if(!(await askConfirm({title,message,confirmLabel,danger})))return;
+   Devuelve una promesa: true = confirmar, false = cancelar. Se monta en su
+   propio contenedor, así que funciona desde cualquier sitio. */
+const ConfirmDialog=({title,message,confirmLabel,cancelLabel,danger,dismissible,onAnswer})=>{
+  const okRef=useRef(null);
+  const cancelRef=useRef(null);
+  useEffect(()=>{
+    // En acciones que borran o pisan algo, el foco va a «Cancelar»: un Intro
+    // sin querer no debe descartar nada.
+    try{(danger?cancelRef:okRef).current?.focus();}catch(e){}
+    const k=e=>{if(e.key==='Escape'&&dismissible){e.preventDefault();onAnswer(false);}};
+    window.addEventListener('keydown',k);
+    return()=>window.removeEventListener('keydown',k);
+  },[]);
+  return(
+    <div role="dialog" aria-modal="true" aria-label={title}
+      onClick={e=>{if(e.target===e.currentTarget&&dismissible)onAnswer(false);}}
+      style={{position:'fixed',inset:0,zIndex:10000,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20,fontFamily:"'Source Sans 3',sans-serif"}}>
+      <div style={{background:CARD_BG,borderRadius:16,width:'100%',maxWidth:360,padding:'24px 22px 20px',boxShadow:'0 24px 60px -16px rgba(10,27,61,0.4)'}}>
+        <div style={{fontFamily:'"Playfair Display",Georgia,serif',fontStyle:'italic',fontWeight:600,fontSize:18,color:TXT,lineHeight:1.3,marginBottom:message?8:20}}>{title}</div>
+        {message&&<div style={{fontSize:13.5,color:MUTED,lineHeight:1.55,marginBottom:20,whiteSpace:'pre-line'}}>{message}</div>}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <button ref={cancelRef} onClick={()=>onAnswer(false)}
+            style={{flex:'1 1 120px',background:'transparent',border:'1px solid '+BDR,borderRadius:10,padding:'11px 12px',fontSize:13.5,fontWeight:500,color:MUTED,cursor:'pointer'}}>
+            {cancelLabel}
+          </button>
+          <button ref={okRef} onClick={()=>onAnswer(true)}
+            style={{flex:'1 1 120px',background:danger?'#C5221F':AZUL,border:'none',borderRadius:10,padding:'11px 12px',fontSize:13.5,fontWeight:600,color:'#fff',cursor:'pointer'}}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+const askConfirm=({title,message='',confirmLabel='Aceptar',cancelLabel='Cancelar',danger=false,dismissible=true}={})=>new Promise(resolve=>{
+  let host=null,root=null,answered=false;
+  const answer=v=>{
+    if(answered)return;answered=true;
+    try{root&&root.unmount();}catch(e){}
+    try{host&&host.remove();}catch(e){}
+    resolve(!!v);
+  };
+  try{
+    host=document.createElement('div');document.body.appendChild(host);
+    root=ReactDOM.createRoot(host);
+    root.render(<ConfirmDialog title={title} message={message} confirmLabel={confirmLabel} cancelLabel={cancelLabel} danger={danger} dismissible={dismissible} onAnswer={answer}/>);
+  }catch(e){
+    // Si algo falla al pintar, mejor la confirmación del navegador que ninguna.
+    console.error('askConfirm:',e);answered=true;try{host&&host.remove();}catch(_){}
+    resolve(window.confirm(title+(message?'\n\n'+message:'')));
+  }
+});
 
 /* ─── CAMBIAR TÍTULO (duetos y colectivos) ─────────────────────── */
 const TITLE_MAX=80;
@@ -20869,7 +20941,10 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
     finally{setSavingSettings(false);}
   };
   const removeMember=async(m)=>{
-    if(!confirm('¿Quitar a '+m.name+' del relato? Su parte ya escrita se conserva, pero dejará de tener turnos.'))return;
+    if(!(await askConfirm({
+      title:'¿Quitar a '+m.name+' del relato?',
+      message:'Su parte ya escrita se conserva, pero dejará de tener turnos.',
+      confirmLabel:'Quitar',danger:true})))return;
     try{
       await DB.removeCollectiveMember(col.id,m.user_id);
       const fresh=await DB.getCollectiveDetail(col.id);
