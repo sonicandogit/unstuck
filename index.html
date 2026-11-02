@@ -4597,10 +4597,22 @@ const DB = {
       .order('ts', { ascending: false })
       .limit(50);
     if (error) { console.error('getFriendsEntries:', error.message); throw error; }
-    const rows = data || [];
+    // Relatos a varias manos compartidos con «amigos»: la copia está a nombre
+    // de quien lo propuso, pero la ven los amigos de CUALQUIER participante
+    // (la política entries_select_shared_story decide cuáles devuelve).
+    let shared = [];
+    try {
+      const { data: sh, error: se } = await getSB().from('entries')
+        .select('*').eq('sk', 'compartido').eq('visibility', 'amigos').neq('user_id', uid)
+        .eq('deleted', false).order('ts', { ascending: false }).limit(30);
+      if (se) console.error('getFriendsEntries (compartidos):', se.message); else shared = sh || [];
+    } catch (e) { console.error('getFriendsEntries (compartidos):', e); }
+    const seen = new Set((data || []).map(r => r.id));
+    const rows = [...(data || []), ...shared.filter(r => !seen.has(r.id))]
+      .sort((x, y) => (y.ts || 0) - (x.ts || 0));
     if (!rows.length) return rows;
     const { data: profs, error: pe } = await getSB().from('profiles')
-      .select('id, name, username, initials, accent, bg').in('id', mutualIds);
+      .select('id, name, username, initials, accent, bg').in('id', [...new Set([...mutualIds, ...rows.map(r => r.user_id)])]);
     if (pe) console.error('getFriendsEntries (profiles):', pe.message);
     const byId = {}; (profs || []).forEach(p => byId[p.id] = p);
     return rows.map(r => ({ ...r, profiles: byId[r.user_id] || null }));
@@ -5615,6 +5627,28 @@ const DB = {
     const{data,error}=await getSB().from('story_archives').select('kind,story_id,entry_id').eq('user_id',uid);
     if(error)throw error;
     return data||[];
+  },
+  // ── Compartir con la aprobación de todos (COMPARTIR.sql) ──
+  // Estado para quien participa: null (sin propuesta) o
+  // {status:'pending'|'shared', visibility, requested_by, requested_by_name, entry_id, participants:[{id,name,approved}]}
+  getStoryShare: async(kind,storyId)=>{
+    const{data,error}=await getSB().rpc('get_story_share',{p_kind:kind,p_story_id:storyId});
+    if(error)throw error;
+    return data||null;
+  },
+  requestStoryShare: async(kind,storyId,visibility)=>{
+    const{data,error}=await getSB().rpc('request_story_share',{p_kind:kind,p_story_id:storyId,p_visibility:visibility});
+    if(error)throw error;
+    return data||null;
+  },
+  answerStoryShare: async(kind,storyId,accept)=>{
+    const{data,error}=await getSB().rpc('answer_story_share',{p_kind:kind,p_story_id:storyId,p_accept:accept});
+    if(error)throw error;
+    return data||null;
+  },
+  withdrawStoryShare: async(kind,storyId)=>{
+    const{error}=await getSB().rpc('withdraw_story_share',{p_kind:kind,p_story_id:storyId});
+    if(error)throw error;
   },
   // Corrige UNA parte propia de un relato terminado (en el relato compartido).
   editMyTurn: async(kind,turnId,html,plain)=>{
@@ -10063,7 +10097,7 @@ const _shiftDay=(str,n)=>{const d=new Date(str+'T12:00:00Z');d.setUTCDate(d.getU
 // de una sola vez. Un hueco ya pagado se puentea gratis; solo cuestan los nuevos.
 const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridgedDays=[])=>{
   // Las copias archivadas repiten palabras ya contadas al escribir cada parte.
-  library=(library||[]).filter(e=>e&&e.sk!=='archivo');
+  library=(library||[]).filter(e=>e&&e.sk!=='archivo'&&e.sk!=='compartido');
   // totalWords = sum of words_added across all entries
   // words_added stores the INCREMENT per session (new words only)
   // For old entries without words_added, fall back to word_count
@@ -10105,12 +10139,18 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
   let streak=0,wildcardCount=wildcards||0,wildcardUsed=0;
   const bridged=new Set(bridgedDays||[]);
   const newlyBridged=[];
-  const ref=new Date();ref.setHours(0,0,0,0);
+  // Todo en la MISMA referencia: las fechas de los textos y today() son
+  // fechas UTC ('YYYY-MM-DD'), así que la distancia entre días se calcula
+  // también con esas cadenas. Antes la distancia se medía con la medianoche
+  // LOCAL y los días del hueco se contaban desde today() (UTC): abriendo la
+  // app entre las 00:00 y la 01:00 (02:00 en verano) en España, el hueco salía
+  // desplazado un día y el comodín se gastaba en un día CON texto, dejando el
+  // hueco real sin cubrir (así se perdió una racha de 117 días).
+  const dayNum=s=>Math.round(Date.parse(s+'T12:00:00Z')/864e5);
   let refStr=today();
   for(const d of dates){
-    const dt=new Date(d);dt.setHours(0,0,0,0);
-    const diff=Math.round((ref-dt)/(864e5));
-    if(diff<=1){streak++;ref.setTime(dt.getTime());refStr=d;}
+    const diff=dayNum(refStr)-dayNum(d);
+    if(diff<=1){streak++;refStr=d;}
     else{
       // Hueco de (diff-1) días entre el último activo y este: antes solo se
       // podía puentear un hueco de EXACTAMENTE 1 día, así que fallar 2 días
@@ -10127,7 +10167,7 @@ const computeStats=(library,reflections,wildcards=0,wildcard_milestone=0,bridged
       if(needed.length<=wildcardCount){
         streak++;wildcardCount-=needed.length;wildcardUsed+=needed.length;
         newlyBridged.push(...needed);
-        ref.setTime(dt.getTime());refStr=d;
+        refStr=d;
       }else break;
     }
   }
@@ -11523,6 +11563,14 @@ const Dashboard=({user,library,reflections,projects,sharedWithMe=[],onCollabAcce
     try{
       if(n.type==='new_friend_text'||n.type==='new_comment'){
         const entry=await DB.getEntryById(n.entity_id);
+        if(entry)setReadingEntry(entry);
+      }else if(n.type==='story_share_done'){
+        // No sabemos si era dueto o colectivo: se prueba con los dos ids posibles.
+        let entry=null;
+        for(const k of ['collective','duet']){
+          entry=await DB.getEntryById('compartido_'+k+'_'+n.entity_id).catch(()=>null);
+          if(entry)break;
+        }
         if(entry)setReadingEntry(entry);
       }else if(n.type==='new_follower'){
         const profile=await DB.getProfile(n.actor_id);
@@ -15422,7 +15470,7 @@ const TeamDetail=({user,team,onBack,onInvite,onEdit,onVisibilityChange,onDelete}
 
 /* ─── STATS CHART ────────────────────────────────── */
 const StatsChart=({library})=>{
-  library=(library||[]).filter(e=>e&&e.sk!=='archivo');
+  library=(library||[]).filter(e=>e&&e.sk!=='archivo'&&e.sk!=='compartido');
   const getMonday=d=>{
     const dt=new Date(d+'T12:00:00');
     const diff=(dt.getDay()+6)%7;
@@ -15526,7 +15574,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
   // Can the user interact? (not their own text, and user is logged in)
   const isOwn=entry.user_id===user?.id;
   // Copia archivada de un dueto/colectivo: acciones propias (ver ArchiveEntryActions).
-  const isArchive=entry.sk==='archivo'&&isOwn;
+  const isArchive=(entry.sk==='archivo'||entry.sk==='compartido')&&isOwn;
   // Colaboradores aceptados en un texto compartido también pueden editarlo y
   // cambiar su visibilidad, aunque no sean el dueño original (isOwn=false).
   const editAllowed=canEdit!==undefined?canEdit:isOwn;
@@ -17172,7 +17220,7 @@ const MisTextos=({user,library,projects=[],sharedWithMe=[],onVisibilityChange,on
                     <span onClick={e2=>{
                         e2.stopPropagation();
                         if(isUpdating)return;
-                        if(e.sk==='archivo')return; // privado siempre (fase B: con aprobación de todos)
+                        if(e.sk==='archivo'||e.sk==='compartido')return; // se gestiona desde el propio relato
                         setVisMenuEntry(e);
                       }}
                       title="Cambiar visibilidad"
@@ -17892,7 +17940,7 @@ const AmigosScreen=({user,onClose})=>{
 };
 
 const EstadísticasScreen=({library,reflections,onClose,stats})=>{
-  library=(library||[]).filter(e=>e&&e.sk!=='archivo');
+  library=(library||[]).filter(e=>e&&e.sk!=='archivo'&&e.sk!=='compartido');
   const {totalWords,totalSessions,totalElapsed,weekWords,weekSessions}=stats;
 
   // Words per week (last 12 weeks) — same as StatsChart
@@ -18903,8 +18951,141 @@ const RenameTitleModal=({currentTitle,onClose,onSave})=>{
    y descargarlo en .docx. Ver ARCHIVAR.sql. */
 const emitAppEvent=(name,detail)=>{try{window.dispatchEvent(new CustomEvent(name,{detail}));}catch(e){}};
 const parseArchiveId=id=>{
-  const m=/^archivo_(duet|collective)_([0-9a-f-]{36})_/.exec(id||'');
-  return m?{kind:m[1],storyId:m[2]}:null;
+  // Copia archivada (archivo_<tipo>_<id>_<usuario>) o publicada (compartido_<tipo>_<id>).
+  const m=/^(archivo|compartido)_(duet|collective)_([0-9a-f-]{36})/.exec(id||'');
+  return m?{kind:m[2],storyId:m[3],shared:m[1]==='compartido'}:null;
+};
+const shareErrorText=e=>{
+  const m=(e&&e.message)||'';
+  if(/Solo |ya no est[aá] pendiente|Ya hay una propuesta|ya est[aá] publicado|Elige con qui[eé]n|iniciar sesi/.test(m))return m;
+  if(/story_share|get_story_share|function .* does not exist|Could not find/i.test(m))return 'Esta función aún no está activada en el servidor.';
+  if(/fetch|network|Failed/i.test(m))return 'No hay conexión. Comprueba tu red e inténtalo de nuevo.';
+  return 'No se ha podido completar. Inténtalo de nuevo en un momento.';
+};
+const SHARE_WITH={amigos:'vuestros amigos',abierto:'todo el mundo'};
+
+/* Compartir un relato terminado: propuesta → «sí» de todos → una sola copia
+   publicada. Cualquiera puede retirarlo. Ver COMPARTIR.sql. */
+const ShareProposeModal=({solo,title,onClose,onPick,busy,err})=>{
+  const opt=(vis,icon,label,hint)=>(
+    <button onClick={()=>onPick(vis)} disabled={!!busy}
+      style={{display:'flex',alignItems:'center',gap:12,width:'100%',textAlign:'left',background:'transparent',border:'1px solid '+BDR,borderRadius:11,padding:'12px 14px',cursor:busy?'default':'pointer',opacity:busy&&busy!==vis?0.5:1}}>
+      <Icon name={icon} size={20} color={AZUL}/>
+      <span style={{flex:1}}>
+        <div style={{fontSize:14,fontWeight:600,color:TXT}}>{busy===vis?'Enviando…':label}</div>
+        <div style={{fontSize:11.5,color:MUTED,lineHeight:1.45,marginTop:2}}>{hint}</div>
+      </span>
+    </button>
+  );
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:460,background:'rgba(10,27,61,0.5)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+      onClick={e=>{if(e.target===e.currentTarget&&!busy)onClose();}}>
+      <div style={{background:CARD_BG,borderRadius:14,padding:'22px 22px 18px',maxWidth:380,width:'100%'}}>
+        <div style={{fontSize:15,fontWeight:700,color:TXT,fontFamily:'"Playfair Display",serif',marginBottom:6}}>Compartir «{title||'Sin título'}»</div>
+        <div style={{fontSize:12.5,color:MUTED,lineHeight:1.5,marginBottom:14}}>
+          {solo
+            ?'Se publicará en tu Biblioteca con el texto entero.'
+            :'Se publicará una sola vez en tu Biblioteca, con todos los autores. Antes tienen que aceptarlo todas las personas que lo escribisteis; hasta entonces sigue siendo privado.'}
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {opt('amigos','users',solo?'Con tus amigos':'Con vuestros amigos',solo?'Las personas con las que os seguís mutuamente.':'Los amigos de cualquiera de quienes lo escribisteis.')}
+          {opt('abierto','globe','Con todo el mundo','Cualquiera podrá leerlo en la Biblioteca.')}
+        </div>
+        {err&&<div style={{fontSize:12,color:'#C5221F',lineHeight:1.4,marginTop:10}}>{err}</div>}
+        <button onClick={onClose} disabled={!!busy}
+          style={{width:'100%',marginTop:12,background:'transparent',border:'1px solid '+BDR,borderRadius:9,padding:'10px',fontSize:13,fontWeight:500,color:MUTED,cursor:busy?'default':'pointer'}}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const ShareBar=({user,kind,storyId,title,solo,compact})=>{
+  const [state,setState]=useState(undefined); // undefined = cargando; null = sin propuesta
+  const [hidden,setHidden]=useState(false);    // p. ej. si el servidor aún no tiene COMPARTIR.sql
+  const [busy,setBusy]=useState('');
+  const [err,setErr]=useState('');
+  const [showPropose,setShowPropose]=useState(false);
+  const [confirmWithdraw,setConfirmWithdraw]=useState(false);
+  useEffect(()=>{
+    let alive=true;
+    const load=()=>DB.getStoryShare(kind,storyId)
+      .then(s=>{if(alive){setState(s);setHidden(false);}})
+      .catch(e=>{console.error('getStoryShare:',e);if(alive)setHidden(true);});
+    load();
+    const h=ev=>{if(!ev.detail||ev.detail.storyId===storyId)load();};
+    window.addEventListener('pretexto:share-changed',h);
+    return()=>{alive=false;window.removeEventListener('pretexto:share-changed',h);};
+  },[kind,storyId]);
+  if(hidden||state===undefined)return null;
+  const run=async(key,fn)=>{
+    if(busy)return;setBusy(key);setErr('');
+    try{await fn();emitAppEvent('pretexto:share-changed',{kind,storyId});}
+    catch(e){console.error('share:',e);setErr(shareErrorText(e));}
+    setBusy('');
+  };
+  const afterResult=async res=>{
+    setState(res);
+    // Si se acaba de publicar a mi nombre, que aparezca ya en mi Biblioteca.
+    if(res&&res.status==='shared'&&res.entry_id&&res.requested_by===user.id)await refreshArchiveEntry(res.entry_id);
+  };
+  const propose=vis=>run(vis,async()=>{const r=await DB.requestStoryShare(kind,storyId,vis);setShowPropose(false);await afterResult(r);});
+  const answer=yes=>run(yes?'yes':'no',async()=>{const r=await DB.answerStoryShare(kind,storyId,yes);await afterResult(r);});
+  const withdraw=()=>run('wd',async()=>{
+    const wasShared=state&&state.status==='shared';
+    await DB.withdrawStoryShare(kind,storyId);
+    if(wasShared)emitAppEvent('pretexto:entry-remove',{id:'compartido_'+kind+'_'+storyId});
+    setState(null);setConfirmWithdraw(false);
+  });
+  const parts=(state&&state.participants)||[];
+  const me=parts.find(x=>x.id===user.id);
+  const waiting=parts.filter(x=>!x.approved&&x.id!==user.id).map(x=>x.name||'alguien');
+  const where=state&&(state.requested_by===user.id?'en tu Biblioteca':'en la Biblioteca de '+(state.requested_by_name||'quien lo propuso'));
+  const btn=(key,label,onClick,primary)=>(
+    <button onClick={onClick} disabled={!!busy}
+      style={{display:'flex',alignItems:'center',gap:6,background:primary?AZUL:'transparent',border:primary?'none':'1px solid rgba(30,155,240,0.35)',borderRadius:8,padding:'6px 14px',fontSize:12.5,fontWeight:600,color:primary?'#fff':AZUL,cursor:busy?'default':'pointer',opacity:busy&&busy!==key?0.5:1}}>
+      {busy===key?'…':label}
+    </button>
+  );
+  let text,actions;
+  if(!state){
+    text=compact?null:(solo?'¿Quieres que otras personas lo lean? Puedes publicarlo en tu Biblioteca.':'¿Queréis que otras personas lo lean? Propón compartirlo: tenéis que aceptarlo todos.');
+    actions=<button onClick={()=>{setErr('');setShowPropose(true);}}
+      style={{display:'flex',alignItems:'center',gap:6,background:'transparent',border:'1px solid rgba(30,155,240,0.35)',borderRadius:8,padding:'6px 14px',fontSize:12.5,fontWeight:600,color:AZUL,cursor:'pointer'}}>
+      <Icon name="share-network" size={14} color={AZUL}/>Compartir…
+    </button>;
+  }else if(state.status==='pending'&&me&&!me.approved){
+    text=<><strong>{state.requested_by_name||'Alguien'}</strong> propone compartirlo con {SHARE_WITH[state.visibility]}. Tu parte será visible si aceptas.</>;
+    actions=<>{btn('yes','Aceptar',()=>answer(true),true)}{btn('no','No',()=>answer(false))}</>;
+  }else if(state.status==='pending'){
+    text=<>Propuesta para compartirlo con {SHARE_WITH[state.visibility]} · esperando a {waiting.join(', ')||'…'}</>;
+    actions=btn('wd',state.requested_by===user.id?'Retirar propuesta':'Retirar mi permiso',withdraw);
+  }else{
+    text=<>Compartido con {SHARE_WITH[state.visibility]} · {where}</>;
+    actions=confirmWithdraw?null:btn('wd0','Retirar',()=>setConfirmWithdraw(true));
+  }
+  return(
+    <div style={{padding:compact?'10px 0 0':'10px 18px',background:compact?'transparent':'rgba(30,155,240,0.04)',borderBottom:compact?'none':'0.5px solid rgba(30,155,240,0.15)',flexShrink:0}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',justifyContent:compact?'center':'flex-start'}}>
+        {text&&<span style={{fontSize:12.5,color:MUTED,flex:compact?'0 1 auto':1,minWidth:160,lineHeight:1.45,display:'flex',alignItems:'center',gap:6}}>
+          {state&&<Icon name={state.status==='shared'?'globe':'share-network'} size={14} color={AZUL}/>}<span>{text}</span>
+        </span>}
+        <div style={{display:'flex',gap:8}}>{actions}</div>
+      </div>
+      {confirmWithdraw&&(
+        <div style={{fontSize:12.5,color:TXT,lineHeight:1.5,background:'rgba(0,0,0,0.03)',border:'1px solid '+BDR,borderRadius:10,padding:'10px 12px',marginTop:8,textAlign:'left'}}>
+          El relato dejará de estar en la Biblioteca para todo el mundo y avisaremos a los demás. Para volver a compartirlo, tendréis que aceptarlo otra vez.
+          <div style={{display:'flex',gap:8,marginTop:8}}>
+            <button onClick={()=>setConfirmWithdraw(false)} disabled={!!busy} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:8,padding:'6px 12px',fontSize:12,color:MUTED,cursor:'pointer'}}>Cancelar</button>
+            <button onClick={withdraw} disabled={!!busy} style={{background:'#C5221F',border:'none',borderRadius:8,padding:'6px 12px',fontSize:12,fontWeight:600,color:'#fff',cursor:'pointer'}}>{busy==='wd'?'Retirando…':'Retirar'}</button>
+          </div>
+        </div>
+      )}
+      {err&&!showPropose&&<div style={{fontSize:12,color:'#C5221F',marginTop:6}}>{err}</div>}
+      {showPropose&&<ShareProposeModal solo={solo} title={title} busy={busy} err={err} onClose={()=>{setShowPropose(false);setErr('');}} onPick={propose}/>}
+    </div>
+  );
 };
 const archiveErrorText=e=>{
   const m=(e&&e.message)||'';
@@ -19161,16 +19342,19 @@ const ArchiveEntryActions=({entry,user,onClose,onMoveFolder})=>{
   return(
     <div style={{display:'flex',flexDirection:'column',gap:8}}>
       <div style={{fontSize:11.5,color:MUTED,display:'flex',alignItems:'center',gap:6}}>
-        <Icon name="archive" size={13} color={AZUL}/>
-        Relato archivado · {entry.in_library?'en tu Biblioteca (privado)':'en tu Escritorio'}
+        <Icon name={info.shared?'globe':'archive'} size={13} color={AZUL}/>
+        {info.shared
+          ?'Relato compartido · '+(entry.visibility==='abierto'?'lo puede leer todo el mundo':'lo leen los amigos de quienes lo escribisteis')
+          :'Relato archivado · '+(entry.in_library?'en tu Biblioteca (privado)':'en tu Escritorio')}
       </div>
       <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',rowGap:8}}>
         {pill('edit','pencil-simple','Editar mis partes',()=>setEditing(true),true)}
         {pill('docx','download-simple','Descargar .docx',download)}
-        {pill('lib',entry.in_library?'book-bookmark':'book-open',entry.in_library?'Quitar de la Biblioteca':'Añadir a la Biblioteca',toggleLibrary)}
+        {!info.shared&&pill('lib',entry.in_library?'book-bookmark':'book-open',entry.in_library?'Quitar de la Biblioteca':'Añadir a la Biblioteca',toggleLibrary)}
         {onMoveFolder&&pill('folder','folder-simple','Carpeta',()=>{onClose();onMoveFolder(entry);})}
-        {pill('un','arrow-counter-clockwise','Desarchivar',()=>setConfirmUn(true))}
+        {!info.shared&&pill('un','arrow-counter-clockwise','Desarchivar',()=>setConfirmUn(true))}
       </div>
+      <ShareBar user={user} kind={info.kind} storyId={info.storyId} title={entry.title} compact/>
       {confirmUn&&(
         <div style={{fontSize:12.5,color:TXT,lineHeight:1.5,background:'rgba(0,0,0,0.03)',border:'1px solid '+BDR,borderRadius:10,padding:'10px 12px'}}>
           Se quita esta copia y el relato vuelve a tu lista de colectivos y duetos. El relato no se borra y tus correcciones se mantienen.
@@ -19602,17 +19786,9 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
       )}
 
       {duet.status==='finished'&&<ArchiveBar kind="duet" storyId={duet.id} title={duetTitle} archived={myArchives?myArchives.has('duet:'+duet.id):null}/>}
-      {/* Publish approval banner (finished) */}
-      {duet.status==='finished'&&!duet.published&&(
-        <div style={{padding:'12px 18px',background:'rgba(30,155,240,0.06)',borderBottom:'0.5px solid rgba(30,155,240,0.2)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
-          {(isA?duet['publish_'+'a']:duet['publish_'+'b'])
-            ?<span style={{fontSize:13,color:'#1E9BF0',flex:1}}>Has aprobado la publicación. Esperando a {otherName}…</span>
-            :<>
-              <span style={{fontSize:13,color:'#1E9BF0',flex:1}}>¿Publicar este relato en la Biblioteca con ambos autores?</span>
-              <button onClick={approvePublish} disabled={saving} style={{background:'#1E9BF0',border:'none',borderRadius:7,padding:'6px 14px',fontSize:12,fontWeight:500,color:'#fff',cursor:'pointer'}}>Aprobar publicación</button>
-            </>}
-        </div>
-      )}
+      {/* Compartir (sustituye a «Aprobar publicación»; ver COMPARTIR.sql). Los
+          duetos ya publicados con el sistema antiguo siguen mostrando su aviso. */}
+      {duet.status==='finished'&&!duet.published&&<ShareBar user={user} kind="duet" storyId={duet.id} title={duetTitle} solo={!!duet.is_ai_partner}/>}
       {duet.published&&<div style={{padding:'10px 18px',background:'rgba(30,155,240,0.07)',borderBottom:'0.5px solid rgba(30,155,240,0.2)',fontSize:13,color:'#1E9BF0',flexShrink:0}}>✓ Publicado en la Biblioteca</div>}
 
       {/* Body */}
@@ -21151,6 +21327,7 @@ const CollectiveEditor=({user,collective:initialCol,onClose,onUpdate,onRefresh})
               <div style={{marginTop:8,fontSize:13,fontWeight:600,color:TXT}}>Relato completado</div>
               <div style={{fontSize:11,color:MUTED,marginTop:4}}>{turns.length} partes · {members.length} autores</div>
               <ArchiveBar kind="collective" storyId={col.id} title={col.title} archived={myArchives?myArchives.has('collective:'+col.id):null} compact/>
+              <ShareBar user={user} kind="collective" storyId={col.id} title={col.title} compact/>
             </div>
           )}
         </div>
@@ -21928,6 +22105,8 @@ const NOTIF_ICON={
   duet_follow_update:'hands-clapping',
   content_hidden:'eye-slash',
   content_restored:'eye',
+  duet_share_request:'share-network', collective_share_request:'share-network',
+  story_share_done:'globe', story_share_declined:'x-circle', story_share_withdrawn:'lock-simple',
 };
 const NOTIF_COLOR={
   new_follower:AZUL, new_friend_text:AZULMED, challenge_received:NARANJA,
@@ -21942,6 +22121,8 @@ const NOTIF_COLOR={
   duet_follow_update:MUTED,
   content_hidden:'#A82020',
   content_restored:AZUL,
+  duet_share_request:AZUL, collective_share_request:AZUL,
+  story_share_done:AZUL, story_share_declined:MUTED, story_share_withdrawn:MUTED,
 };
 
 const relNotifTime=iso=>{
@@ -22061,6 +22242,27 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
     }
   };
 
+  // Respuesta a «X propone compartir…» (COMPARTIR.sql), en la misma fila.
+  const [shareRespondedIds,setShareRespondedIds]=useState({}); // {notifId:'yes'|'no'|'gone'}
+  const respondShare=async(n,accept)=>{
+    if(shareRespondedIds[n.id])return;
+    setShareRespondedIds(prev=>({...prev,[n.id]:accept?'yes':'no'}));
+    const kind=n.type==='duet_share_request'?'duet':'collective';
+    try{
+      await DB.answerStoryShare(kind,n.entity_id,accept);
+      emitAppEvent('pretexto:share-changed',{kind,storyId:n.entity_id});
+    }catch(e){
+      console.error('respondShare:',e);
+      if(/ya no est[aá] pendiente/.test(e?.message||''))setShareRespondedIds(prev=>({...prev,[n.id]:'gone'}));
+      else{setShareRespondedIds(prev=>{const c={...prev};delete c[n.id];return c;});alert('No se pudo guardar tu respuesta, inténtalo de nuevo.');return;}
+    }
+    if(!n.read){
+      try{await DB.markNotificationRead(n.id);}catch(e){}
+      setItems(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
+      setUnread(prev=>Math.max(0,prev-1));
+    }
+  };
+
   const markAllRead=async()=>{
     try{await DB.markAllNotificationsRead(user.id);}catch(e){}
     setItems(prev=>prev.map(x=>({...x,read:true})));
@@ -22082,7 +22284,29 @@ const NotificationBell=({user,onNavigate,onNewChallenge})=>{
             {unread>0&&<button onClick={markAllRead} style={{background:'transparent',border:'none',color:AZUL,fontSize:11,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Marcar todo leído</button>}
           </div>
           {loaded&&items.length===0&&<div style={{padding:'32px 16px',textAlign:'center',color:MUTED,fontSize:12.5}}>Aún no tienes notificaciones.</div>}
-          {items.map(n=>(n.type==='collective_follow_invite'||n.type==='duet_follow_invite')?(
+          {items.map(n=>(n.type==='duet_share_request'||n.type==='collective_share_request')?(
+            <div key={n.id} style={{display:'flex',gap:10,width:'100%',background:n.read?'transparent':'rgba(30,155,240,0.05)',borderBottom:'1px solid '+BDR,padding:'11px 14px',fontFamily:"'Source Sans 3',sans-serif"}}>
+              <div style={{width:28,height:28,borderRadius:'50%',background:(NOTIF_COLOR[n.type]||AZUL)+'18',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name={NOTIF_ICON[n.type]||'bell'} size={13} color={NOTIF_COLOR[n.type]||AZUL}/>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,color:TXT,fontWeight:n.read?400:600,lineHeight:1.4}}>{n.title}</div>
+                {n.body&&<div style={{fontSize:11.5,color:MUTED,marginTop:2}}>{n.body}</div>}
+                {shareRespondedIds[n.id]
+                  ?<div style={{fontSize:11,color:shareRespondedIds[n.id]==='yes'?'#1E7A34':FAINT,marginTop:6,fontWeight:600}}>
+                      {shareRespondedIds[n.id]==='yes'?'✓ Aceptado':shareRespondedIds[n.id]==='no'?'Has dicho que no':'Esta propuesta ya no está pendiente'}
+                    </div>
+                  :n.read
+                    ?<div style={{fontSize:11,color:FAINT,marginTop:6}}>Respondida</div>
+                    :<div style={{display:'flex',gap:6,marginTop:8}}>
+                      <button onClick={()=>respondShare(n,true)} style={{background:AZUL,border:'none',borderRadius:6,padding:'5px 12px',fontSize:11,fontWeight:600,color:'#fff',cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>Aceptar</button>
+                      <button onClick={()=>respondShare(n,false)} style={{background:'transparent',border:'1px solid '+BDR,borderRadius:6,padding:'5px 12px',fontSize:11,color:MUTED,cursor:'pointer',fontFamily:"'Source Sans 3',sans-serif"}}>No</button>
+                    </div>}
+                <div style={{fontSize:10,color:FAINT,marginTop:6}}>{relNotifTime(n.created_at)}</div>
+              </div>
+              {!n.read&&<div style={{width:7,height:7,borderRadius:'50%',background:NARANJA,flexShrink:0,marginTop:5}}/>}
+            </div>
+          ):(n.type==='collective_follow_invite'||n.type==='duet_follow_invite')?(
             // Fila especial: no navega al pulsar, tiene sus propios botones
             // de decisión — por eso es un <div>, no un <button> (no se
             // pueden anidar botones).
