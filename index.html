@@ -15572,6 +15572,18 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
   // cambiar su visibilidad, aunque no sean el dueño original (isOwn=false).
   const editAllowed=canEdit!==undefined?canEdit:isOwn;
   const canInteract=user&&!isOwn&&entry.visibility!=='privado';
+  // Copia compartida de un relato en el que has escrito: puedes comentar,
+  // pero no valorarlo ni reaccionar (NO_VALORAR_PROPIO.sql lo impide también
+  // en el servidor). Si no participas, get_story_share falla y no cambia nada.
+  const [isStoryAuthor,setIsStoryAuthor]=useState(false);
+  useEffect(()=>{
+    if(entry.sk!=='compartido'||isOwn||!user?.id)return;
+    const info=parseArchiveId(entry.id);if(!info)return;
+    let alive=true;
+    DB.getStoryShare(info.kind,info.storyId).then(()=>{if(alive)setIsStoryAuthor(true);}).catch(()=>{});
+    return()=>{alive=false;};
+  },[entry.id]);
+  const canEvaluate=canInteract&&!isStoryAuthor;
 
   useEffect(()=>{
     const load=async()=>{
@@ -15598,7 +15610,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
   const avgRating=ratings.length?Math.round(ratings.reduce((s,r)=>s+r.rating,0)/ratings.length*10)/10:null;
 
   const handleRating=async(r)=>{
-    if(!canInteract)return;
+    if(!canEvaluate)return;
     setMyRating(r);
     try{await DB.upsertRating(entry.id,user.id,r);}
     catch(e){console.error(e);}
@@ -15625,7 +15637,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
   };
 
   const handleReaction=async(emoji)=>{
-    if(!canInteract)return;
+    if(!canEvaluate)return;
     try{
       const added=await DB.toggleReaction(entry.id,user.id,emoji);
       setReactions(prev=>added?[...prev,{emoji,user_id:user.id}]:prev.filter(r=>!(r.emoji===emoji&&r.user_id===user.id)));
@@ -15823,14 +15835,14 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
           dangerouslySetInnerHTML={{__html:sanitizeHtml(entry.html||entry.plain?.replace(/\n/g,'<br>')||'')}}/> 
 
         {/* Reactions row */}
-        {(canInteract||reactions.length>0)&&(
+        {(canEvaluate||reactions.length>0)&&(
           <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
             {['👏','❤️','🔥'].map(emoji=>{
               const count=reactions.filter(r=>r.emoji===emoji).length;
               const mine=user&&reactions.some(r=>r.emoji===emoji&&r.user_id===user.id);
               return(
                 <button key={emoji} onClick={()=>handleReaction(emoji)}
-                  disabled={!canInteract}
+                  disabled={!canEvaluate}
                   style={{display:'flex',alignItems:'center',gap:5,border:'0.5px solid '+(mine?'rgba(30,155,240,0.4)':BDR),borderRadius:18,padding:'5px 12px',background:mine?'rgba(30,155,240,0.08)':'transparent',cursor:canInteract?'pointer':'default',fontSize:14}}>
                   <span>{emoji}</span>
                   {count>0&&<span style={{fontSize:11,fontWeight:600,color:mine?'#1E9BF0':MUTED}}>{count}</span>}
@@ -15841,7 +15853,7 @@ const ReadingModal=({entry,user,onClose,onVisibilityChange,onEdit,onDelete,canEd
         )}
 
         {/* Rating section */}
-        {canInteract&&(
+        {canEvaluate&&(
           <div style={{borderTop:'1px solid '+BDR,paddingTop:16,marginBottom:16}}>
             <div style={{font:"600 9.5px/1 'Source Sans 3'",letterSpacing:'.14em',textTransform:'uppercase',color:NARANJA,marginBottom:9}}>Tu valoración · anónima</div>
             <Stars value={myRating} hover={hoverRating}
