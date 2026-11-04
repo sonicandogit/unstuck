@@ -17390,7 +17390,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
                           <Icon name="arrow-bend-up-right" size={13} color={FAINT}/>{who} pasó su turno esta vez.
                         </div>
                       ):(
-                        <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:'rgba(26,25,22,0.75)'}}
+                        <div style={{fontFamily:'"Playfair Display",serif',fontSize:15,lineHeight:1.85,color:PROSE_TEXT}}
                           dangerouslySetInnerHTML={{__html:sanitizeHtml(t.html)}}/>
                       )}
                     </div>
@@ -17398,7 +17398,7 @@ const DuetEditor=({user,duet,onClose,onUpdate,onEntrySaved})=>{
                 })}
               </div>
               :duet.full_html
-              ?<div style={{fontSize:16,lineHeight:1.85,color:'rgba(26,25,22,0.75)',fontFamily:'"Playfair Display",Georgia,serif',marginBottom:20,paddingBottom:20,borderBottom:myTurn?'1px dashed rgba(30,155,240,0.3)':'none'}}
+              ?<div style={{fontSize:16,lineHeight:1.85,color:PROSE_TEXT,fontFamily:'"Playfair Display",Georgia,serif',marginBottom:20,paddingBottom:20,borderBottom:myTurn?'1px dashed rgba(30,155,240,0.3)':'none'}}
                 dangerouslySetInnerHTML={{__html:sanitizeHtml(duet.full_html)}}/>
               :<div style={{fontSize:13,color:FAINT,marginBottom:20,fontStyle:'italic'}}>El relato está en blanco. {myTurn?'Tú lo empiezas.':''}</div>}
 
@@ -17996,7 +17996,7 @@ const ChainEditor=({user,chain,startingFresh,onClose,onUpdate})=>{
           {loadingChapters?<div style={{textAlign:'center',color:MUTED,fontSize:13,padding:40}}>Cargando…</div>:(
             <>
               {chain&&chapters.length>0&&(
-                <div style={{fontSize:16,lineHeight:1.85,color:'rgba(26,25,22,0.7)',fontFamily:'"Playfair Display",serif',marginBottom:20,paddingBottom:20,borderBottom:'1px dashed '+BDR,maxHeight:280,overflowY:'auto'}}
+                <div style={{fontSize:16,lineHeight:1.85,color:PROSE_TEXT,fontFamily:'"Playfair Display",serif',marginBottom:20,paddingBottom:20,borderBottom:'1px dashed '+BDR,maxHeight:280,overflowY:'auto'}}
                   dangerouslySetInnerHTML={{__html:chapters.map(c=>sanitizeHtml(c.html)).join('<hr style="opacity:0.15;margin:16px 0">')}}/>
               )}
               {requiredStart&&(
